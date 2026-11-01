@@ -13,10 +13,14 @@ New pieces:
 
 - `tungsten-parse`: a lenient parser from text to `OptimizedProgram` and a canonical printer
   back to text.
-- `tungsten-checker`: the core IR, the (unverified) lowering from `OptimizedProgram` to it, and a
-  **Verus-verified** well-formedness and type checker.
-- `tungsten-interpreter`: a **Verus-verified** interpreter over the core IR. The executable
-  interpreter is proven to refine a spec semantics written as `spec fn`s.
+- `tungsten-core`: the single **Verus-verified** crate, with no dependencies besides Verus'
+  own. It holds the core IR, the well-formedness and type checker, the spec semantics written
+  as `spec fn`s, and the executable interpreter, which is proven to refine that spec. Everything
+  in this crate is proven, and everything outside it is tested.
+- `tungsten-check`: plain Rust, unverified. The registry, the lowering from
+  `OptimizedProgram` to the core IR, and the entry points `tungsten_check::{prepare, evaluate}`
+  (lower → check → evaluate). User-facing through the facade's `check` feature. See its
+  `README.md`.
 - `tungsten-testsuite` (`publish = false`): the harness, the test corpus, the extern registry,
   the prelude, and minimal test runtimes for Rust, Java and CUDA.
 
@@ -24,11 +28,11 @@ New pieces:
 
 | Topic | Decision |
 | --- | --- |
-| Verification tool | Verus. The crates build with plain `cargo` (`verus!{}` erases). Proofs run with `scripts/verify.sh` (pinned Verus), locally only. They don't gate CI. |
+| Verification tool | Verus. The crates build with plain `cargo` (`verus!{}` erases). `vstd` comes from crates.io, `=`-pinned. Proofs run with `scripts/verify.sh` (downloads the pinned release, runs `cargo verus verify -p tungsten-core`), locally only. They don't gate CI. |
 | What is proven | Spec + refinement: exec interpreter == spec semantics. Plus type soundness of the checker, fuel monotonicity, and the layout lemma (§6.3). Floats are uninterpreted in both spec and exec. |
 | Verified IR | A lowered **core IR** (dense `Vec` indices, resolved types, no names). The lowering from `OptimizedProgram` is ordinary Rust and is tested, not proven. |
 | Checker | Verified. `check(p) == Ok` ⇒ the interpreter never gets stuck. |
-| Termination | Fuel. `OutOfFuel` is a distinct outcome and fails the test. Recursion is rejected by the checker (call graph is a DAG). |
+| Termination | Fuel **per `While` execution**: one `While` may run at most `fuel` iterations, else `OutOfFuel` (a distinct outcome that fails the test). `Repeat` costs nothing. Recursion and cyclic consts/inputs are rejected by the checker. Every function, const, input and unit has a **rank** (its depth in the dependency DAG), and every call/read checks that the rank decreases. |
 | Edge semantics | Java semantics, normative for every backend: wrapping integer arithmetic, masked shift amounts, saturating float→int casts with NaN→0. Integer `/` and `%` by zero is an error. |
 | Short-circuit | `And`/`Or` are lazy. Everything else is evaluated left to right, and the first error wins. |
 | Typing | Strict: operands must have identical types, with one exception: `Vec3 ∘ Pos3` / `Pos3 ∘ Vec3` for `+ - * /`. |
@@ -38,7 +42,7 @@ New pieces:
 | Bitcasts | Only canonicalizing `float_to_bits` (Java `floatToIntBits`, all NaN → canonical) and `bits_to_float`. |
 | Externs | A test-owned registry with one implementation per target. Tests can only use registered externs. Extern types are registry-declared records. |
 | Permutation tables / samplers | A toy deterministic builder from the registry, identical in all targets. Real noise correctness stays with tungsten-mc. |
-| Evaluation model | Pointwise lazy with memoization, independent of `Interface` scheduling. Explicit indices are decoded through the spec'd layout. Out-of-bounds is an error. |
+| Evaluation model | **Eager**, independent of `Interface` scheduling. Every const is evaluated once per case before any entry; one failing const fails every entry cell. Before a unit is evaluated in a context, every input it declares is built over all of its cells, read or not; a failing input fails every cell of that unit. Buffers are memoized per `InputId`. Out-of-bounds is an error. |
 | Ambient variables | IR change: `Expression::Ambient(AmbientKind)` replaces the four `Named` default variables. |
 | Scale keys | Merging two scales through fixed-point collision is a bug. There's a regression test for it, marked `@knownfail` until fixed. |
 | Text format | Lenient parser, canonical printer. `parse(print(m)) ≅ m` over compacted arenas, and `print ∘ parse` is a fixpoint on printed text. Not a bijection: comments and whitespace are free. |
@@ -56,15 +60,22 @@ New pieces:
 crates/tungsten-parse/
   src/lib.rs          # load(src, file, &dyn Env) -> Result<TestFile>, print / print_test_file
   src/{lexer,parser,ast}.rs  src/elaborate/  src/printer/   # layout and API: crates/tungsten-parse/SPEC.md
-crates/tungsten-checker/
-  src/core.rs         # core IR (inside verus!)
-  src/lower.rs        # OptimizedProgram -> core IR (plain Rust, unverified)
-  src/check.rs        # verified checker
-crates/tungsten-interpreter/
-  src/value.rs        # value domain
-  src/spec/           # spec semantics (spec fn)
-  src/exec/           # executable interpreter + refinement proofs
-  src/prim.rs         # trusted float/extern primitive layer (external_body)
+crates/tungsten-core/          # all inside verus!{}, depends only on vstd/builtin
+  src/ir.rs           # core IR
+  src/registry.rs     # registry types: extern + extern-type signatures (data, filled by the caller)
+  src/value.rs        # value domain, EvalError/StuckReason, Case, trait Externs, value_has_type
+  src/util.rs         # bounds-checked Vec access, clone_* for the recursive types
+  src/layout.rs       # len / flat / decode, overflow-checked
+  src/prim.rs         # trusted int/float/cast primitive layer (external_body)
+  src/check/          # checker: wf twin, types, flow, scope, acyclic (ranks); later well_typed
+  src/exec/           # executable interpreter; later refinement proofs
+  src/spec/           # (later) spec semantics (spec fn)
+  src/proofs/         # (later) type soundness, fuel monotonicity, layout lemma
+crates/tungsten-check/         # plain Rust, unverified
+  src/registry.rs     # Registry, RegistryBuilder (names + decls)
+  src/lower/          # OptimizedProgram -> core IR
+  src/check.rs        # checker errors → Location; Invalid
+  src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
 crates/tungsten-testsuite/
   src/harness/        # drivers, protocol, comparison, knownfail bookkeeping
   src/gen.rs          # random well-typed program generator (proptest)
@@ -74,11 +85,32 @@ crates/tungsten-testsuite/
   corpus/**/*.tw      # hand-written tests
   corpus/regressions/ # shrunk failures from the generator
   tests/*.rs          # cargo test entry points per level
-scripts/verify.sh     # runs Verus over checker + interpreter
+scripts/verify.sh     # runs Verus over tungsten-core (one invocation)
 ```
 
-Dependencies: `tungsten-interpreter → tungsten-checker → tungsten-ir`, and
-`tungsten-parse → tungsten-ir`. The testsuite depends on all of them and on every backend.
+Dependencies:
+
+```
+tungsten-core (verified, Verus crates only)
+      ▲
+tungsten-check (registry, lowering, prepare/evaluate) ──▶ tungsten-ir
+      ▲
+tungsten-testsuite ──▶ tungsten-parse ──▶ tungsten-ir, and every backend
+```
+
+`tungsten-core` doesn't depend on `tungsten-ir`, so Verus never sees arenas, `Ref` retagging or
+the lowering, and the trust boundary is the crate boundary. Keeping the checker and the
+interpreter in one crate lets the type soundness proof (§7.2), which needs `well_typed`, the
+spec semantics and value typing together, live in one place without cross-crate spec
+export/import. Verus can still verify one module at a time while iterating. If proof times ever
+force a split, it can happen later.
+
+The registry is an input, not a dependency: `tungsten-core` defines the declaration types
+(extern and extern-type signatures, domain errors), and the core `Program` holds them, so the
+checker takes only the program. `tungsten-check` fills them from a `Registry` (the testsuite
+builds one from `registry.toml`).
+Exec-side extern implementations are supplied through `prim.rs` (§7.3).
+
 Verus crates (`vstd`, `builtin`, `builtin_macros`) come in as `[workspace.dependencies]`, pinned
 to one Verus release.
 
@@ -113,11 +145,14 @@ to one Verus release.
 
 ### 5.2 Outcomes
 
-`eval : Program × Case × Fuel → Ok(values per entry cell) | Err(e)` with
-`e ∈ { DivByZero, OutOfBounds, OutOfFuel, ExternDomain }`. `Stuck` exists in the spec but is
-unreachable for checker-accepted programs (§7). Evaluation is left to right: call arguments,
-binary operands (except `And`/`Or`), construct and array-literal elements. The first error in
-that order is the result.
+`eval : Program × Case × Fuel → (per entry, per cell: Ok(value) | Err(e), failures)` with
+`e ∈ { DivByZero, OutOfBounds, OutOfFuel, ExternDomain, Stuck(_) }`. Results are **per cell**:
+the first error inside a cell ends that cell only. `Stuck` is a per-cell error that is
+unreachable for checker-accepted programs and cases (§7). `failures` lists every failing const
+and input once, as diagnostics. Evaluation is left to right: call arguments, binary operands
+(except `And`/`Or`, which short-circuit), construct and array-literal elements, record fields in
+written order. The error choice is canonical: lowest failing `ConstId`, then lowest failing
+`InputId` of the unit, then the first cell in flat order, then left to right inside the cell.
 
 ### 5.3 Typing (checker)
 
@@ -132,13 +167,27 @@ that order is the result.
 - `ExplicitCast`: between all numeric types, `Bool → integer` (0/1), `Pos3 → Vec3`. No other
   casts.
 - `Construct`/`ConstructExtern`: `ConstructExtern` needs an `Extern` type whose registry fields
-  it lists. The parser accepts any type there (and repeated `parameters`), so these are checker
-  errors.
+  it lists. The parser accepts any type there (and repeated `parameters`). A non-`Extern` type
+  or an unknown field name is a lowering error (`crates/tungsten-check/README.md`); missing or
+  repeated fields are checker errors.
 - Grids: every `dimensions` component of an entry point or density input is at least 1. The
   parser accepts any `i32`.
 - Statements: every variable is definitely assigned before it's read, every path returns,
   `Break` only appears inside `While`/`Repeat`, the call graph is acyclic, constants are acyclic,
-  and every extern and extern type is in the registry with matching signature.
+  and every extern and extern type is in the registry with matching signature. Flow analysis is
+  conservative: loops never contribute assignments or "always returns" (the error carries a
+  hint when a loop is the reason). Dead code after `return`/`break` is allowed.
+- Vectors: `Vec3∘Vec3` and `Pos3∘Pos3` for `+ - * /` componentwise (i32 wrapping for `Pos3`,
+  the first zero divisor in x, y, z order is `DivByZero`), negation of both. No scalar
+  broadcast. `== !=` on `Bool` and numeric types only, `< <= > >=` on numeric types only.
+- Indices (`Index`, explicit `Density` index) are `I32`.
+- A const init contains no `Local`, `Call`, `Density`, `Ambient`, `Host`, `ExternCall` or
+  `Table`. A unit's `main` has no params and any return type.
+- Grids: additionally `dx*dy*dz ≤ i32::MAX`.
+- Scoping, for every unit `U` and every `f ∈ F(U) = {U.main} ∪ U.helpers`: (a) calls stay in
+  `F(U)`; (b) hosts read are in `f.hosts ⊆ U.hosts`; (c) tables in `U.tables`; (d) consts, and
+  every const their inits reach, in `U.consts`; (e) density reads only of inputs owned by `U`,
+  by a function no other unit lists.
 
 ### 5.4 Integer and float operations (Java)
 
@@ -157,8 +206,8 @@ that order is the result.
 ### 5.5 Statements
 
 `Repeat { count }` runs the body `count` times. `Break` leaves the innermost `While`/`Repeat`.
-`Return` leaves the function. Each `While` iteration and each `Repeat` iteration costs one unit
-of fuel.
+`Return` leaves the function. One `While` execution may run at most `fuel` iterations (fuel is
+per loop, not shared). `Repeat` costs no fuel.
 
 ## 6. Entry and density-input evaluation
 
@@ -187,8 +236,9 @@ and the scales from the entry. A `DensityInput d` is evaluated with the same `or
   grid is `OutOfBounds`.
 - `DensityVariable(d, Some(e))`: `e` evaluates to an integer index. A negative index or one
   ≥ `len(d)` is `OutOfBounds`. Otherwise, read cell `decode(e, d.dimensions)`.
-- Reads are memoized on `(unit, config bits, cell)`. Memoization is an exec-only optimisation,
-  and it's proven equal to the unmemoized spec.
+- Buffers are built eagerly (§2 Evaluation model) and memoized per `InputId`: a buffer's value
+  depends only on the input, never on the reader. Memoization is an exec-only optimisation, and
+  (later) proven equal to the unmemoized spec; it is tested now (memo on == memo off).
 
 Lemma (verified): `decode(flat(c, dims), dims) == c` for every `c` in range, and
 `flat(decode(i, dims), dims) == i`.
@@ -198,8 +248,9 @@ Lemma (verified): `decode(flat(c, dims), dims) == c` for every `c` in range, and
 ### 7.1 Structure
 
 - `spec fn eval_*` define the semantics over the core IR with explicit fuel.
-- Exec `fn eval_*` have `ensures result == spec_eval_*(…)`. The memo table invariant is
-  `∀ k ∈ memo. memo[k] == spec_eval_cell(k)`.
+- Exec `fn eval_*` have `ensures result == spec_eval_*(…)`. The memo invariant is per id:
+  `∀ c ∈ memo.consts. memo[c] == spec_eval_const(p, case, fuel, c)`, and likewise for
+  `memo.inputs` with `spec_build_input`.
 - `check` has `ensures result.is_ok() ⇒ well_typed(p)`.
 
 ### 7.2 Theorems
@@ -207,15 +258,19 @@ Lemma (verified): `decode(flat(c, dims), dims) == c` for every `c` in range, and
 1. **Refinement**: exec interpreter == spec, for every fuel.
 2. **Type soundness**: `well_typed(p)` ⇒ spec evaluation never returns `Stuck`, and every `Ok`
    value has its declared type.
-3. **Fuel monotonicity**: if fuel `f` gives a result other than `OutOfFuel`, every `f' ≥ f`
-   gives the same result.
+3. **Fuel monotonicity**, per cell: if fuel `f` gives a cell result other than `OutOfFuel`,
+   every `f' ≥ f` gives the same result for that cell.
 4. **Layout**: §6.3 lemma.
 
 ### 7.3 Trusted base
 
-Verus itself. The primitive layer `prim.rs`: every float operation and registry extern is an
-`external_body` fn whose `ensures` equates it to an uninterpreted `spec fn`. The lowering, the
-parser, the harness and the runtimes are all tested, not proven. Kani harnesses for the lowering
+Verus itself. The primitive layer `prim.rs`: every integer, float and cast operation is an
+`external_body` fn whose `ensures` (added in the proof phase) equates it to an uninterpreted
+`spec fn`. Externs are supplied through the `Externs` trait
+(`call(&self, ExternId, &[Value]) -> Result<Value, ExternFail>`), which gets an uninterpreted
+spec too; its results are checked against the decl at runtime. Everything else outside
+`tungsten-core` (the lowering in `tungsten-check`, the parser, the harness and the runtimes) is
+tested, not proven. Kani harnesses for the lowering
 and for cast/shift edge cases are possible later work.
 
 ## 8. Text format
@@ -325,8 +380,11 @@ kind. A watchdog timeout counts as a hang (the `OutOfFuel` counterpart).
 
 ### 9.4 Comparison
 
-Values must be equal bit-for-bit, and any two NaNs are equal. For errors, Rust and Java must
-also produce an error, and the kind is compared when the driver can map it. The interpreter
+Backends are compared per case. If no interpreter cell has an error and there are no
+`failures`, every backend value must equal the interpreter value bit for bit, and any two NaNs
+are equal. Otherwise the backend must fail the case (any error, panic, exception or watchdog);
+the kind appears in the report but is never compared, so the `Interface` may schedule freely
+(the interpreter's canonical error choice is semantics, not a schedule). The interpreter
 records every `If`/`While` decision per cell. On a mismatch, the report shows the first
 diverging decision (re-running a backend trace mode when one is available), the cell, and both
 values in hex and decimal.
@@ -374,7 +432,5 @@ skipped with a notice. Verus: `scripts/verify.sh`, run locally only.
 - Confirm in tungsten-mc that every density input of an entry gets the entry's `origin`
   (§6.1), and that `Vec3` is f64 in the runtime the Rust backend targets (`mathf64.rs`) rather
   than f32 (`math.rs`).
-- Decide whether Verus crates are taken from a git revision or from crates.io, and pin the
-  version in `scripts/verify.sh`.
 - Error-kind mapping for Rust panics (needs identifiable panic messages from the generated
   code), or compare only error vs non-error.
