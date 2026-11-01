@@ -1,15 +1,20 @@
 //! Lowering tests. Inputs are `.tw` snippets through `tungsten_parse::load`, plus
 //! hand-built programs for what text can't express. Every successful lowering goes through
-//! [`ok`], which runs the wf mirror.
+//! [`ok`], which runs `check_wf` and the checker.
 
+mod check_errors;
+mod check_rejects;
 mod determinism;
 mod errors;
+mod eval;
 mod ids;
 mod legacy;
 mod map;
+mod memo;
 mod no_panic;
 mod normalization;
 mod registry;
+mod stuck_mutation;
 mod wf_mirror;
 
 use tungsten_core::{Expr, FnId, Stmt};
@@ -67,9 +72,25 @@ pub fn load(src: &str) -> OptimizedProgram {
 }
 
 /// A program with a host `h`, tables `t` (perlin) and `b3`, a const `c`, a `leaf` unit, and a
-/// unit `u` whose main is `fn top(p: f64) -> f64 @hosts(h) { <body> }` with input `d` reading
-/// `leaf_u`. `decls` go before `top`.
+/// unit `u` whose 0-param main `top_main` returns `top(1.0)`, where
+/// `fn top(p: f64) -> f64 @hosts(h) { <body> }`, with input `d` reading `leaf_u`. `decls` go
+/// before `top`; every fn they declare is listed in `u`'s helpers, next to `top`.
 pub fn snippet(decls: &str, body: &str) -> String {
+    let mut helpers = vec!["top".to_string()];
+    let mut rest = decls;
+    while let Some(i) = rest.find("fn ") {
+        let after = &rest[i + 3..];
+        let name: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let boundary = i == 0 || !rest.as_bytes()[i - 1].is_ascii_alphanumeric();
+        if boundary && !name.is_empty() {
+            helpers.push(name);
+        }
+        rest = after;
+    }
+    let helpers = helpers.join(", ");
     format!(
         "program {{
     host h: f64;
@@ -79,9 +100,11 @@ pub fn snippet(decls: &str, body: &str) -> String {
     {decls}
     fn leaf() -> f64 {{ return 1.0; }}
     fn top(p: f64) -> f64 @hosts(h) {{ {body} }}
+    fn top_main() -> f64 {{ return top(1.0); }}
     unit leaf_u {{ main leaf; }}
     unit u {{
-        main top;
+        main top_main;
+        helpers [{helpers}];
         hosts [h];
         tables [t];
         consts [c];
@@ -92,10 +115,15 @@ pub fn snippet(decls: &str, body: &str) -> String {
     )
 }
 
-/// Lowers, expecting success, and checks wf.
+/// Lowers, expecting success, and checks wf. Then runs the checker: a rejection must be listed
+/// in `check_rejects.rs`.
 pub fn ok(p: &OptimizedProgram, registry: &Registry) -> Lowered {
     let l = lower(p, registry).unwrap_or_else(|e| panic!("lowering failed:\n{e}"));
-    wf_mirror::assert_wf(&l.program);
+    let wf = tungsten_core::check::wf::check_wf(&l.program);
+    assert!(wf.is_empty(), "lowered program is not wf: {wf:?}");
+    if let Err(e) = crate::check_lowered(&l) {
+        check_rejects::allow(&e);
+    }
     l
 }
 

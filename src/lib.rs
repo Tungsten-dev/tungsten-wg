@@ -52,10 +52,10 @@ pub enum CompileError {
         #[source]
         source: BackendError,
     },
-    /// The program didn't lower to the core IR. No backend ran.
+    /// The program didn't lower to the core IR, or failed the core checker. No backend ran.
     #[cfg(feature = "check")]
     #[error("program is invalid")]
-    Invalid(#[source] check::LowerErrors),
+    Invalid(#[source] check::Invalid),
 }
 
 /// Compiles an optimized program with the given backends.
@@ -79,16 +79,15 @@ pub fn compile(
 }
 
 /// Lowers `program` to the core IR against `registry` (the externs and records the program may
-/// use) and only compiles if that succeeds. Currently a
-/// structural check (refs, names, representable shapes). Type checking arrives with
-/// tungsten-core's verified checker, behind the same signature.
+/// use), runs tungsten-core's checker (types, flow, scoping, grids, cycles), and only compiles
+/// if both succeed.
 #[cfg(feature = "check")]
 pub fn compile_checked(
     program: &OptimizedProgram,
     registry: &check::Registry,
     backends: &mut [&mut dyn Backend],
 ) -> Result<(), CompileError> {
-    check::lower(program, registry).map_err(CompileError::Invalid)?;
+    check::prepare(program, registry).map_err(CompileError::Invalid)?;
     compile(program, backends)
 }
 

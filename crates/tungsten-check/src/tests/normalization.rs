@@ -412,15 +412,15 @@ fn items() {
         ]
     );
     let leaf_u = l.map.units.iter().find(|(_, _, n)| *n == "leaf").unwrap().0;
-    let u = l.map.units.iter().find(|(_, _, n)| *n == "top").unwrap().0;
+    let u = l.map.units.iter().find(|(_, _, n)| *n == "top_main").unwrap().0;
     assert_eq!(
         pr.units[u.0],
         Unit {
-            main: fn_id(&l, "top"),
+            main: fn_id(&l, "top_main"),
             inputs: vec![InputId(0)],
             tables: vec![TableId(0)],
             hosts: vec![HostId(0)],
-            helpers: vec![],
+            helpers: vec![fn_id(&l, "top")],
             consts: vec![ConstId(0)],
         }
     );

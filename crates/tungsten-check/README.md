@@ -33,7 +33,7 @@ type-check.** It only:
 It reports an error only when the program *can't be expressed* in the core IR at all: a ref
 pointing nowhere, an unknown name, a `Dynamic` host, and so on. A type mismatch, a missing
 record field or an empty array literal is perfectly expressible, so it passes through
-untouched for the future verified checker to reject.
+untouched for the checker (`tungsten-core`'s `check`, run by `prepare`) to reject.
 
 The reason: this crate is unverified code. Keeping it "dumb" keeps the amount of trusted code
 small.
@@ -243,8 +243,34 @@ someone might still want:
   (the original table, with `ident`/`subident`), `input_vars`, extern names, record and field
   names.
 
-Use it to turn a core id back into something a human recognizes, for example in error messages
-from the future checker.
+Use it to turn a core id back into something a human recognizes, as `check.rs` does for checker
+errors, or to resolve `ExternId → name` and `TableId → ident` in an `Externs` implementation.
+
+## Checking and evaluating (`check.rs`, `eval.rs`)
+
+The checker and the interpreter live in `tungsten-core` (verified). This crate wraps them:
+
+```rust
+let prep = tungsten_check::prepare(&program, &registry)?;   // lower + check, once per program
+let case = prep.case(&NamedCase { origin: [0.0; 3], hosts: vec![("seed".into(), v)] })?;
+let result = prep.eval(&case, &my_externs, EvalOptions::default())?;  // once per case
+// or, one shot: tungsten_check::evaluate(&program, &registry, &named_case, &ext, opts)
+```
+
+- `prepare` returns `Invalid::Lower(LowerErrors)` or `Invalid::Check(CheckErrors)`. Checker
+  errors are rendered with names: a `Location` (core path → `Item` + `Step`s; cycles are under
+  `Item::Program`, a transitive missing const under `Step::WholeList`) and a message. The core
+  `CheckErrorKind` is kept on each error.
+- `Prepared::case` binds hosts by `Named` string (unknown, missing and duplicate names are
+  `CaseBindError`s) and runs `check_case`.
+- `Prepared::eval` runs `check_case`, then `eval_program`. Any `Stuck` in a cell or a failure
+  diagnostic is `EvalFailure::Stuck`: an interpreter or checker bug, never a program error.
+- `EvalOptions { fuel, memo }`: fuel per `While` execution (`DEFAULT_FUEL = 1 << 20`), and
+  `memo: false` for the test-only recompute-everything mode (results are identical).
+- `CaseResult { entries, failures }`: per entry, per cell in flat order, plus every failing const
+  and input once. Backends are compared against it per case: no error anywhere → values must be
+  bit-equal; any error → the backend must fail the case (TESTING.md §9.4).
+- `check_lowered(&Lowered)` runs only the checker (for hand-built or mutated programs).
 
 ## Tests (`src/tests/`)
 
@@ -255,8 +281,11 @@ the result. `tests/mod.rs` has the helpers:
   record `Pair`).
 - `snippet(decls, body)`: wraps a function body in a small program with a host, tables, a
   constant and a density input, so a test only has to write the interesting line.
-- `ok(…)`: lowers and also runs the wf mirror, so *every* successful lowering in the suite is
-  checked against `wf_program`.
+- `snippet(decls, body)`: the body goes in `fn top(p: f64) -> f64`, a helper of unit `u`
+  whose 0-param main `top_main` returns `top(1.0)`; every fn in `decls` is listed as a helper.
+- `ok(…)`: lowers, runs `check_wf`, and runs the checker. A program the checker rejects fails
+  the test unless the test is listed in `check_rejects.rs` with a reason (deliberately
+  ill-typed normalization tests, and the parse corpus files whose mains have params).
 
 | File | What it checks |
 | --- | --- |
@@ -267,17 +296,21 @@ the result. `tests/mod.rs` has the helpers:
 | `map.rs` | Every id round-trips through the `LowerMap` |
 | `registry.rs` | `RegistryBuilder` errors and id order |
 | `no_panic.rs` | proptest: break refs at random, `lower` must return `Err`, never panic |
-| `legacy.rs` | Programs from `tungsten-legacy`'s builders lower cleanly |
-| `wf_mirror.rs` | Not a test itself: a plain-Rust copy of `tungsten-core/src/wf.rs` |
+| `legacy.rs` | Programs from `tungsten-legacy`'s builders lower cleanly (and pass the checker) |
+| `check_errors.rs` | One reject test per `CheckErrorKind` (both hints), with its rendered location; hand-built core programs for wf and forbidden const inits |
+| `check_rejects.rs` | The lowering tests whose programs the checker rejects on purpose, with reasons |
+| `eval.rs` | Interpreter results computed by hand (operators × types, overflow, shifts, casts, `-0.0`, short-circuit, loops, fuel, consts, density inputs, eager failures, canonical errors, externs) and the `prepare`/`Prepared`/`evaluate` API |
+| `stuck_mutation.rs` | proptest: checker-accepted programs mutated on the core IR; those still accepted never get `Stuck` |
+| `memo.rs` | proptest: memo on == memo off; results are monotone in fuel per cell |
+| `wf_mirror.rs` | A plain-Rust copy of `tungsten-core/src/wf.rs`, and the proptest that `check_wf` agrees with it |
 
 Run them with `cargo test -p tungsten-check`.
 
 ## How it's used from the facade
 
 With feature `check`, the root crate exposes `compile_checked(program, &registry, backends)`.
-It calls `lower` first. If that fails it returns `CompileError::Invalid(errors)` and runs no
-backend. For now this is only a structural check. When the verified checker exists it will run
-here too, with the same signature.
+It calls `prepare` (lower + the core checker) first. If that fails it returns
+`CompileError::Invalid(check::Invalid)` and runs no backend.
 
 ## Design decisions
 
@@ -289,8 +322,10 @@ here too, with the same signature.
 | Empty `ArrayLiteral` | Lowered to `ArrayLit([])`; the checker rejects it. | A lowering error. |
 | Registry | Always required and strict. Frontends build it with the public `RegistryBuilder` (the testsuite's `registry.toml` loader too). | An Infer mode that builds the tables from the program's own annotations. It existed briefly and was removed: it only checks the program against itself, never against the runtime, and needs unverified evidence-merging rules. |
 | `LowerMap` | Both directions: core id → `Ref` + display name, and `Ref` → id. | Names only. |
-| Crate | Lowering lives here; `tungsten-interpreter` is reserved for the interpreter facade and will depend on this crate. | Lowering inside `tungsten-interpreter`: users would depend on something called "interpreter". |
-| Facade | Opt-in feature `check` with `compile_checked`; `compile` unchanged. The interim version only lowers, behind the signature the checker will use. | Always on (every user would need vstd and a registry); waiting for the checker. |
+| Crate | Lowering, `prepare` and `evaluate` live here; the checker and interpreter themselves are in `tungsten-core`. There is no `tungsten-interpreter` crate. | A separate `tungsten-interpreter` facade crate (TESTING.md's earlier plan): it would only wrap these entry points. |
+| API | `prepare` once per program, `Prepared::eval` per case, plus a one-shot `evaluate`. | One-shot with core ids (callers don't know them before lowering); re-lowering per case. |
+| Errors | `Invalid = Lower(LowerErrors) \| Check(CheckErrors)`. | One merged list: blurs which stage failed. |
+| Facade | Opt-in feature `check` with `compile_checked` (lower + check); `compile` unchanged. | Always on (every user would need vstd and a registry). |
 | Tests | `.tw` snippets via `tungsten-parse`, plus hand-built programs for what text can't express. | Hand-built only. |
 
 Open questions:
@@ -302,7 +337,9 @@ Open questions:
 - **New `tungsten-ir` `Expression` variant:** add an arm in `lower/expr.rs::expr`, plus a
   normalization test.
 - **New core IR variant:** see the checklist in `tungsten-core/README.md`. On this side: the
-  lowering, and `tests/wf_mirror.rs`.
+  lowering, `tests/wf_mirror.rs`, and the rendering in `check.rs`.
+- **New `CheckErrorKind`:** its message in `check.rs::Names::message` and a test in
+  `tests/check_errors.rs`.
 - **New error kind:** add it to `LowerErrorKind` in `error.rs` with a `Display` message, and
   add a test in `tests/errors.rs`.
 - **New arena in `OptimizedProgram`:** give it ids in `build_ids`, lower it in `run` at the

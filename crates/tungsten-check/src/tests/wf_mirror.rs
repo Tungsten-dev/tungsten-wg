@@ -1,5 +1,5 @@
-//! A plain-Rust mirror of `tungsten_core::wf`, clause by clause. Kept in sync with `wf.rs` by
-//! review; replaced by the checker's verified exec code later.
+//! A plain-Rust mirror of `tungsten_core::wf`, clause by clause, and the agreement test against
+//! the exec twin `tungsten_core::check::wf::check_wf` (which `ok()` now runs).
 
 use tungsten_core::*;
 
@@ -106,39 +106,17 @@ fn wf_input_links(p: &Program) -> bool {
     })
 }
 
-/// Panics, naming the first failing clause, unless `wf_program(p)`.
-pub fn assert_wf(p: &Program) {
-    for (i, u) in p.units.iter().enumerate() {
-        assert!(wf_unit(p, u), "unit {i} is not wf: {u:?}");
-    }
-    for (i, f) in p.functions.iter().enumerate() {
-        assert!(wf_function(p, f), "function {i} is not wf: {f:?}");
-    }
-    for (i, c) in p.consts.iter().enumerate() {
-        assert!(wf_expr(p, 0, &c.init), "const {i} is not wf: {c:?}");
-    }
-    for (i, h) in p.hosts.iter().enumerate() {
-        assert!(wf_type(p, &h.ty), "host {i} is not wf");
-    }
-    for (i, d) in p.inputs.iter().enumerate() {
-        assert!(
-            d.owner.0 < p.units.len() && d.source.0 < p.units.len(),
-            "input {i} is not wf"
-        );
-    }
-    for (i, e) in p.entries.iter().enumerate() {
-        assert!(e.unit.0 < p.units.len(), "entry {i} is not wf");
-    }
-    for (i, d) in p.externs.iter().enumerate() {
-        assert!(
-            wf_types(p, &d.params) && wf_type(p, &d.ret),
-            "extern {i} is not wf"
-        );
-    }
-    for (i, d) in p.records.iter().enumerate() {
-        assert!(wf_types(p, &d.fields), "record {i} is not wf");
-    }
-    assert!(wf_input_links(p), "input ownership links are not wf");
+/// `wf_program(p)`.
+pub fn is_wf(p: &Program) -> bool {
+    p.units.iter().all(|u| wf_unit(p, u))
+        && p.functions.iter().all(|f| wf_function(p, f))
+        && p.consts.iter().all(|c| wf_expr(p, 0, &c.init))
+        && p.hosts.iter().all(|h| wf_type(p, &h.ty))
+        && p.inputs.iter().all(|d| d.owner.0 < p.units.len() && d.source.0 < p.units.len())
+        && p.entries.iter().all(|e| e.unit.0 < p.units.len())
+        && p.externs.iter().all(|d| wf_types(p, &d.params) && wf_type(p, &d.ret))
+        && p.records.iter().all(|d| wf_types(p, &d.fields))
+        && wf_input_links(p)
 }
 
 #[test]
@@ -167,4 +145,89 @@ fn mirror_rejects_out_of_range_ids() {
         ty: Type::F64,
     }));
     assert!(!wf_type(&p, &Type::Array(Box::new(Type::Record(RecordId(3))), 1)));
+}
+
+/// `check_wf` (the exec twin in tungsten-core) agrees with this mirror on lowered programs and
+/// on programs with ids broken at random.
+mod agreement {
+    use proptest::prelude::*;
+    use tungsten_core::check::wf::check_wf;
+    use tungsten_core::*;
+
+    use super::super::stuck_mutation::{Rng, accepted};
+    use super::is_wf;
+
+    fn break_ids(p: &mut Program, rng: &mut Rng) {
+        let big = 7 + rng.below(3);
+        match rng.below(9) {
+            0 => {
+                if let Some(f) = p.functions.first_mut() {
+                    f.params = f.locals.len() + 1;
+                }
+            }
+            1 => {
+                if let Some(f) = p.functions.last_mut() {
+                    f.body.push(Stmt::Return(Expr::Local(LocalId(f.locals.len() + big))));
+                }
+            }
+            2 => {
+                if let Some(u) = p.units.first_mut() {
+                    u.main = FnId(big + 100);
+                }
+            }
+            3 => {
+                let n = p.units.len();
+                if let (true, Some(d)) = (n > 1, p.inputs.first_mut()) {
+                    d.owner = UnitId((d.owner.0 + 1) % n);
+                }
+            }
+            4 => p.hosts.push(HostDecl { ty: Type::Array(Box::new(Type::Record(RecordId(big))), 1) }),
+            5 => p.entries.push(Entry {
+                unit: UnitId(p.units.len() + big),
+                dims: Dims { x: 1, y: 1, z: 1 },
+                origin_scale: F64x3 { x: 0, y: 0, z: 0 },
+                position_scale: F64x3 { x: 0, y: 0, z: 0 },
+            }),
+            6 => p.consts.push(ConstDecl {
+                init: Expr::Field {
+                    base: Box::new(Expr::Lit(Lit::I32(0))),
+                    sel: FieldSel::Record(RecordId(0), big),
+                    ty: Type::F64,
+                },
+            }),
+            7 => {
+                if let Some(u) = p.units.last_mut() {
+                    u.consts.push(ConstId(p.consts.len() + big));
+                }
+            }
+            _ => {
+                if let Some(f) = p.functions.first_mut() {
+                    f.hosts.push(HostId(p.hosts.len()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lowered_programs_agree() {
+        for p in accepted() {
+            assert!(is_wf(&p));
+            assert!(check_wf(&p).is_empty());
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        #[test]
+        fn broken_programs_agree(prog in 0usize..16, seed in any::<u64>(), steps in 0usize..3) {
+            let progs = accepted();
+            let mut p = progs[prog % progs.len()].clone();
+            let mut rng = Rng(seed);
+            for _ in 0..steps {
+                break_ids(&mut p, &mut rng);
+            }
+            prop_assert_eq!(is_wf(&p), check_wf(&p).is_empty(), "{:?}", p);
+        }
+    }
 }

@@ -127,8 +127,11 @@ pub enum Item {
     Host { id: Option<HostId>, name: String },
     Input { id: Option<InputId>, name: String },
     Entry { index: usize },
-    /// Before the walk enters an item. No error is reported here.
+    /// Before the walk enters an item. No lowering error is reported here; checker wf errors
+    /// in extern and record decls are.
     Registry,
+    /// The whole program (dependency cycles).
+    Program,
 }
 
 impl fmt::Display for Item {
@@ -141,6 +144,7 @@ impl fmt::Display for Item {
             Item::Input { name, .. } => write!(f, "input `{name}`"),
             Item::Entry { index } => write!(f, "entry {index}"),
             Item::Registry => write!(f, "registry"),
+            Item::Program => write!(f, "program"),
         }
     }
 }
@@ -175,6 +179,10 @@ pub enum Step {
     Main,
     /// Position `index` in a scoping list (`helpers`, `tables`, `hosts`, `consts`).
     List { list: &'static str, index: usize },
+    /// A scoping list as a whole (a const only reachable through other consts' inits).
+    WholeList { list: &'static str },
+    /// An input's or entry's dims.
+    Dims,
     /// An input's source unit.
     Source,
     /// An entry's unit.
@@ -204,6 +212,8 @@ impl fmt::Display for Step {
             Step::Type => write!(f, "type"),
             Step::Main => write!(f, "main"),
             Step::List { list, index } => write!(f, "{list} {index}"),
+            Step::WholeList { list } => write!(f, "{list}"),
+            Step::Dims => write!(f, "dims"),
             Step::Source => write!(f, "source"),
             Step::Unit => write!(f, "unit"),
         }

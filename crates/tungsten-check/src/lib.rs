@@ -6,12 +6,17 @@
 //! [`lower`] collects every error, each with a [`Location`], and never panics, whatever refs the
 //! program holds.
 //!
+//! [`prepare`] lowers and then runs the core checker; [`Prepared::eval`] runs the core
+//! interpreter on one case, and [`evaluate`] does both in one go.
+//!
 //! Externs and records resolve strictly against a [`Registry`] (an unknown name is an error),
 //! which the caller builds with [`RegistryBuilder`].
 
 pub use tungsten_core as core_ir;
 
+mod check;
 mod error;
+mod eval;
 mod lower;
 mod map;
 mod registry;
@@ -23,7 +28,14 @@ pub use error::{
     EntityKind, Item, Location, LowerError, LowerErrorKind, LowerErrors,
     ParameterProblem, Step,
 };
+pub use check::{CheckError, CheckErrorKind, CheckErrors, Invalid, ReturnHint, UnassignedHint};
+pub use eval::{
+    CaseBindError, DEFAULT_FUEL, EvalFailure, EvalOptions, EvaluateError, NamedCase, Prepared,
+    check_lowered, evaluate, prepare,
+};
 pub use map::{CoreId, IdMap, LowerMap, RecordNames};
+pub use tungsten_core::exec::{CaseResult, Failure};
+pub use tungsten_core::{Case, EvalError, ExternFail, Externs, StuckReason, Value};
 pub use registry::{Registry, RegistryBuilder, RegistryError};
 
 use tungsten_ir::OptimizedProgram;
