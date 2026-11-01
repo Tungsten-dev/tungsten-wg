@@ -71,8 +71,8 @@ if [[ "$PINNED" != "$VSTD_VERSION" ]]; then
     exit 1
 fi
 
-# 2. Proof-free guard (this slice): no trusted gaps in tungsten-core.
-# prim.rs will be exempt when it arrives.
+# 2. Proof-free guard (this phase): no trusted gaps in tungsten-core, except prim.rs (the trusted
+#    primitive layer).
 if GAPS="$(grep -rnE 'admit\(|assume\(|external_body|#\[verifier::external\]' crates/tungsten-core/src --include='*.rs' | grep -v '/prim\.rs:')"; then
     echo "verify.sh: trusted gaps in tungsten-core:" >&2
     echo "$GAPS" >&2

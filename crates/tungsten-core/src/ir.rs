@@ -1,7 +1,7 @@
 //! Ids, types, literals, expressions, statements, functions, units and the program.
 //!
-//! All fields are `pub` and there are no exec functions: any exec fn that indexes a `Vec`
-//! inside `verus!{}` would need bounds proofs. Plain-Rust helpers live in `tungsten-check`.
+//! All fields are `pub`. Exec helpers over these types live in `util.rs`, `check/` and
+//! `exec/`.
 
 use vstd::prelude::*;
 
@@ -290,85 +290,28 @@ pub struct Program {
 
 // `Clone` for the recursive types is written outside `verus!{}`: the pinned Verus rejects a
 // derived `Clone` on a type that contains itself (through `Box`/`Vec`) as a possibly
-// non-terminating cycle. These are plain exec impls with no spec; nothing in the spec relies on
-// them.
+// non-terminating cycle. They delegate to the verified-terminating `clone_*` fns in `util.rs`.
 
 impl Clone for Type {
     fn clone(&self) -> Self {
-        match self {
-            Type::Bool => Type::Bool,
-            Type::I8 => Type::I8,
-            Type::I32 => Type::I32,
-            Type::I64 => Type::I64,
-            Type::F32 => Type::F32,
-            Type::F64 => Type::F64,
-            Type::Vec3 => Type::Vec3,
-            Type::Pos3 => Type::Pos3,
-            Type::Array(t, n) => Type::Array(t.clone(), *n),
-            Type::Record(r) => Type::Record(*r),
-            Type::PermTable => Type::PermTable,
-            Type::Sampler => Type::Sampler,
-        }
+        crate::util::clone_type(self)
     }
 }
 
 impl Clone for Expr {
     fn clone(&self) -> Self {
-        match self {
-            Expr::Lit(l) => Expr::Lit(l.clone()),
-            Expr::Local(l) => Expr::Local(*l),
-            Expr::Const(c) => Expr::Const(*c),
-            Expr::Host(h) => Expr::Host(*h),
-            Expr::Table(t) => Expr::Table(*t),
-            Expr::Ambient(a) => Expr::Ambient(a.clone()),
-            Expr::Density { input, index } => Expr::Density { input: *input, index: index.clone() },
-            Expr::Call { func, args } => Expr::Call { func: *func, args: args.clone() },
-            Expr::ExternCall { ext, params, ret, args } => Expr::ExternCall {
-                ext: *ext,
-                params: params.clone(),
-                ret: ret.clone(),
-                args: args.clone(),
-            },
-            Expr::Binary { op, left, right } => Expr::Binary {
-                op: op.clone(),
-                left: left.clone(),
-                right: right.clone(),
-            },
-            Expr::Unary { op, operand } => Expr::Unary { op: op.clone(), operand: operand.clone() },
-            Expr::Field { base, sel, ty } => Expr::Field {
-                base: base.clone(),
-                sel: sel.clone(),
-                ty: ty.clone(),
-            },
-            Expr::Index { array, index } => Expr::Index { array: array.clone(), index: index.clone() },
-            Expr::MakeVec3 { x, y, z } => Expr::MakeVec3 { x: x.clone(), y: y.clone(), z: z.clone() },
-            Expr::MakePos3 { x, y, z } => Expr::MakePos3 { x: x.clone(), y: y.clone(), z: z.clone() },
-            Expr::MakeRecord { record, fields } => Expr::MakeRecord { record: *record, fields: fields.clone() },
-            Expr::ArrayLit(es) => Expr::ArrayLit(es.clone()),
-            Expr::Cast { to, operand } => Expr::Cast { to: to.clone(), operand: operand.clone() },
-        }
+        crate::util::clone_expr(self)
     }
 }
 
 impl Clone for FieldInit {
     fn clone(&self) -> Self {
-        FieldInit { field: self.field, value: self.value.clone() }
+        crate::util::clone_field_init(self)
     }
 }
 
 impl Clone for Stmt {
     fn clone(&self) -> Self {
-        match self {
-            Stmt::Assign { target, value } => Stmt::Assign { target: *target, value: value.clone() },
-            Stmt::Return(e) => Stmt::Return(e.clone()),
-            Stmt::If { cond, then_branch, else_branch } => Stmt::If {
-                cond: cond.clone(),
-                then_branch: then_branch.clone(),
-                else_branch: else_branch.clone(),
-            },
-            Stmt::While { cond, body } => Stmt::While { cond: cond.clone(), body: body.clone() },
-            Stmt::Repeat { count, body } => Stmt::Repeat { count: *count, body: body.clone() },
-            Stmt::Break => Stmt::Break,
-        }
+        crate::util::clone_stmt(self)
     }
 }

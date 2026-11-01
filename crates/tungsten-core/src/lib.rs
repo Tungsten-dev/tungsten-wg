@@ -10,17 +10,59 @@
 //! `spec fn`s.
 
 #![allow(unused_imports)]
+// `check/` and `exec/` are written in the style Verus verifies (and the later proofs need):
+// explicit loops and matches, `i = i + 1`, no `Option` combinators or closures.
+#![allow(
+    clippy::assign_op_pattern,
+    clippy::len_zero,
+    clippy::manual_map,
+    clippy::match_like_matches_macro,
+    clippy::collapsible_match,
+    clippy::collapsible_if,
+    clippy::collapsible_else_if,
+    clippy::question_mark,
+    clippy::manual_unwrap_or,
+    clippy::manual_unwrap_or_default,
+    clippy::redundant_field_names,
+    clippy::should_implement_trait,
+    clippy::needless_lifetimes,
+    clippy::extra_unused_lifetimes,
+    clippy::vec_init_then_push,
+    clippy::implicit_saturating_sub,
+    clippy::manual_range_contains,
+    clippy::needless_return,
+    clippy::bool_comparison,
+    clippy::nonminimal_bool,
+    clippy::comparison_chain,
+    clippy::unnecessary_cast,
+    clippy::needless_range_loop,
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::new_without_default,
+    clippy::manual_is_multiple_of,
+    clippy::implicit_saturating_add,
+    // `&Vec` (not `&[_]`): the termination measures use vstd's `Vec` index axioms.
+    clippy::ptr_arg,
+    clippy::single_match
+)]
 // The derived `Clone`s have no spec; nothing in the spec uses them.
 #![cfg_attr(verus_keep_ghost, verifier::allow(autoderive_clone_without_spec))]
 
 use vstd::prelude::*;
 
+pub mod check;
+pub mod exec;
 pub mod ir;
+pub mod layout;
+pub mod prim;
 pub mod registry;
+pub mod util;
+pub mod value;
 pub mod wf;
 
 pub use ir::*;
 pub use registry::*;
+pub use value::*;
 
 #[cfg(test)]
 mod tests {
