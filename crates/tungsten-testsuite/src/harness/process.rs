@@ -42,9 +42,8 @@ struct Running {
     stderr: Arc<Mutex<Vec<u8>>>,
 }
 
-fn spawn(bin: &Path, id: &str, body_len: usize) -> std::io::Result<Running> {
-    let mut child = Command::new(bin)
-        .arg(id)
+fn spawn(mut cmd: Command, body_len: usize) -> std::io::Result<Running> {
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -134,19 +133,37 @@ pub fn run_cases_with(
     timeout: Duration,
     startup: Duration,
 ) -> Vec<CaseOutcome> {
+    let make = || {
+        let mut c = Command::new(bin);
+        c.arg(id);
+        c
+    };
+    run_cases_cmd(&make, requests, body_len, timeout, startup)
+}
+
+/// `run_cases_with` for any child process: `make` builds the command (called once per process).
+pub fn run_cases_cmd(
+    make: &dyn Fn() -> Command,
+    requests: &[Vec<u8>],
+    body_len: usize,
+    timeout: Duration,
+    startup: Duration,
+) -> Vec<CaseOutcome> {
     let mut outcomes = Vec::with_capacity(requests.len());
     let mut proc: Option<Running> = None;
     let mut first_in_process = true;
     for req in requests {
         if proc.is_none() {
-            match spawn(bin, id, body_len) {
+            let cmd = make();
+            let name = cmd.get_program().to_string_lossy().into_owned();
+            match spawn(cmd, body_len) {
                 Ok(p) => {
                     proc = Some(p);
                     first_in_process = true;
                 }
                 Err(e) => {
                     outcomes.push(CaseOutcome::Crashed {
-                        status: format!("could not start {}: {e}", bin.display()),
+                        status: format!("could not start {name}: {e}"),
                         stderr: String::new(),
                     });
                     continue;

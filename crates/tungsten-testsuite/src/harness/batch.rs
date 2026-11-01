@@ -9,10 +9,28 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use super::java;
 use super::rust::{RUNTIME_FILES, RUSTC_FLAGS, generate_test, main_source, records_source, test_id};
 use crate::corpus::{self, CorpusFile};
 use crate::env::TestEnv;
 use crate::oracle;
+
+/// The backend language of a harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lang {
+    Rust,
+    Java,
+}
+
+impl Lang {
+    /// The name used in trial names, `TW_BACKENDS` and `@knownfail`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Lang::Rust => "rust",
+            Lang::Java => "java",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Stage {
@@ -32,7 +50,8 @@ impl Stage {
 /// What a test can run from.
 #[derive(Debug, Clone)]
 pub enum Artifact {
-    /// The test id is the first argument of the binary.
+    /// Rust: the binary, with the test id as its first argument. Java: the class directory, and
+    /// the test's `Driver` class is `<id>.Driver`.
     Binary { path: PathBuf, id: String },
     /// `generate` panicked or failed.
     GenFailed(String),
@@ -46,9 +65,13 @@ type BatchResult = Arc<HashMap<String, Artifact>>;
 type BatchCell = Arc<OnceLock<BatchResult>>;
 
 pub struct Harness {
+    pub lang: Lang,
     pub cache_root: PathBuf,
-    pub rustc: String,
-    pub rustc_version: String,
+    /// `rustc` or `javac`.
+    pub compiler: String,
+    pub compiler_version: String,
+    /// The `java` launcher (Java harnesses only).
+    pub java: String,
     pub large: bool,
     /// Number of compiler invocations so far (the cache check of SPEC §12 reads it).
     pub builds: AtomicUsize,
@@ -69,17 +92,67 @@ pub fn probe_rustc(rustc: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// One test's generated module.
+/// `$JAVAC` or `javac`.
+pub fn javac_command() -> String {
+    std::env::var("JAVAC").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "javac".into())
+}
+
+/// `$JAVA` or `java`.
+pub fn java_command() -> String {
+    std::env::var("JAVA").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "java".into())
+}
+
+/// The major version in `javac -version` / `java -version` output (`javac 21.0.1`, `openjdk version "21.0.1"`).
+fn major_version(text: &str) -> Option<u32> {
+    let rest = text.split(|c: char| c.is_ascii_digit()).next().map(|p| &text[p.len()..])?;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let major: u32 = digits.parse().ok()?;
+    // Java 8 and older report `1.8.0`.
+    if major == 1 {
+        let minor: String = rest[2..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        return minor.parse().ok();
+    }
+    Some(major)
+}
+
+/// Checks that `javac` and `java` exist and are at least version 21; returns a description.
+pub fn probe_java(javac: &str, java: &str) -> Result<String, String> {
+    let mut desc = String::new();
+    for (tool, text) in [(javac, "javac"), (java, "java")] {
+        let out = Command::new(tool).arg("-version").output().map_err(|e| format!("`{tool}`: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("`{tool} -version` failed"));
+        }
+        // `java -version` prints to stderr, `javac -version` to stdout.
+        let mut v = String::from_utf8_lossy(&out.stdout).into_owned();
+        v.push_str(&String::from_utf8_lossy(&out.stderr));
+        match major_version(&v) {
+            Some(m) if m >= 21 => {}
+            _ => return Err(format!("{text} 21 or newer is required, `{tool} -version` says: {}", v.trim())),
+        }
+        desc.push_str(v.trim());
+        desc.push('\n');
+    }
+    Ok(desc)
+}
+
+/// One test's generated module (Java: a blob of `//@@FILE` sections, see `java::split_files`).
 pub struct TestSource {
     pub name: String,
     pub id: String,
     pub source: String,
 }
 
-fn key_of(version: &str, runtime: &[(&str, &str)], records: &str, tests: &[&TestSource]) -> String {
+fn key_of(
+    version: &str,
+    flags: &[&str],
+    runtime: &[(&str, &str)],
+    records: &str,
+    tests: &[&TestSource],
+) -> String {
     let mut ctx = md5::Context::new();
     ctx.consume(version.as_bytes());
-    ctx.consume(RUSTC_FLAGS.join(" ").as_bytes());
+    ctx.consume(flags.join(" ").as_bytes());
     for (name, text) in runtime {
         ctx.consume(name.as_bytes());
         ctx.consume(text.as_bytes());
@@ -95,21 +168,57 @@ fn key_of(version: &str, runtime: &[(&str, &str)], records: &str, tests: &[&Test
 }
 
 impl Harness {
+    /// A Rust harness. `Err` if there is no `rustc`.
     pub fn new(cache_root: PathBuf, large: bool) -> Result<Harness, String> {
-        let rustc = rustc_command();
-        let rustc_version = probe_rustc(&rustc)?;
+        let compiler = rustc_command();
+        let compiler_version = probe_rustc(&compiler)?;
         Ok(Harness {
+            lang: Lang::Rust,
             cache_root,
-            rustc,
-            rustc_version,
+            compiler,
+            compiler_version,
+            java: String::new(),
             large,
             builds: AtomicUsize::new(0),
             batches: Mutex::new(HashMap::new()),
         })
     }
 
-    fn rust_dir(&self) -> PathBuf {
-        self.cache_root.join("tw-cache").join("rust")
+    /// A Java harness. `Err` if `javac` or `java` is missing or older than 21.
+    pub fn new_java(cache_root: PathBuf, large: bool) -> Result<Harness, String> {
+        let compiler = javac_command();
+        let java = java_command();
+        let compiler_version = probe_java(&compiler, &java)?;
+        Ok(Harness {
+            lang: Lang::Java,
+            cache_root,
+            compiler,
+            compiler_version,
+            java,
+            large,
+            builds: AtomicUsize::new(0),
+            batches: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn lang_dir(&self) -> PathBuf {
+        self.cache_root.join("tw-cache").join(self.lang.name())
+    }
+
+    /// The command running test `id` of the artifact at `path`.
+    pub fn command(&self, path: &std::path::Path, id: &str) -> Command {
+        match self.lang {
+            Lang::Rust => {
+                let mut c = Command::new(path);
+                c.arg(id);
+                c
+            }
+            Lang::Java => {
+                let mut c = Command::new(&self.java);
+                c.args(java::JAVA_FLAGS).arg("-cp").arg(path).arg(format!("{id}.Driver"));
+                c
+            }
+        }
     }
 
     /// The artifact of corpus file `file` (name without extension) in its batch.
@@ -141,7 +250,10 @@ impl Harness {
             return result;
         }
         let env = TestEnv::new();
-        let records = records_source(env.spec());
+        let records = match self.lang {
+            Lang::Rust => records_source(env.spec()),
+            Lang::Java => java::records_source(env.spec()),
+        };
         result.extend(self.build_tests(&records, &tests));
         result
     }
@@ -188,25 +300,67 @@ impl Harness {
         if stage == Stage::Inlined {
             tungsten_optimizer::perform_inline(&mut program);
         }
-        let source = generate_test(&program, &env)?;
-        Ok(Some(TestSource { name: file.name.clone(), id: test_id(&file.name), source }))
+        let id = test_id(&file.name);
+        let source = match self.lang {
+            Lang::Rust => generate_test(&program, &env)?,
+            Lang::Java => java::generate_test(&program, &env, &id)?,
+        };
+        Ok(Some(TestSource { name: file.name.clone(), id, source }))
     }
 
-    /// Builds one crate holding `tests` (cached by content). `Err` carries the compiler output
+    /// Builds one batch holding `tests` (cached by content). `Err` carries the compiler output
     /// and the directory with the sources.
     pub fn build(&self, records: &str, tests: &[&TestSource]) -> Result<PathBuf, (String, PathBuf)> {
-        let key = key_of(&self.rustc_version, RUNTIME_FILES, records, tests);
-        let root = self.rust_dir();
+        let (flags, runtime) = match self.lang {
+            Lang::Rust => (RUSTC_FLAGS, RUNTIME_FILES),
+            Lang::Java => (java::JAVAC_FLAGS, java::RUNTIME_FILES),
+        };
+        let key = key_of(&self.compiler_version, flags, runtime, records, tests);
+        let root = self.lang_dir();
         let final_dir = root.join(&key);
-        let bin = final_dir.join("bin");
-        if bin.exists() {
-            return Ok(bin);
+        let artifact = final_dir.join(match self.lang {
+            Lang::Rust => "bin",
+            Lang::Java => "classes",
+        });
+        if artifact.exists() {
+            return Ok(artifact);
         }
         let n = self.builds.fetch_add(1, Ordering::SeqCst);
         let tmp = root.join(format!("{key}.tmp-{}-{n}", std::process::id()));
         let io = |e: std::io::Error| (format!("io error: {e}"), tmp.clone());
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).map_err(io)?;
+        let output = match self.lang {
+            Lang::Rust => self.compile_rust(&tmp, records, tests),
+            Lang::Java => self.compile_java(&tmp, records, tests),
+        };
+        let out = match output {
+            Ok(o) => o,
+            Err(e) => return Err((e, tmp.clone())),
+        };
+        if !out.status.success() {
+            let mut text = String::from_utf8_lossy(&out.stderr).into_owned();
+            if text.is_empty() {
+                text = String::from_utf8_lossy(&out.stdout).into_owned();
+            }
+            let failed = root.join(format!("{key}.failed"));
+            let _ = std::fs::remove_dir_all(&failed);
+            let kept = if std::fs::rename(&tmp, &failed).is_ok() { failed } else { tmp };
+            return Err((text, kept));
+        }
+        match std::fs::rename(&tmp, &final_dir) {
+            Ok(()) => Ok(artifact),
+            // Another test got there first; its artifact is identical.
+            Err(_) if artifact.exists() => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                Ok(artifact)
+            }
+            Err(e) => Err((format!("could not move the build into the cache: {e}"), tmp)),
+        }
+    }
+
+    fn compile_rust(&self, tmp: &std::path::Path, records: &str, tests: &[&TestSource]) -> Result<std::process::Output, String> {
+        let io = |e: std::io::Error| format!("io error: {e}");
         for (name, text) in RUNTIME_FILES {
             std::fs::write(tmp.join(name), text).map_err(io)?;
         }
@@ -216,29 +370,45 @@ impl Harness {
         for t in tests {
             std::fs::write(tmp.join(format!("{}.rs", t.id)), &t.source).map_err(io)?;
         }
-        let out = Command::new(&self.rustc)
+        Command::new(&self.compiler)
             .args(RUSTC_FLAGS)
             .args(["--crate-name", "tw_batch", "--crate-type", "bin", "-o"])
             .arg(tmp.join("bin"))
             .arg(tmp.join("main.rs"))
             .output()
-            .map_err(|e| (format!("could not run {}: {e}", self.rustc), tmp.clone()))?;
-        if !out.status.success() {
-            let text = String::from_utf8_lossy(&out.stderr).into_owned();
-            let failed = root.join(format!("{key}.failed"));
-            let _ = std::fs::remove_dir_all(&failed);
-            let kept = if std::fs::rename(&tmp, &failed).is_ok() { failed } else { tmp };
-            return Err((text, kept));
+            .map_err(|e| format!("could not run {}: {e}", self.compiler))
+    }
+
+    fn compile_java(&self, tmp: &std::path::Path, records: &str, tests: &[&TestSource]) -> Result<std::process::Output, String> {
+        let io = |e: std::io::Error| format!("io error: {e}");
+        let src = tmp.join("src");
+        let mut files: Vec<String> = vec![];
+        let mut put = |rel: String, text: &str| -> Result<(), String> {
+            let path = src.join(&rel);
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(io)?;
+            std::fs::write(&path, text).map_err(io)?;
+            files.push(format!("src/{rel}"));
+            Ok(())
+        };
+        for (name, text) in java::RUNTIME_FILES {
+            put(name.to_string(), text)?;
         }
-        match std::fs::rename(&tmp, &final_dir) {
-            Ok(()) => Ok(bin),
-            // Another test binary got there first; its artifact is identical.
-            Err(_) if bin.exists() => {
-                let _ = std::fs::remove_dir_all(&tmp);
-                Ok(bin)
+        for (name, text) in java::split_files(records) {
+            put(name, &text)?;
+        }
+        for t in tests {
+            for (name, text) in java::split_files(&t.source) {
+                put(format!("{}/{name}", t.id), &text)?;
             }
-            Err(e) => Err((format!("could not move the build into the cache: {e}"), tmp)),
         }
+        std::fs::create_dir_all(tmp.join("classes")).map_err(io)?;
+        std::fs::write(tmp.join("files.txt"), files.join("\n")).map_err(io)?;
+        Command::new(&self.compiler)
+            .current_dir(tmp)
+            .args(java::JAVAC_FLAGS)
+            .args(["-d", "classes", "@files.txt"])
+            .output()
+            .map_err(|e| format!("could not run {}: {e}", self.compiler))
     }
 }
 
@@ -254,5 +424,5 @@ pub fn cache_key(
         .map(|(id, s)| TestSource { name: id.clone(), id: id.clone(), source: s.clone() })
         .collect();
     let refs: Vec<&TestSource> = tests.iter().collect();
-    key_of(version, runtime, records, &refs)
+    key_of(version, RUSTC_FLAGS, runtime, records, &refs)
 }

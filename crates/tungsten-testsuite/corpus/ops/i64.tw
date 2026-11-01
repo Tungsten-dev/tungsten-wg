@@ -1,4 +1,5 @@
 // i64: arithmetic shift right.
+@knownfail(java, "derive_binop_type has no result type for shift and bitwise operators, so an array literal starting with one panics in the Java backend")
 program {
     fn run() -> [i64; 1] {
         return [(-8L >> 60)];

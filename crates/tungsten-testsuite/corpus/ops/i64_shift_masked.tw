@@ -1,5 +1,6 @@
 // i64 shift amounts are masked to 6 bits.
 @knownfail(rust, "the backend emits plain <<, which panics on a shift amount of the type width or more instead of masking it")
+@knownfail(java, "derive_binop_type has no result type for shift and bitwise operators, so an array literal starting with one panics in the Java backend")
 program {
     fn run() -> [i64; 1] {
         return [(1L << 65)];

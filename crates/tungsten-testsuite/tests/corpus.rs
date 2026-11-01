@@ -7,7 +7,7 @@ mod selftest;
 use std::sync::Arc;
 
 use libtest_mimic::{Arguments, Failed, Trial};
-use tungsten_testsuite::harness::batch::{Harness, Stage, probe_rustc, rustc_command};
+use tungsten_testsuite::harness::batch::{Harness, Lang, Stage};
 use tungsten_testsuite::harness::trial::run_backend_trial;
 use tungsten_testsuite::corpus::{CorpusFile, Loaded, discover, load_file};
 use tungsten_testsuite::env::TestEnv;
@@ -30,19 +30,30 @@ fn main() {
     let env = TestEnv::new();
     let mut trials = vec![];
 
-    // Backends: milestone 2 has Rust only. Java and CUDA arrive in milestones 3 and 5.
-    let want_rust = sel.backends.as_ref().is_none_or(|b| b.iter().any(|x| x == "rust"));
-    let require_rust = sel.require.iter().any(|x| x == "rust");
-    let harness: Result<Arc<Harness>, String> = if want_rust || require_rust {
-        Harness::new(std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")), sel.large).map(Arc::new)
-    } else {
-        Err("rust is not in TW_BACKENDS".to_string())
-    };
-    if let (true, Err(e)) = (require_rust, &harness) {
-        eprintln!("error: TW_REQUIRE lists rust, but there is no toolchain: {e}");
-        std::process::exit(2);
+    // One harness per selected backend. Java and CUDA arrive in milestones 3 and 5.
+    let cache = || std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let mut backends: Vec<(Lang, bool, Result<Arc<Harness>, String>)> = vec![];
+    for lang in [Lang::Rust, Lang::Java] {
+        let name = lang.name();
+        let wanted = sel.backends.as_ref().is_none_or(|b| b.iter().any(|x| x == name));
+        let required = sel.require.iter().any(|x| x == name);
+        let h: Result<Arc<Harness>, String> = if wanted || required {
+            match lang {
+                Lang::Rust => Harness::new(cache(), sel.large),
+                Lang::Java => Harness::new_java(cache(), sel.large),
+            }
+            .map(Arc::new)
+        } else {
+            Err(format!("{name} is not in TW_BACKENDS"))
+        };
+        if let (true, Err(e)) = (required, &h) {
+            eprintln!("error: TW_REQUIRE lists {name}, but there is no toolchain: {e}");
+            std::process::exit(2);
+        }
+        backends.push((lang, wanted, h));
     }
-    let _ = (rustc_command, probe_rustc);
+    let harness: Result<Arc<Harness>, String> =
+        backends.iter().find(|(l, _, _)| *l == Lang::Rust).map(|(_, _, h)| h.clone()).unwrap();
 
     for file in discover() {
         let Loaded { file, result } = load_file(file, &env);
@@ -65,23 +76,25 @@ fn main() {
                 add("interp", interp);
                 if !reject {
                     add("inline", inline);
-                    for stage in [Stage::Original, Stage::Inlined] {
-                        let name = format!("{}::rust::{}", file.name, stage.name());
-                        let f = file.clone();
-                        let trial = match (&harness, want_rust) {
-                            (_, false) => Trial::test(name, || Ok(()))
-                                .with_ignored_flag(true)
-                                .with_kind("rust not in TW_BACKENDS"),
-                            (Ok(h), true) => {
-                                let h = h.clone();
-                                let t = Trial::test(name, move || backend_trial(&h, &f, stage));
-                                if ignore { t.with_ignored_flag(true).with_kind("large (set TW_LARGE=1)") } else { t }
-                            }
-                            (Err(e), true) => Trial::test(name, || Ok(()))
-                                .with_ignored_flag(true)
-                                .with_kind(format!("no rustc: {e}")),
-                        };
-                        trials.push(trial);
+                    for (lang, want, harness) in &backends {
+                        for stage in [Stage::Original, Stage::Inlined] {
+                            let name = format!("{}::{}::{}", file.name, lang.name(), stage.name());
+                            let f = file.clone();
+                            let trial = match (harness, want) {
+                                (_, false) => Trial::test(name, || Ok(()))
+                                    .with_ignored_flag(true)
+                                    .with_kind(format!("{} not in TW_BACKENDS", lang.name())),
+                                (Ok(h), true) => {
+                                    let h = h.clone();
+                                    let t = Trial::test(name, move || backend_trial(&h, &f, stage));
+                                    if ignore { t.with_ignored_flag(true).with_kind("large (set TW_LARGE=1)") } else { t }
+                                }
+                                (Err(e), true) => Trial::test(name, || Ok(()))
+                                    .with_ignored_flag(true)
+                                    .with_kind(format!("no {} toolchain: {e}", lang.name())),
+                            };
+                            trials.push(trial);
+                        }
                     }
                 }
             }
@@ -89,7 +102,10 @@ fn main() {
     }
 
     trials.push(Trial::test("runtime_externs_registered", runtime_externs_registered));
-    trials.extend(selftest::trials(harness.as_ref().ok().cloned()));
+    trials.extend(selftest::trials(
+        harness.as_ref().ok().cloned(),
+        backends.iter().find(|(l, _, _)| *l == Lang::Java).and_then(|(_, _, h)| h.as_ref().ok().cloned()),
+    ));
     libtest_mimic::run(&args, trials).exit();
 }
 

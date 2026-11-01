@@ -1,4 +1,5 @@
 // i8: arithmetic shift right promotes to i32 and truncates.
+@knownfail(java, "derive_binop_type has no result type for shift and bitwise operators, so an array literal starting with one panics in the Java backend")
 program {
     fn run() -> [i8; 1] {
         return [(-128b >> 1)];

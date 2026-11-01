@@ -1,17 +1,15 @@
-//! One backend trial: `<path>::rust::original` or `<path>::rust::inlined` (SPEC §6.1).
+//! One backend trial: `<path>::<backend>::original` or `::inlined` (SPEC §6.1).
 
 use std::time::Duration;
 
 use super::batch::{Artifact, Harness, Stage};
-use super::process::{CaseOutcome, run_cases};
+use super::process::{CaseOutcome, STARTUP_ALLOWANCE, run_cases_cmd};
 use super::protocol::TestIo;
 use crate::compare::{Verdict, score_case, score_unbuilt};
 use crate::corpus::{CorpusFile, load_file};
 use crate::env::TestEnv;
 use crate::knownfail::{CaseScore, reconcile};
 use crate::oracle;
-
-pub const BACKEND: &str = "rust";
 
 /// `TW_TIMEOUT_SECS` (default 10), ten times longer for `@tier(large)`.
 pub fn case_timeout(large: bool) -> Duration {
@@ -64,7 +62,9 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
                 requests.push(io.encode_request(&env, c.origin, c.seed, &named.hosts)?);
             }
             let large = tf.tier.as_deref() == Some("large");
-            let outcomes = run_cases(&path, &id, &requests, io.response_bytes(&env)?, case_timeout(large));
+            let make = || h.command(&path, &id);
+            let outcomes =
+                run_cases_cmd(&make, &requests, io.response_bytes(&env)?, case_timeout(large), STARTUP_ALLOWANCE);
             let mut by_case: Vec<Option<CaseOutcome>> = (0..n).map(|_| None).collect();
             for (&i, o) in eligible.iter().zip(outcomes) {
                 by_case[i] = Some(o);
@@ -78,5 +78,5 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
             }
         }
     }
-    reconcile(&tf.knownfails, BACKEND, stage.name(), &scores)
+    reconcile(&tf.knownfails, h.lang.name(), stage.name(), &scores)
 }

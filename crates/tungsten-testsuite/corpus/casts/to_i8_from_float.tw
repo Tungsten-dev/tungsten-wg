@@ -1,5 +1,6 @@
 // A float cast to i8 goes through i32 and then truncates, like Java (byte); it doesn't saturate.
 @knownfail(rust, "float to i8 casts saturate in Rust instead of going through i32 like Java")
+@knownfail(java, "the Java backend clamps float to i8 casts to -128..127 (Rust saturating semantics) instead of truncating through int like the interpreter")
 program {
     fn run() -> [i8; 1] {
         return [(300.0 as i8)];

@@ -968,6 +968,7 @@ dependencies = [
  "tungsten-core",
  "tungsten-interface",
  "tungsten-ir",
+ "tungsten-java",
  "tungsten-optimizer",
  "tungsten-parse",
  "tungsten-rust",

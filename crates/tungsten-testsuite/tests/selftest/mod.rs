@@ -3,6 +3,8 @@
 //! Each test feeds a stub driver (hand-written Rust, standing in for generated code) through the
 //! real build, fallback, process and scoring code, and checks the verdict.
 
+mod java;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +14,7 @@ use tungsten_testsuite::compare::{Verdict, score_case};
 use tungsten_testsuite::corpus::load_source;
 use tungsten_testsuite::env::TestEnv;
 use tungsten_testsuite::harness::batch::{Artifact, Harness, TestSource, cache_key};
-use tungsten_testsuite::harness::process::{CaseOutcome, run_cases_with};
+use tungsten_testsuite::harness::process::{CaseOutcome, run_cases_cmd};
 use tungsten_testsuite::harness::protocol::TestIo;
 use tungsten_testsuite::harness::rust::{RUNTIME_FILES, records_source};
 use tungsten_testsuite::knownfail::{CaseScore, reconcile};
@@ -20,6 +22,7 @@ use tungsten_testsuite::oracle;
 
 const SHORT: Duration = Duration::from_millis(1500);
 const NO_STARTUP: Duration = Duration::from_millis(500);
+const JAVA_STARTUP: Duration = Duration::from_secs(10);
 
 fn program(expr: &str, origins: &[f64]) -> String {
     let mut s = format!(
@@ -52,13 +55,25 @@ fn ok_f64(bits: u64) -> String {
 /// Builds `stub`, runs the cases of `src` through it and scores each.
 fn run_stub(h: &Harness, src: &str, body: &str, timeout: Duration) -> Result<(Vec<CaseOutcome>, Vec<Verdict>), Failed> {
     let env = TestEnv::new();
+    let records = records_source(env.spec());
+    run_stub_with(h, src, stub("t_selftest", body), &records, timeout)
+}
+
+/// `run_stub` for a prebuilt stub (any language) and its records.
+fn run_stub_with(
+    h: &Harness,
+    src: &str,
+    t: TestSource,
+    records: &str,
+    timeout: Duration,
+) -> Result<(Vec<CaseOutcome>, Vec<Verdict>), Failed> {
+    let env = TestEnv::new();
     let tf = load_source(src, &env)?;
     let run = oracle::run_all(&tf, &env)?;
     let io = TestIo::from_program(&tf.program)?;
-    let t = stub("t_selftest", body);
-    let arts = h.build_tests(&records_source(env.spec()), std::slice::from_ref(&t));
-    let Artifact::Binary { path, id } = &arts["t_selftest"] else {
-        return Err(Failed::from(format!("the stub didn't build: {:?}", arts["t_selftest"])));
+    let arts = h.build_tests(records, std::slice::from_ref(&t));
+    let Artifact::Binary { path, id } = &arts[&t.name] else {
+        return Err(Failed::from(format!("the stub didn't build: {:?}", arts[&t.name])));
     };
     let mut requests = vec![];
     for i in 0..tf.cases.len() {
@@ -66,7 +81,9 @@ fn run_stub(h: &Harness, src: &str, body: &str, timeout: Duration) -> Result<(Ve
         let c = &tf.cases[i];
         requests.push(io.encode_request(&env, c.origin, c.seed, &named.hosts)?);
     }
-    let outcomes = run_cases_with(path, id, &requests, io.response_bytes(&env)?, timeout, NO_STARTUP);
+    let make = || h.command(path, id);
+    let startup = if h.lang == tungsten_testsuite::harness::batch::Lang::Java { JAVA_STARTUP } else { NO_STARTUP };
+    let outcomes = run_cases_cmd(&make, &requests, io.response_bytes(&env)?, timeout, startup);
     let verdicts = outcomes
         .iter()
         .enumerate()
@@ -89,10 +106,11 @@ fn expect_pass(v: &Verdict) -> Result<(), Failed> {
     }
 }
 
-pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
+pub fn trials(h: Option<Arc<Harness>>, jh: Option<Arc<Harness>>) -> Vec<Trial> {
     let mut out = vec![];
     // The cache checks that need no compiler.
     out.push(Trial::test("selftest::cache_key_tracks_inputs", cache_key_tracks_inputs));
+    out.extend(java::trials(jh));
     let Some(h) = h else { return out };
     macro_rules! t {
         ($name:literal, $f:expr) => {{
@@ -191,10 +209,12 @@ fn second_build_is_cached(h: &Harness) -> Result<(), Failed> {
     let records = records_source(env.spec());
     // A unique body so earlier runs of other selftests can't be what is cached.
     let t = stub("t_cached", &ok_f64(0xcafe));
-    h.build_tests(&records, std::slice::from_ref(&t));
-    let after_first = h.builds.load(std::sync::atomic::Ordering::SeqCst);
-    h.build_tests(&records, std::slice::from_ref(&t));
-    let after_second = h.builds.load(std::sync::atomic::Ordering::SeqCst);
+    // A harness of its own, so parallel selftests don't move the build counter.
+    let own = Harness::new(h.cache_root.clone(), false).map_err(Failed::from)?;
+    own.build_tests(&records, std::slice::from_ref(&t));
+    let after_first = own.builds.load(std::sync::atomic::Ordering::SeqCst);
+    own.build_tests(&records, std::slice::from_ref(&t));
+    let after_second = own.builds.load(std::sync::atomic::Ordering::SeqCst);
     if after_first == after_second { Ok(()) } else { Err(Failed::from("the second build invoked the compiler")) }
 }
 
