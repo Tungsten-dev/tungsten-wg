@@ -76,7 +76,7 @@ location and calls `__trap()`. Release output contains no check code.
 
 ## Runtime contract (`tw::`)
 
-The runtime is not in the repo yet; it moves here once the intrinsic set stabilizes. Until then a
+The production runtime is not in the repo yet (`../cuda-density`); the testsuite has its own toy-table version in `crates/tungsten-testsuite/runtime/cuda/tw/`; it moves here once the intrinsic set stabilizes. Until then a
 missing extern is a compile error in the consumer's build. Semantics follow the Rust runtime, not
 vanilla Java. `runtime_include` (default `tw/tungsten_runtime.cuh`) plus the profile header,
 next to it, must provide:
@@ -128,7 +128,7 @@ next to it, must provide:
 | Batching | One origin per call, async on a per-`Orchestration` stream; no per-wave syncs. | The old generator's per-wave `cudaStreamSynchronize`. |
 | AST | Own owned AST in `model/`, like `tungsten-java`. | Porting `old/cuda/` (reference only). |
 | Inlining | Plain `__device__` by default, `InlinePolicy` overrides. | Forcing inlining: let nvcc decide. |
-| Testing | Text-level smoke tests here; GPU validation downstream in `tungsten-mc-compile`. | nvcc/GPU tests in this repo. |
+| Testing | Text-level smoke tests here; GPU differential tests in `tungsten-testsuite` (local, needs nvcc and a GPU); more downstream in `tungsten-mc-compile`. | nvcc/GPU tests in this crate. |
 
 ## Open questions
 

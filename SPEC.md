@@ -1,6 +1,6 @@
 # `tungsten-testsuite`: differential test harness, corpus and runtimes
 
-Status: approved design; milestones 1 and 2 are implemented (§14). This implements `TESTING.md` §9–§12 and the
+Status: approved design; milestones 1, 2, 3 and 5 are implemented (§14). This implements `TESTING.md` §9–§12 and the
 `tungsten-testsuite` entry in §3. `TESTING.md` remains the normative source for semantics (§5, §6)
 and the text format (§8, plus `crates/tungsten-parse/SPEC.md`). The amendments in §10 below have
 already been applied to it.
@@ -525,8 +525,7 @@ The harness itself must be shown to detect failures, or a green run means nothin
 - Inlining with `@knownfail` has no interpreter-level escape hatch by design (§3.3). If a known inliner
   bug has to wait for a long fix, a `stage=inlined` skip could be added.
 - Rust and Java compile time for a whole batch is unmeasured. If a directory becomes slow, split it.
-- CUDA specifics (host-driver layout, GPU job limit) get settled at milestone 5, within the protocol
-  above.
+- ~~CUDA specifics (host-driver layout, GPU job limit)~~ Settled in milestone 5 (§14).
 
 ## 14. Implementation notes
 
@@ -634,3 +633,47 @@ trials, the Java selftests, and `.github/workflows/test.yml`. Details:
 - **Gaps.** 8 corpus files carry `@knownfail(java, ...)` (see `PAPER.md`). The before/after diff of the
   generated Java across the `entry_method_names` extraction was done: 118 outputs (59 files, both stages; 14 are the backend panics logged in `PAPER.md`), byte-identical.
 
+
+### Milestone 5 (CUDA)
+
+Implemented: `entry_base_names`, the header-only runtime (`runtime/cuda/tw/`), `harness/cuda.rs` (records,
+host driver, `main.cu`), `Lang::Cuda` with `Harness::new_cuda` and `probe_cuda`, error-case skipping, GPU
+serialization, the `::cuda::original` and `::cuda::inlined` trials, and the CUDA selftests
+(`tests/selftest/cuda.rs`). Details and decisions:
+
+- **`entry_base_names(program, rules, used)`** in `tungsten_interface::naming` replaces the inline
+  `unique(unit_base_name)` loop of `tungsten-cuda/src/orchestration.rs`; the driver uses it too. The generated
+  CUDA for the whole corpus is unchanged (cache keys of the batches did not move, so nothing was rebuilt).
+- **Runtime.** Vector operators, `Array`, `Config`, `PositionIterator` and the saturating casts follow the
+  production runtime in `../cuda-density/src/tw/`. Its Perlin and Base3D samplers and Minecraft externs are
+  not used: the interpreter compares against the toy tables (§5.3), so `tungsten_runtime.cuh` has the toy
+  `PerlinNoiseSampler { perm[256] }` and `InterpolatedNoiseSampler { state }` and `profile_exact.cuh` the
+  registry externs (Java `min`/`max`, canonical-NaN bit casts). Everything is `__host__ __device__`, so the
+  selftests check goldens on both sides. `tw::f2i8` clamps, as the CUDA README says.
+- **Host-driver layout (settled).** One `nvcc` run per test builds `t_<hash>.cu`, which includes
+  `density.cu`, `orchestration.cu` and a generated driver, in the namespace `t_<hash>` (also the
+  `CudaConfig::namespace`, so kernel symbols are `t_<hash>_...`). No `-rdc`. A generated `main.cu` dispatches
+  on the test id. The objects are cached by content under `tw-cache/cuda/obj/` and linked per batch, so the
+  per-test fallback of §7.2 costs a link, not a recompile. The driver creates a fresh `Orchestration` per
+  case, enqueues every entry, syncs once and encodes the pinned results. Records are `tw/records.cuh`,
+  generated from `registry.toml`.
+- **Flags.** `-std=c++20 -O3 -w --fmad=false --prec-div=true --prec-sqrt=true --ftz=false -arch=sm_XY`
+  (compute capability of GPU 0; the nvcc version, GPU list and arch are in the cache key). No
+  `--use_fast_math`. `debug_checks` stay off because erroring cases are not run.
+- **Error-case skipping.** `oracle::skipped_for_backend(result, backend)`: `OutOfFuel` everywhere, and on
+  CUDA any case with an interpreter cell error or const/input failure. Such cases are `Skipped` even when the
+  build fails (§6.3 says a build failure fails every case that would have run).
+- **Sticky errors.** The driver answers a CUDA error with a kind-3 failure and exits. `process::run_cases_opts`
+  has `restart_after_failure`, which kills the process after a reported failure so the next case starts
+  clean (selftest `device_trap_ends_process_and_resumes` uses a real `__trap`).
+- **GPU job limit (settled).** One global lock around the child-process phase of a CUDA trial; builds
+  are CPU-only and run in parallel (up to 8 `nvcc` at once).
+- **Cost.** A cold run of the whole corpus on both stages takes about 45 s on a GTX 1650 Ti (16 cores);
+  warm, about 25 s, most of it CUDA context creation per process.
+- **Validation.** CUDA golden bytes, toy-table goldens (host and device), `runtime_coverage` (every extern
+  called in a kernel), stub-driver selftests (wrong value, sign of zero, NaN payloads, crash, hang, truncated
+  response, resume after crash, build error in one test, cache), and a mutation check on the real path
+  (`copysign` arguments swapped in `profile_exact.cuh`: `externs/math_f64` went red).
+- **Gaps.** One corpus file carries `@knownfail(cuda, ...)`: `casts/to_i8_from_float` (see `PAPER.md`). The
+  other 58 files agree bit for bit on both stages; CUDA is the only backend with correct integer wrapping,
+  masked shifts and `>>>` so far.

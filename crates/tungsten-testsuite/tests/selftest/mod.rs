@@ -3,6 +3,7 @@
 //! Each test feeds a stub driver (hand-written Rust, standing in for generated code) through the
 //! real build, fallback, process and scoring code, and checks the verdict.
 
+mod cuda;
 mod java;
 
 use std::collections::BTreeMap;
@@ -14,7 +15,7 @@ use tungsten_testsuite::compare::{Verdict, score_case};
 use tungsten_testsuite::corpus::load_source;
 use tungsten_testsuite::env::TestEnv;
 use tungsten_testsuite::harness::batch::{Artifact, Harness, TestSource, cache_key};
-use tungsten_testsuite::harness::process::{CaseOutcome, run_cases_cmd};
+use tungsten_testsuite::harness::process::{CaseOutcome, run_cases_opts};
 use tungsten_testsuite::harness::protocol::TestIo;
 use tungsten_testsuite::harness::rust::{RUNTIME_FILES, records_source};
 use tungsten_testsuite::knownfail::{CaseScore, reconcile};
@@ -82,8 +83,12 @@ fn run_stub_with(
         requests.push(io.encode_request(&env, c.origin, c.seed, &named.hosts)?);
     }
     let make = || h.command(path, id);
-    let startup = if h.lang == tungsten_testsuite::harness::batch::Lang::Java { JAVA_STARTUP } else { NO_STARTUP };
-    let outcomes = run_cases_cmd(&make, &requests, io.response_bytes(&env)?, timeout, startup);
+    let startup = match h.lang {
+        tungsten_testsuite::harness::batch::Lang::Java | tungsten_testsuite::harness::batch::Lang::Cuda => JAVA_STARTUP,
+        _ => NO_STARTUP,
+    };
+    let outcomes =
+        run_cases_opts(&make, &requests, io.response_bytes(&env)?, timeout, startup, h.restart_after_failure());
     let verdicts = outcomes
         .iter()
         .enumerate()
@@ -106,11 +111,12 @@ fn expect_pass(v: &Verdict) -> Result<(), Failed> {
     }
 }
 
-pub fn trials(h: Option<Arc<Harness>>, jh: Option<Arc<Harness>>) -> Vec<Trial> {
+pub fn trials(h: Option<Arc<Harness>>, jh: Option<Arc<Harness>>, ch: Option<Arc<Harness>>) -> Vec<Trial> {
     let mut out = vec![];
     // The cache checks that need no compiler.
     out.push(Trial::test("selftest::cache_key_tracks_inputs", cache_key_tracks_inputs));
     out.extend(java::trials(jh));
+    out.extend(cuda::trials(ch));
     let Some(h) = h else { return out };
     macro_rules! t {
         ($name:literal, $f:expr) => {{

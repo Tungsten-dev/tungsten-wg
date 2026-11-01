@@ -16,6 +16,7 @@ tungsten-interface.workspace = true
 tungsten-optimizer.workspace = true
 tungsten-rust.workspace = true
 tungsten-java.workspace = true
+tungsten-cuda.workspace = true
 md5.workspace = true
 serde.workspace = true
 toml.workspace = true

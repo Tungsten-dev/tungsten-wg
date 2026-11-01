@@ -30,10 +30,10 @@ fn main() {
     let env = TestEnv::new();
     let mut trials = vec![];
 
-    // One harness per selected backend. Java and CUDA arrive in milestones 3 and 5.
+    // One harness per selected backend.
     let cache = || std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     let mut backends: Vec<(Lang, bool, Result<Arc<Harness>, String>)> = vec![];
-    for lang in [Lang::Rust, Lang::Java] {
+    for lang in [Lang::Rust, Lang::Java, Lang::Cuda] {
         let name = lang.name();
         let wanted = sel.backends.as_ref().is_none_or(|b| b.iter().any(|x| x == name));
         let required = sel.require.iter().any(|x| x == name);
@@ -41,6 +41,7 @@ fn main() {
             match lang {
                 Lang::Rust => Harness::new(cache(), sel.large),
                 Lang::Java => Harness::new_java(cache(), sel.large),
+                Lang::Cuda => Harness::new_cuda(cache(), sel.large),
             }
             .map(Arc::new)
         } else {
@@ -105,6 +106,7 @@ fn main() {
     trials.extend(selftest::trials(
         harness.as_ref().ok().cloned(),
         backends.iter().find(|(l, _, _)| *l == Lang::Java).and_then(|(_, _, h)| h.as_ref().ok().cloned()),
+        backends.iter().find(|(l, _, _)| *l == Lang::Cuda).and_then(|(_, _, h)| h.as_ref().ok().cloned()),
     ));
     libtest_mimic::run(&args, trials).exit();
 }

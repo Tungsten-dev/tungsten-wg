@@ -8,10 +8,10 @@ the testing policy in `TESTING.md`.
 
 ## Status
 
-Milestones 1 to 3 are built. The suite tests the parser, the lowering, the interpreter and the
-inliner, and it compiles every program with the Rust and Java backends, runs it out of process and compares
-every value with the interpreter, on the original and on the inlined program. CUDA is the next
-milestone; the random program generator is out of scope for now (`SPEC.md` §9.4).
+Milestones 1 to 3 and 5 are built. The suite tests the parser, the lowering, the interpreter and the
+inliner, and it compiles every program with the Rust, Java and CUDA backends, runs it out of process and compares
+every value with the interpreter, on the original and on the inlined program. CUDA runs locally only
+(it needs `nvcc` and a GPU); the random program generator is out of scope for now (`SPEC.md` §9.4).
 
 ## What it checks
 
@@ -43,8 +43,9 @@ If you change the lowering on purpose, the snapshots will differ. Review and acc
 with `INSTA_UPDATE=always cargo test -p tungsten-testsuite --test lowering`, then look at the diff
 in `tests/snapshots/`. CI should set `INSTA_UPDATE=no`.
 
-Environment variables (see `SPEC.md` §3.2). Only `rust` runs so far; `java` and `cuda` are accepted
-names but have no trials yet:
+Environment variables (see `SPEC.md` §3.2). `cuda` is added by default when `nvcc` (`$NVCC`, else `PATH`,
+else `/usr/local/cuda/bin/nvcc`) and a GPU in `nvidia-smi -L` are found. CUDA builds use
+`-arch=sm_XY` of GPU 0 and `--fmad=false --prec-div=true --prec-sqrt=true --ftz=false`:
 
 - `TW_BACKENDS`: comma list from `rust`, `java`, `cuda`. An unknown name fails the run.
 - `TW_REQUIRE`: backends whose missing toolchain should fail the run. Without it, a missing `rustc`
@@ -118,5 +119,9 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   compiles the same arithmetic. The tests check exact points and agreement with libm to 1e-9.
 - **Known backend gaps.** Integer overflow, `>>>`, float to `i8` casts and failing constants on the
   Rust backend, and a panic and a cast bug on the Java backend, are marked `@knownfail` (`grep -rl @knownfail corpus`); `PAPER.md` has the log.
-- **What is not covered yet.** CUDA is the next milestone (`SPEC.md` §9.4). The random program generator
-  is out of scope for now.
+- **CUDA.** The runtime is header-only in `runtime/cuda/tw/` (core types follow `../cuda-density`, the
+  samplers and externs are the registry's toy versions). Each test is one `nvcc` run over a `t_<hash>.cu`
+  that includes the four generated files and a generated host driver; objects are cached per test and
+  linked into one binary. Cases where the interpreter errors are not run on CUDA, and GPU jobs run one
+  at a time. A reported failure ends the process, since device errors are sticky.
+- **What is not covered yet.** The random program generator is out of scope for now.

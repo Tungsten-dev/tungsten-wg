@@ -131,9 +131,15 @@ pub fn expects_out_of_fuel(tf: &TestFile, i: usize) -> bool {
         .any(|e| e.case == i && matches!(&e.kind, ExpectKind::Error(k) if k == "OutOfFuel"))
 }
 
-/// Cases a backend must not be sent (SPEC §4.1).
+/// Cases no backend must be sent (SPEC §4.1).
 pub fn skipped_for_backends(r: &CaseResult) -> bool {
     has_out_of_fuel(r)
+}
+
+/// Cases `backend` must not be sent: `OutOfFuel` everywhere, and on CUDA every case where the
+/// interpreter errors, because trap errors are sticky and cost a process (SPEC §6.3).
+pub fn skipped_for_backend(r: &CaseResult, backend: &str) -> bool {
+    skipped_for_backends(r) || (backend == "cuda" && !(r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())))
 }
 
 fn flat(c: [i32; 3], dims: (i32, i32, i32)) -> usize {

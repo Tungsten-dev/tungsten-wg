@@ -966,6 +966,7 @@ dependencies = [
  "toml",
  "tungsten-check",
  "tungsten-core",
+ "tungsten-cuda",
  "tungsten-interface",
  "tungsten-ir",
  "tungsten-java",

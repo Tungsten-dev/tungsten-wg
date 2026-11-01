@@ -169,6 +169,12 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
 - 2026-11-01 [bug] The Java backend clamps float to `i8` casts to -128..127 (`Math.min`/`Math.max` around the
   `int` cast) as if it were Rust's saturating `as i8`, but the IR goes through `i32` and truncates (44 for
   `300.0`). The comment in `expression.rs` that justifies it is wrong. Evidence: `corpus/casts/to_i8_from_float.tw`.
+- 2026-11-01 [bug] The CUDA backend casts a float to `i8` through `tw::f2i8`, which its README defines as
+  clamping to -128..127 ("where Java `(byte)` would wrap"), but the IR goes through `i32` and truncates (44
+  for `300.0`). Same defect as Rust and Java. Evidence: `corpus/casts/to_i8_from_float.tw`.
+- 2026-11-01 [design] First CUDA differential run (GTX 1650 Ti, nvcc 13.4, exact profile): 58 of 59 corpus
+  files agree bit for bit on both stages with no backend change; integer wrapping, masked shifts and `>>>`
+  that Rust gets wrong are right in CUDA. Cases where the interpreter errors are not run on CUDA.
 
 ## Maintaining this file
 

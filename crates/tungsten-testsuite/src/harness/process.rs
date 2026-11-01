@@ -149,6 +149,19 @@ pub fn run_cases_cmd(
     timeout: Duration,
     startup: Duration,
 ) -> Vec<CaseOutcome> {
+    run_cases_opts(make, requests, body_len, timeout, startup, false)
+}
+
+/// `run_cases_cmd`; with `restart_after_failure` a reported failure also ends the process, so the
+/// next case runs in a new one (CUDA: device errors are sticky).
+pub fn run_cases_opts(
+    make: &dyn Fn() -> Command,
+    requests: &[Vec<u8>],
+    body_len: usize,
+    timeout: Duration,
+    startup: Duration,
+    restart_after_failure: bool,
+) -> Vec<CaseOutcome> {
     let mut outcomes = Vec::with_capacity(requests.len());
     let mut proc: Option<Running> = None;
     let mut first_in_process = true;
@@ -186,7 +199,14 @@ pub fn run_cases_cmd(
         };
         match msg {
             Some(Message::Ok(body)) => outcomes.push(CaseOutcome::Returned(body)),
-            Some(Message::Failed(kind, message)) => outcomes.push(CaseOutcome::Failed { kind, message }),
+            Some(Message::Failed(kind, message)) => {
+                outcomes.push(CaseOutcome::Failed { kind, message });
+                if restart_after_failure {
+                    if let Some(mut p) = proc.take() {
+                        p.kill();
+                    }
+                }
+            }
             Some(Message::Dead(why)) => {
                 let mut p = proc.take().unwrap();
                 let malformed = why.starts_with("unknown response tag") || why.contains("inside a");

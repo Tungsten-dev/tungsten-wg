@@ -9,7 +9,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::java;
+use super::{cuda, java};
 use super::rust::{RUNTIME_FILES, RUSTC_FLAGS, generate_test, main_source, records_source, test_id};
 use crate::corpus::{self, CorpusFile};
 use crate::env::TestEnv;
@@ -20,6 +20,7 @@ use crate::oracle;
 pub enum Lang {
     Rust,
     Java,
+    Cuda,
 }
 
 impl Lang {
@@ -28,6 +29,7 @@ impl Lang {
         match self {
             Lang::Rust => "rust",
             Lang::Java => "java",
+            Lang::Cuda => "cuda",
         }
     }
 }
@@ -72,6 +74,8 @@ pub struct Harness {
     pub compiler_version: String,
     /// The `java` launcher (Java harnesses only).
     pub java: String,
+    /// The `-arch=sm_XY` flag (CUDA harnesses only).
+    pub arch: String,
     pub large: bool,
     /// Number of compiler invocations so far (the cache check of SPEC §12 reads it).
     pub builds: AtomicUsize,
@@ -95,6 +99,40 @@ pub fn probe_rustc(rustc: &str) -> Result<String, String> {
 /// `$JAVAC` or `javac`.
 pub fn javac_command() -> String {
     std::env::var("JAVAC").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "javac".into())
+}
+
+/// `$NVCC` or `nvcc`, falling back to `/usr/local/cuda/bin/nvcc` when `nvcc` is not on the `PATH`.
+pub fn nvcc_command() -> String {
+    if let Some(v) = std::env::var("NVCC").ok().filter(|s| !s.is_empty()) {
+        return v;
+    }
+    if Command::new("nvcc").arg("--version").output().is_err() && std::path::Path::new("/usr/local/cuda/bin/nvcc").exists() {
+        return "/usr/local/cuda/bin/nvcc".into();
+    }
+    "nvcc".into()
+}
+
+/// Checks that `nvcc` works and `nvidia-smi -L` lists a GPU. Returns a description that includes the
+/// compiler version and the architecture (`-arch=sm_XY` of GPU 0), and the `-arch` flag.
+pub fn probe_cuda(nvcc: &str) -> Result<(String, String), String> {
+    let out = Command::new(nvcc).arg("--version").output().map_err(|e| format!("`{nvcc}`: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("`{nvcc} --version` failed"));
+    }
+    let version = String::from_utf8_lossy(&out.stdout).into_owned();
+    let smi = Command::new("nvidia-smi").arg("-L").output().map_err(|e| format!("`nvidia-smi`: {e}"))?;
+    let gpus = String::from_utf8_lossy(&smi.stdout).into_owned();
+    if !smi.status.success() || !gpus.lines().any(|l| l.starts_with("GPU ")) {
+        return Err("`nvidia-smi -L` lists no GPU".into());
+    }
+    let cap = Command::new("nvidia-smi")
+        .args(["--query-gpu=compute_cap", "--format=csv,noheader"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).lines().next().map(|l| l.trim().replace('.', "")))
+        .filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_ascii_digit()));
+    let arch = cap.map(|c| format!("-arch=sm_{c}")).unwrap_or_else(|| "-arch=native".into());
+    Ok((format!("{}\n{}\n{arch}", version.trim(), gpus.trim()), arch))
 }
 
 /// `$JAVA` or `java`.
@@ -178,6 +216,7 @@ impl Harness {
             compiler,
             compiler_version,
             java: String::new(),
+            arch: String::new(),
             large,
             builds: AtomicUsize::new(0),
             batches: Mutex::new(HashMap::new()),
@@ -195,10 +234,34 @@ impl Harness {
             compiler,
             compiler_version,
             java,
+            arch: String::new(),
             large,
             builds: AtomicUsize::new(0),
             batches: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// A CUDA harness. `Err` if `nvcc` is missing or no GPU is listed.
+    pub fn new_cuda(cache_root: PathBuf, large: bool) -> Result<Harness, String> {
+        let compiler = nvcc_command();
+        let (compiler_version, arch) = probe_cuda(&compiler)?;
+        Ok(Harness {
+            lang: Lang::Cuda,
+            cache_root,
+            compiler,
+            compiler_version,
+            java: String::new(),
+            arch,
+            large,
+            builds: AtomicUsize::new(0),
+            batches: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Whether a `Failed` response ends the process, so the next case needs a new one (CUDA: a
+    /// device error is sticky, SPEC §7.3).
+    pub fn restart_after_failure(&self) -> bool {
+        self.lang == Lang::Cuda
     }
 
     fn lang_dir(&self) -> PathBuf {
@@ -208,7 +271,7 @@ impl Harness {
     /// The command running test `id` of the artifact at `path`.
     pub fn command(&self, path: &std::path::Path, id: &str) -> Command {
         match self.lang {
-            Lang::Rust => {
+            Lang::Rust | Lang::Cuda => {
                 let mut c = Command::new(path);
                 c.arg(id);
                 c
@@ -253,6 +316,7 @@ impl Harness {
         let records = match self.lang {
             Lang::Rust => records_source(env.spec()),
             Lang::Java => java::records_source(env.spec()),
+            Lang::Cuda => cuda::records_source(env.spec()),
         };
         result.extend(self.build_tests(&records, &tests));
         result
@@ -293,7 +357,7 @@ impl Harness {
             return Ok(None);
         }
         let Ok(run) = oracle::run_all(&tf, &env) else { return Ok(None) };
-        if run.results.iter().all(oracle::skipped_for_backends) {
+        if run.results.iter().all(|r| oracle::skipped_for_backend(r, self.lang.name())) {
             return Ok(None);
         }
         let mut program = tf.program.clone();
@@ -304,6 +368,7 @@ impl Harness {
         let source = match self.lang {
             Lang::Rust => generate_test(&program, &env)?,
             Lang::Java => java::generate_test(&program, &env, &id)?,
+            Lang::Cuda => cuda::generate_test(&program, &env, &id)?,
         };
         Ok(Some(TestSource { name: file.name.clone(), id, source }))
     }
@@ -314,12 +379,13 @@ impl Harness {
         let (flags, runtime) = match self.lang {
             Lang::Rust => (RUSTC_FLAGS, RUNTIME_FILES),
             Lang::Java => (java::JAVAC_FLAGS, java::RUNTIME_FILES),
+            Lang::Cuda => (cuda::NVCC_FLAGS, cuda::RUNTIME_FILES),
         };
         let key = key_of(&self.compiler_version, flags, runtime, records, tests);
         let root = self.lang_dir();
         let final_dir = root.join(&key);
         let artifact = final_dir.join(match self.lang {
-            Lang::Rust => "bin",
+            Lang::Rust | Lang::Cuda => "bin",
             Lang::Java => "classes",
         });
         if artifact.exists() {
@@ -333,6 +399,7 @@ impl Harness {
         let output = match self.lang {
             Lang::Rust => self.compile_rust(&tmp, records, tests),
             Lang::Java => self.compile_java(&tmp, records, tests),
+            Lang::Cuda => self.compile_cuda(&tmp, records, tests),
         };
         let out = match output {
             Ok(o) => o,
@@ -377,6 +444,113 @@ impl Harness {
             .arg(tmp.join("main.rs"))
             .output()
             .map_err(|e| format!("could not run {}: {e}", self.compiler))
+    }
+
+    /// One `nvcc` run per test (parallel, objects cached by content), then one link.
+    fn compile_cuda(&self, tmp: &std::path::Path, records: &str, tests: &[&TestSource]) -> Result<std::process::Output, String> {
+        use std::os::unix::process::ExitStatusExt;
+        let io = |e: std::io::Error| format!("io error: {e}");
+        let inc = tmp.join("inc");
+        let put = |rel: &str, text: &str| -> Result<(), String> {
+            let path = inc.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(io)?;
+            std::fs::write(&path, text).map_err(io)
+        };
+        for (name, text) in cuda::RUNTIME_FILES {
+            put(name, text)?;
+        }
+        put("tw/records.cuh", records)?;
+        let ids: Vec<String> = tests.iter().map(|t| t.id.clone()).collect();
+        std::fs::write(tmp.join("main.cu"), cuda::main_source(&ids)).map_err(io)?;
+        for t in tests {
+            for (name, text) in java::split_files(&t.source) {
+                put(&name, &text)?;
+            }
+        }
+        let fail = |text: String| std::process::Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: vec![],
+            stderr: text.into_bytes(),
+        };
+        let obj_dir = self.lang_dir().join("obj");
+        std::fs::create_dir_all(&obj_dir).map_err(io)?;
+        let flag_key = format!("{} {}", cuda::NVCC_FLAGS.join(" "), self.arch);
+        let obj_key = |t: &TestSource| {
+            let mut ctx = md5::Context::new();
+            ctx.consume(self.compiler_version.as_bytes());
+            ctx.consume(flag_key.as_bytes());
+            for (n, text) in cuda::RUNTIME_FILES {
+                ctx.consume(n.as_bytes());
+                ctx.consume(text.as_bytes());
+            }
+            ctx.consume(records.as_bytes());
+            ctx.consume(t.source.as_bytes());
+            format!("{:x}", ctx.finalize())
+        };
+        let nvcc = |args: &[&std::ffi::OsStr]| {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Command::new(&self.compiler)
+                .args(cuda::NVCC_FLAGS)
+                .arg(&self.arch)
+                .args(args)
+                .output()
+                .map_err(|e| format!("could not run {}: {e}", self.compiler))
+        };
+        let next = AtomicUsize::new(0);
+        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(1, 8).min(tests.len().max(1));
+        let results: Mutex<Vec<(usize, Result<PathBuf, String>)>> = Mutex::new(vec![]);
+        std::thread::scope(|s| {
+            for _ in 0..workers {
+                s.spawn(|| {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        let Some(t) = tests.get(i) else { return };
+                        let key = obj_key(t);
+                        let obj = obj_dir.join(format!("{key}.o"));
+                        let r = if obj.exists() {
+                            Ok(obj)
+                        } else {
+                            let part = obj_dir.join(format!("{key}.tmp-{}-{i}.o", std::process::id()));
+                            let src = inc.join(format!("{}.cu", t.id));
+                            let inc_flag = format!("-I{}", inc.display());
+                            let out = nvcc(&["-c".as_ref(), inc_flag.as_ref(), src.as_os_str(), "-o".as_ref(), part.as_os_str()]);
+                            match out {
+                                Ok(o) if o.status.success() => match std::fs::rename(&part, &obj) {
+                                    Ok(()) => Ok(obj),
+                                    Err(_) if obj.exists() => Ok(obj),
+                                    Err(e) => Err(format!("could not cache the object of {}: {e}", t.id)),
+                                },
+                                Ok(o) => Err(format!(
+                                    "{}:\n{}{}",
+                                    t.id,
+                                    String::from_utf8_lossy(&o.stderr),
+                                    String::from_utf8_lossy(&o.stdout)
+                                )),
+                                Err(e) => Err(e),
+                            }
+                        };
+                        results.lock().unwrap().push((i, r));
+                    }
+                });
+            }
+        });
+        let mut results = results.into_inner().unwrap();
+        results.sort_by_key(|(i, _)| *i);
+        let errors: Vec<String> = results.iter().filter_map(|(_, r)| r.as_ref().err().cloned()).collect();
+        if !errors.is_empty() {
+            return Ok(fail(errors.join("\n")));
+        }
+        let main_obj = tmp.join("main.o");
+        let o = nvcc(&["-c".as_ref(), tmp.join("main.cu").as_os_str(), "-o".as_ref(), main_obj.as_os_str()])?;
+        if !o.status.success() {
+            return Ok(o);
+        }
+        let mut link: Vec<std::ffi::OsString> = vec![main_obj.into_os_string()];
+        link.extend(results.into_iter().map(|(_, r)| r.unwrap().into_os_string()));
+        link.push("-o".into());
+        link.push(tmp.join("bin").into_os_string());
+        let refs: Vec<&std::ffi::OsStr> = link.iter().map(|s| s.as_os_str()).collect();
+        nvcc(&refs)
     }
 
     fn compile_java(&self, tmp: &std::path::Path, records: &str, tests: &[&TestSource]) -> Result<std::process::Output, String> {
