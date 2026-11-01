@@ -604,6 +604,3 @@ Where the implementation differs from, or fills in, the text above:
   (`tests/permute.rs`). The interpreter and backend comparison needs the testsuite.
   `isomorphic` formats both programs in full, so it is for tests only.
 - **`Expression::Ambient`** was added to `tungsten-ir` as a prerequisite (TESTING.md §4 item 1).
-- **Real tungsten-mc output** can be checked with
-  `TUNGSTEN_PARSE_CORPUS=<dir> cargo test -p tungsten-parse --test legacy -- --ignored`, which
-  round-trips every `.tw` file in the directory, before and after inlining.

@@ -8,10 +8,10 @@ the testing policy in `TESTING.md`.
 
 ## Status
 
-Milestones 1 and 2 are built. The suite tests the parser, the lowering, the interpreter and the
-inliner, and it compiles every program with the Rust backend, runs it out of process and compares
-every value with the interpreter, on the original and on the inlined program. Java, CUDA and the
-random program generator are later milestones (`SPEC.md` §9.4).
+Milestones 1 to 3 are built. The suite tests the parser, the lowering, the interpreter and the
+inliner, and it compiles every program with the Rust and Java backends, runs it out of process and compares
+every value with the interpreter, on the original and on the inlined program. CUDA is the next
+milestone; the random program generator is out of scope for now (`SPEC.md` §9.4).
 
 ## What it checks
 
@@ -117,6 +117,6 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
 - **The prelude.** The transcendentals are series approximations built from `+ - * /`, so every backend
   compiles the same arithmetic. The tests check exact points and agreement with libm to 1e-9.
 - **Known backend gaps.** Integer overflow, `>>>`, float to `i8` casts and failing constants on the
-  Rust backend are marked `@knownfail` (`grep -rl @knownfail corpus`); `PAPER.md` has the log.
-- **What is not covered yet.** Java, the random program generator, CI and CUDA are later milestones in
-  `SPEC.md` §9.4.
+  Rust backend, and a panic and a cast bug on the Java backend, are marked `@knownfail` (`grep -rl @knownfail corpus`); `PAPER.md` has the log.
+- **What is not covered yet.** CUDA is the next milestone (`SPEC.md` §9.4). The random program generator
+  is out of scope for now.

@@ -28,6 +28,8 @@ expectations, the text round-trip, the lowering and the inliner.
 - Verus proofs, or any change to `tungsten-core`.
 - Real noise correctness, which stays with tungsten-mc.
 - Decision traces (§9.1 here) in the first version.
+- Random program testing (L6, §8). Out of scope for now: no generator, no `tests/random.rs`, no
+  `corpus/regressions/` writer. §8 stays as the design for when it is picked up again.
 
 ## 2. Crate layout
 
@@ -37,7 +39,7 @@ crates/tungsten-testsuite/        # publish = false
   registry.toml                   # externs and records (§5)
   prelude/prelude.tw              # sin, cos, exp, log, pow, lerp, smoothstep, as_index, corner*
   corpus/<dir>/**/*.tw            # hand-written; each top-level dir is one batch
-  corpus/regressions/             # shrunk L6 failures
+  corpus/regressions/             # shrunk L6 failures (deferred, §8)
   runtime/rust/{mathf64,utilsf64,externs}.rs
   runtime/java/tungsten/runtime/*.java
   runtime/cuda/tw/*               # milestone 5
@@ -52,14 +54,14 @@ crates/tungsten-testsuite/        # publish = false
     compare.rs                    # scoring (§6.3) and reports
     knownfail.rs                  # reconciliation (§6.4)
     selection.rs                  # TW_BACKENDS, TW_REQUIRE, toolchain probes
-    gen.rs                        # L6 generator (§8)
+    gen.rs                        # L6 generator (§8, deferred)
     harness/
       batch.rs                    # batching, content-hash cache, fallback (§7.2)
       protocol.rs                 # wire format (§7.4)
       process.rs                  # child lifecycle, watchdog, resume (§7.3)
       rust.rs  java.rs  cuda.rs   # driver generator and build command per backend
   tests/
-    roundtrip.rs   lowering.rs   corpus.rs   random.rs   # all harness = false
+    roundtrip.rs   lowering.rs   corpus.rs   random.rs   # all harness = false; random.rs is deferred (§8)
     snapshots/                    # insta
 .github/workflows/test.yml        # new: the repo has no CI yet
 ```
@@ -107,12 +109,12 @@ the file is `@tier(large)` without `TW_LARGE=1`.
 | `TW_BACKENDS` | Comma list of backends to run | `rust,java`, plus `cuda` when `nvcc` and a GPU are detected and the backend's milestone has landed |
 | `TW_REQUIRE` | A listed backend with a missing toolchain fails the run instead of being ignored | empty |
 | `TW_LARGE` | `1` runs `@tier(large)` | off |
-| `TW_FUZZ` | L6 program count; also enables shrinking and writing for non-strict backends | unset |
-| `TW_SEED` | L6 base seed | fixed constant; with `TW_FUZZ`, random and printed |
+| `TW_FUZZ` | (deferred with L6) L6 program count; also enables shrinking and writing for non-strict backends | unset |
+| `TW_SEED` | (deferred with L6) L6 base seed | fixed constant; with `TW_FUZZ`, random and printed |
 | `TW_SHRINK_SECS` | Time budget per shrink | 120 |
 | `TW_SHRINK_COUNT` | Maximum failures shrunk per backend per run | 5 |
 | `TW_TIMEOUT_SECS` | Watchdog per case | 10 (×10 for `@tier(large)`) |
-| `CI` | L6 failures go to the log and an artifact, not the source tree | set by Actions |
+| `CI` | (deferred with L6) L6 failures go to the log and an artifact, not the source tree | set by Actions |
 
 An unknown name in `TW_BACKENDS` or `TW_REQUIRE` fails the run.
 
@@ -358,6 +360,9 @@ whole case succeeds, so partial results can't be observed.
 
 ## 8. L6: random well-typed programs
 
+> **Out of scope for now.** Nothing in this section is implemented or scheduled. The next milestone is
+> CUDA (§9.4 item 5). The text below is the design to start from later.
+
 ### 8.1 Generator
 
 `src/gen.rs` is new, because the `tungsten-parse` test generator doesn't produce well-typed programs.
@@ -444,7 +449,8 @@ Each one lands green.
 2. **Rust differential.** `entry_method_names`, Rust runtime, driver, protocol, batches, fallback,
    watchdog, scoring, knownfail reconciliation. Gaps become `@knownfail`, logged in `PAPER.md`.
 3. **Java differential and CI.** Java runtime and driver, full corpus, workflow.
-4. **L6.** Generator, batch sampling, manual shrinking, regressions, report-only gating.
+4. **L6 (out of scope for now, deferred).** Generator, batch sampling, manual shrinking, regressions,
+   report-only gating. CUDA (5) is done first.
 5. **CUDA.** `tw/` runtime, exact profile, C++ host driver, error-case skipping, GPU serialization.
 
 ## 10. Amendments to `TESTING.md`
@@ -468,7 +474,7 @@ Applied to `TESTING.md`:
 
 | Topic | Decision | Rejected, and why |
 | --- | --- | --- |
-| Scope | Phased: Rust, then Java, then L6, then CUDA, with the design fitting all three | All at once: the largest block of work precedes anything running. Excluding CUDA: risks protocol rework. |
+| Scope | Phased: Rust, then Java, then CUDA (L6 deferred), with the design fitting all of them | All at once: the largest block of work precedes anything running. Excluding CUDA: risks protocol rework. |
 | Build isolation | Batch with per-test fallback | Always per test: too slow across stages and L6. Parsing diagnostics: tied to compiler formats, and one error can hide others. |
 | Build failure on error cases | Always a failure | Accepting when all cases error: real compile bugs pass silently. Matching E0080: ties the harness to rustc codes. |
 | Test runner | `libtest-mimic`, one trial per check | One `#[test]` per level: no per-file filtering. `build.rs` generation: more machinery for the same result. |
@@ -506,7 +512,7 @@ The harness itself must be shown to detect failures, or a green run means nothin
 - **Cache**: a second run performs no builds, and changing a runtime file invalidates the key.
 - **End-to-end**: at milestone 3, the example in `TESTING.md` §8.2 passes through every stage on
   Rust and Java, or has a justified `@knownfail`.
-- **L6**: acceptance rate is 100%, the clean-case floor is asserted, and shrinking is demonstrated
+- **L6** (deferred with §8): acceptance rate is 100%, the clean-case floor is asserted, and shrinking is demonstrated
   against a stub backend with a planted bug.
 
 ## 13. Open items
@@ -601,3 +607,30 @@ a watchdog and crash resume, batches with the content-hash cache and per-test fa
 Gaps found (all `@knownfail(rust, ...)`, logged in `PAPER.md`): integer overflow does not wrap (15 files),
 `>>>` is emitted as `>>` (2 files), float to `i8` casts saturate (1 file), and a failing `const` is a
 build error (1 file).
+
+### Milestone 3 (Java differential and CI)
+
+Implemented: the Java runtime (`runtime/java/tungsten/runtime/`), `harness/java.rs` (records, `Driver`,
+`generate_test`), a `Lang` in `Harness` (`Harness::new` is Rust, `Harness::new_java` is Java; each has its
+own cache under `tw-cache/<lang>/`), `process::run_cases_cmd`, the `::java::original` and `::java::inlined`
+trials, the Java selftests, and `.github/workflows/test.yml`. Details:
+
+- **Runtime.** `Vec3`, `Pos3`, `Config` and `PositionIterator` are vendored unchanged from
+  `tungsten-frontends/tungsten-diff-harness/java_wrapper/runtime`. Its `Helpers` and samplers implement the
+  real Minecraft noise, not the registry externs and toy tables the interpreter uses (§5.3), so they are not
+  used. New: `Helpers` (registry externs and toy table constructors), the toy `PerlinNoiseSampler` and
+  `InterpolatedNoiseSampler`, the six `*Ref` holders, and `Proto` (Reader, Writer, request loop).
+- **Build.** One `javac --release 21` run per `(directory, stage)` batch over a source tree; files of a test
+  are `t_<hash>/Gen.java` (backend output) and `t_<hash>/Driver.java`. Source blobs separate files with
+  `//@@FILE <path>` lines. Run as `java -XX:+UseSerialGC -cp <classes> t_<hash>.Driver`, with
+  `STARTUP_ALLOWANCE` added to the first case of each process.
+- **Failing constants.** `ExceptionInInitializerError` is reported as its cause, and the
+  `NoClassDefFoundError` of later cases as the first cause, so all of them score by the original kind.
+- **Probe.** `javac -version` and `java -version` must report 21 or newer (`$JAVAC` and `$JAVA` override the
+  commands). With `TW_REQUIRE=java` a missing toolchain exits with code 2.
+- **Validation of §12.** Java golden bytes (`selftest::java::golden_bytes`), toy-table goldens
+  (`toy_table_goldens`), `runtime_coverage` (generated from the registry; a missing extern fails to compile),
+  stub-driver selftests, and a mutation check on the real path (a changed `copySign` turns `externs/math_*` red).
+- **Gaps.** 8 corpus files carry `@knownfail(java, ...)` (see `PAPER.md`). The before/after diff of the
+  generated Java across the `entry_method_names` extraction was done: 118 outputs (59 files, both stages; 14 are the backend panics logged in `PAPER.md`), byte-identical.
+

@@ -156,6 +156,19 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
 - 2026-11-01 [design] Host values are bound by name when a case is sent to a backend, so the same case works
   on the inlined program, where host arena order can differ. Evidence: `TestIo::encode_request` in
   `crates/tungsten-testsuite/src/harness/protocol.rs`.
+- 2026-11-01 [eval] First Java differential (testsuite milestone 3): the same corpus on the original and
+  the inlined program. 8 files carry a `@knownfail(java, ...)`, for the two bugs below; every other
+  file agrees with the interpreter bit for bit on both stages. Unlike Rust, integer arithmetic, shifts and
+  failing constants all match. Cold Java run of the corpus (javac batches plus JVM start-ups): about 25 s
+  on this machine. Mutation check: swapping the arguments of `copySign` in the Java runtime turns the
+  `externs/math_*` trials red.
+- 2026-11-01 [bug] The Java backend panics ("cannot derive the element type of an array literal") when an
+  array literal starts with a shift expression: `derive_binop_type` (shared, in `tungsten-rust/src/types.rs`)
+  returns `None` for shift and bitwise operators. Evidence: `corpus/ops/{i8,i64,i32_shift_masked,...}.tw`
+  (7 files, every one a shift in a one-element array).
+- 2026-11-01 [bug] The Java backend clamps float to `i8` casts to -128..127 (`Math.min`/`Math.max` around the
+  `int` cast) as if it were Rust's saturating `as i8`, but the IR goes through `i32` and truncates (44 for
+  `300.0`). The comment in `expression.rs` that justifies it is wrong. Evidence: `corpus/casts/to_i8_from_float.tw`.
 
 ## Maintaining this file
 

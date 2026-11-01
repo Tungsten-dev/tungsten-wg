@@ -56,7 +56,7 @@ New pieces:
 | Backend selection | `TW_BACKENDS` picks backends (default `rust,java`, plus `cuda` when `nvcc` and a GPU are detected). A missing toolchain means ignored tests with a notice, unless the backend is listed in `TW_REQUIRE`, which makes it a failure. |
 | Build failures | A `generate` panic or error, or a failed build, fails every case of that test, including cases where the interpreter errors. |
 | Grid sizes | Small (≤ 4×4×4) by default. `@tier(large)` runs only with `TW_LARGE=1`. |
-| Test levels | Hand-written corpus, differential, optimizer equivalence, random well-typed programs, lowering and round-trip. Interface property tests are out of scope (except the scale-key regression). |
+| Test levels | Hand-written corpus, differential, optimizer equivalence, lowering and round-trip. Random well-typed programs (L6) and interface property tests are out of scope for now (except the scale-key regression). |
 | CI gate | Rust + Java execution of the default tier. CUDA and Verus run locally only. |
 
 ## 3. Crate layout
@@ -87,13 +87,13 @@ crates/tungsten-testsuite/     # milestones 1 and 2 done (Rust differential); fu
   src/env.rs          # tungsten_parse::Env + tungsten_check::Registry
   src/externs.rs      # Externs adapter over runtime/rust, for the interpreter
   src/{oracle,compare,knownfail}.rs  # interpreter runs, scoring, knownfail reconciliation
-  src/gen.rs          # random well-typed program generator (proptest)
+  src/gen.rs          # random well-typed program generator (proptest); out of scope for now
   registry.toml       # extern + extern-type declarations
   prelude/prelude.tw  # sin, cos, exp, lerp, smoothstep, ... in IR
   runtime/{rust,java,cuda}/
   corpus/<dir>/**/*.tw  # hand-written tests; each top-level dir is one batch
-  corpus/regressions/ # shrunk failures from the generator
-  tests/{roundtrip,lowering,corpus,random}.rs  # libtest-mimic, harness = false
+  corpus/regressions/ # shrunk failures from the generator (out of scope for now)
+  tests/{roundtrip,lowering,corpus,random}.rs  # libtest-mimic, harness = false; random.rs is out of scope for now
   tests/snapshots/    # insta snapshots for L2
 scripts/verify.sh     # runs Verus over tungsten-core (one invocation)
 ```
@@ -457,9 +457,9 @@ pass that makes each `If`/`While` condition call a trace extern, so verified cod
 | L3 | Interpreter vs `@expect` (hand-computed) | `tests/corpus.rs` |
 | L4 | Interpreter vs each backend | `tests/corpus.rs` |
 | L5 | Optimizer equivalence (§9.1 step 5) | `tests/corpus.rs` |
-| L6 | Random well-typed programs (proptest, shrinking). A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally. Gating below | `tests/random.rs` |
+| L6 | **Out of scope for now; not implemented.** Random well-typed programs (proptest, shrinking). A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally. Gating below | `tests/random.rs` |
 
-L6 gating: interpreter-side checks (checker accepts, no `Stuck`, round-trip, memo on == off, inlined
+L6 gating (design for later, out of scope for now): interpreter-side checks (checker accepts, no `Stuck`, round-trip, memo on == off, inlined
 interpreter == original) always fail the run. Backend mismatches only fail it for backends listed in
 `L6_STRICT`, which starts empty; a backend is added once it conforms. For other backends, mismatches
 are printed, and are shrunk and written only when `TW_FUZZ` is set.
@@ -479,7 +479,7 @@ the grid edge (OOB), the scale-key collision, each extern with hand-computed `@e
 ## 12. CI
 
 GitHub Actions with JDK 21: `TW_BACKENDS=rust,java TW_REQUIRE=rust,java INSTA_UPDATE=no cargo test
---workspace` runs L0–L6 on Rust and Java, so a missing toolchain fails the job rather than being
+--workspace` runs L0–L5 on Rust and Java, so a missing toolchain fails the job rather than being
 skipped. CUDA runs locally only, and so does Verus (`scripts/verify.sh`).
 
 ## 13. Open items
