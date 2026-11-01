@@ -1,0 +1,12 @@
+// Casts to f32 round to nearest even; overflow gives infinity.
+program {
+    fn run() -> [f32; 5] {
+        return [(16777217 as f32), (1e40 as f32), (-1e40 as f32), (0.1 as f32), (9007199254740993L as f32)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [16777216.0f, inf_f32, -inf_f32, 0.1f, 9007199791611904.0f]

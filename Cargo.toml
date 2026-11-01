@@ -27,6 +27,7 @@ members = [
     "crates/tungsten-optimizer",
     "crates/tungsten-parse",
     "crates/tungsten-rust",
+    "crates/tungsten-testsuite",
 ]
 resolver = "3"
 
@@ -46,6 +47,9 @@ stacker = "0.1.25"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0.40"
+toml = "0.8"
+libtest-mimic = "0.8"
+insta = "1"
 # Pinned together with VERUS_TAG in scripts/verify.sh (the script checks it).
 vstd = "=0.0.0-2026-10-25-0158"
 tungsten-ir = { path = "crates/tungsten-ir" }

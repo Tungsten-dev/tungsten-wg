@@ -1,0 +1,15 @@
+// Prelude transcendentals at points where the series is exact.
+program {
+    use prelude::{sin, cos, exp, log, pow};
+    fn run() -> [f64; 5] {
+        return [sin(0.0), cos(0.0), exp(0.0), log(1.0), pow(2.0, 0.0)];
+    }
+    unit u {
+        main run;
+        helpers [sin, cos, exp, log, pow];
+        consts [TAU, LN2];
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [0.0, 1.0, 1.0, 0.0, 1.0]

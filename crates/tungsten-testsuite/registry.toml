@@ -1,0 +1,160 @@
+# Records and externs known to the test environment. Names are unique (no overloads), so f32
+# variants carry a `_f32` suffix. Type spellings are those of tungsten-parse SPEC §5.4.
+
+[[record]]
+name = "Pair"
+fields = [{ name = "a", type = "f64" }, { name = "b", type = "i32" }]
+
+[[record]]
+name = "Wrap"
+fields = [{ name = "p", type = "extern Pair" }, { name = "v", type = "vec3" }]
+
+[[extern]]
+name = "sqrt"
+params = ["f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "floor"
+params = ["f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "ceil"
+params = ["f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "trunc"
+params = ["f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "abs"
+params = ["f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "min"
+params = ["f64", "f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "max"
+params = ["f64", "f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "copysign"
+params = ["f64", "f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "fma"
+params = ["f64", "f64", "f64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "sqrt_f32"
+params = ["f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "floor_f32"
+params = ["f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "ceil_f32"
+params = ["f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "trunc_f32"
+params = ["f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "abs_f32"
+params = ["f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "min_f32"
+params = ["f32", "f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "max_f32"
+params = ["f32", "f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "copysign_f32"
+params = ["f32", "f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "fma_f32"
+params = ["f32", "f32", "f32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "float_to_bits"
+params = ["f32"]
+ret = "i32"
+domain_error = false
+
+[[extern]]
+name = "double_to_bits"
+params = ["f64"]
+ret = "i64"
+domain_error = false
+
+[[extern]]
+name = "bits_to_float"
+params = ["i32"]
+ret = "f32"
+domain_error = false
+
+[[extern]]
+name = "bits_to_double"
+params = ["i64"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "perm_get"
+params = ["perm_table", "i32"]
+ret = "i32"
+domain_error = false
+
+[[extern]]
+name = "sampler_sample"
+params = ["interpolated_noise_sampler", "vec3"]
+ret = "f64"
+domain_error = false
+
+[[extern]]
+name = "test_domain"
+params = ["i32"]
+ret = "i32"
+domain_error = true

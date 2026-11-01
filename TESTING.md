@@ -2,7 +2,8 @@
 
 Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, no
 functional proofs yet) and `tungsten-check` exist. `tungsten-testsuite`, the backend conformance
-work and the CI job do not. Per-item status is marked in §3 and §4.
+work and the CI job do not. Per-item status is marked in §3 and §4. The design of
+`tungsten-testsuite` is in `SPEC.md` at the repo root; this file reflects its decisions.
 
 ## 1. Summary
 
@@ -34,14 +35,14 @@ New pieces:
 | What is proven | Spec + refinement: exec interpreter == spec semantics. Plus type soundness of the checker, fuel monotonicity, and the layout lemma (§6.3). Floats are uninterpreted in both spec and exec. |
 | Verified IR | A lowered **core IR** (dense `Vec` indices, resolved types, no names). The lowering from `OptimizedProgram` is ordinary Rust and is tested, not proven. |
 | Checker | Verified. `check(p) == Ok` ⇒ the interpreter never gets stuck. |
-| Termination | Fuel **per `While` execution**: one `While` may run at most `fuel` iterations, else `OutOfFuel` (a distinct outcome that fails the test). `Repeat` costs nothing. Recursion and cyclic consts/inputs are rejected by the checker. Every function, const, input and unit has a **rank** (its depth in the dependency DAG), and every call/read checks that the rank decreases. |
+| Termination | Fuel **per `While` execution**: one `While` may run at most `fuel` iterations, else `OutOfFuel`. This outcome is interpreter-only: it fails the test unless the file says `@expect "<case>" error(OutOfFuel)`, and either way that case is never sent to a backend, which has no fuel. `Repeat` costs nothing. Recursion and cyclic consts/inputs are rejected by the checker. Every function, const, input and unit has a **rank** (its depth in the dependency DAG), and every call/read checks that the rank decreases. |
 | Edge semantics | Java semantics, normative for every backend: wrapping integer arithmetic, masked shift amounts, saturating float→int casts with NaN→0. Integer `/` and `%` by zero is an error. |
 | Short-circuit | `And`/`Or` are lazy. Everything else is evaluated left to right, and the first error wins. |
 | Typing | Strict: operands must have identical types, with one exception: `Vec3 ∘ Pos3` / `Pos3 ∘ Vec3` for `+ - * /`. |
 | Float comparison | Bit-exact for every backend, including `-0.0` vs `0.0`. NaN is a class: payloads are unspecified and unobservable. CUDA builds with strict IEEE flags (§9.3). |
 | Transcendentals | Not primitives. Written as IR helper functions in a prelude, so every backend compiles the same `+ - * /`. |
 | min/max | Java `Math.min`/`max`: NaN propagates, and `-0.0 < 0.0`. |
-| Bitcasts | Only canonicalizing `float_to_bits` (Java `floatToIntBits`, all NaN → canonical) and `bits_to_float`. |
+| Bitcasts | Only canonicalizing `float_to_bits` / `double_to_bits` (Java `floatToIntBits` / `doubleToLongBits`, all NaN → canonical) and `bits_to_float` / `bits_to_double`. |
 | Externs | A test-owned registry with one implementation per target. Tests can only use registered externs. Extern types are registry-declared records. |
 | Permutation tables / samplers | A toy deterministic builder from the registry, identical in all targets. Real noise correctness stays with tungsten-mc. |
 | Evaluation model | **Eager**, independent of `Interface` scheduling. Every const is evaluated once per case before any entry; one failing const fails every entry cell. Before a unit is evaluated in a context, every input it declares is built over all of its cells, read or not; a failing input fails every cell of that unit. Buffers are memoized per `InputId`. Out-of-bounds is an error. |
@@ -51,7 +52,9 @@ New pieces:
 | Float literals | Shortest round-trip decimal with type suffix, `inf`/`-inf`, and `nan(0x…)` with explicit bits. |
 | Test file | Program + `@case` + optional `@expect` + `@knownfail`. Without `@expect`, the interpreter is the oracle. |
 | Known failures | `@knownfail(backend, "reason")` in the test file. A knownfail that passes is an error. |
-| Execution | Out-of-process driver per backend, one build per batch, binary bit protocol. Java and CUDA are skipped with a notice when the toolchain is missing. |
+| Execution | Out-of-process driver per backend. One batch per backend, top-level corpus directory and stage, with a per-test rebuild if a batch fails. One process per (test, stage), binary request/response protocol. |
+| Backend selection | `TW_BACKENDS` picks backends (default `rust,java`, plus `cuda` when `nvcc` and a GPU are detected). A missing toolchain means ignored tests with a notice, unless the backend is listed in `TW_REQUIRE`, which makes it a failure. |
+| Build failures | A `generate` panic or error, or a failed build, fails every case of that test, including cases where the interpreter errors. |
 | Grid sizes | Small (≤ 4×4×4) by default. `@tier(large)` runs only with `TW_LARGE=1`. |
 | Test levels | Hand-written corpus, differential, optimizer equivalence, random well-typed programs, lowering and round-trip. Interface property tests are out of scope (except the scale-key regression). |
 | CI gate | Rust + Java execution of the default tier. CUDA and Verus run locally only. |
@@ -78,15 +81,20 @@ crates/tungsten-check/         # plain Rust, unverified
   src/lower/          # OptimizedProgram -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
-crates/tungsten-testsuite/     # NOT STARTED
-  src/harness/        # drivers, protocol, comparison, knownfail bookkeeping
+crates/tungsten-testsuite/     # NOT STARTED; full layout in SPEC.md §2
+  src/harness/        # batches and cache, protocol, processes, driver generators
+  src/registry.rs     # registry.toml loader
+  src/env.rs          # tungsten_parse::Env + tungsten_check::Registry
+  src/externs.rs      # Externs adapter over runtime/rust, for the interpreter
+  src/{oracle,compare,knownfail}.rs  # interpreter runs, scoring, knownfail reconciliation
   src/gen.rs          # random well-typed program generator (proptest)
   registry.toml       # extern + extern-type declarations
   prelude/prelude.tw  # sin, cos, exp, lerp, smoothstep, ... in IR
   runtime/{rust,java,cuda}/
-  corpus/**/*.tw      # hand-written tests
+  corpus/<dir>/**/*.tw  # hand-written tests; each top-level dir is one batch
   corpus/regressions/ # shrunk failures from the generator
-  tests/*.rs          # cargo test entry points per level
+  tests/{roundtrip,lowering,corpus,random}.rs  # libtest-mimic, harness = false
+  tests/snapshots/    # insta snapshots for L2
 scripts/verify.sh     # runs Verus over tungsten-core (one invocation)
 ```
 
@@ -111,7 +119,8 @@ The registry is an input, not a dependency: `tungsten-core` defines the declarat
 (extern and extern-type signatures, domain errors), and the core `Program` holds them, so the
 checker takes only the program. `tungsten-check` fills them from a `Registry` (the testsuite
 builds one from `registry.toml`).
-Exec-side extern implementations are supplied through `prim.rs` (§7.3).
+Exec-side extern implementations are supplied through the `Externs` trait (§7.3); the testsuite
+implements it over its shared Rust runtime (§10).
 
 Verus crates (`vstd`, `builtin`, `builtin_macros`) come in as `[workspace.dependencies]`, pinned
 to one Verus release.
@@ -138,6 +147,9 @@ Status as of 2026-11-01 is in brackets.
 4. [open] **Backend conformance** with §5 (wrapping ops, shift masks, cast helpers, Java min/max,
    short-circuit). This is tracked through `@knownfail` and isn't a prerequisite for the suite.
 5. [not checked] **`Interface` scale keying** on exact `f64` bits. Tracked by the scale-key regression.
+6. [open] **`entry_method_names`**: a public `tungsten_interface::naming::entry_method_names(program,
+   rules) -> Vec<String>`, extracted from the Rust and Java orchestration, so generated drivers can
+   call `orchestrate_<entry>`. Generated output doesn't change.
 
 ## 5. Semantics (normative)
 
@@ -367,19 +379,30 @@ a sample of cells on large grids.
 
 ### 9.2 Drivers
 
-Generated code, the test runtime, and a generated driver per test (each test in its own
-module/package) go into `target/tw-cache/<backend>/<hash>/`. They build once per batch with
-`cargo` / `javac` / `nvcc`, and the build is cached by content hash. Protocol: little-endian
-binary on stdin and stdout. Cases go in as origin (3×f64), seed (u64), and host inputs as raw bits
-in declaration order. Results come back per entry, per cell, as raw bits, or as an error tag and
-kind. A watchdog timeout counts as a hang (the `OutOfFuel` counterpart).
+Generated code, the test runtime, generated records, and a generated driver per test (each test
+in its own module/package) go into `$CARGO_TARGET_TMPDIR/tw-cache/<backend>/<hash>/`. A batch is
+(backend, top-level corpus directory, stage). It builds once with `rustc` / `javac` / `nvcc`, and
+the build is cached by a hash of the sources, runtime, flags and compiler version. A filter that
+selects any test in a batch builds the whole batch. If a batch build fails, each of its tests is
+built alone, so a compile error only fails its own test.
+
+There is one process per (test, stage), with a fresh `Orchestration` per case. Protocol:
+little-endian binary on stdin and stdout, request/response per case. A case goes in as origin
+(3×f64), seed (u64), and host inputs as raw bits in declaration order. The result comes back as a
+status byte, then either every entry's cells as raw bits, or an error kind and message. A driver
+responds only after the whole case succeeds. A watchdog (`TW_TIMEOUT_SECS`, default 10 per case) or
+a crash scores that case as a backend failure, and the run resumes from the next case in a new
+process.
 
 ### 9.3 Backend build flags
 
-- Rust: release profile with `overflow-checks = true`, so a non-wrapping op in generated code
-  panics and shows up as a mismatch. A panic maps to an error.
+- Rust: direct `rustc --edition 2024 -C opt-level=3 -C overflow-checks=on -C panic=unwind
+  --cap-lints allow`. A non-wrapping op in generated code panics and shows up as a mismatch. A panic
+  maps to an error. Capping lints lets a literal `1 / 0` in a body reach runtime; a failing Rust
+  `const` is still a compile error, which counts as a build failure (§9.4).
 - Java 21: FP is strict by default. `ArithmeticException` maps to `DivByZero` and
-  `ArrayIndexOutOfBoundsException` to `OutOfBounds`.
+  `ArrayIndexOutOfBoundsException` to `OutOfBounds`. Any other `Throwable` is also an error,
+  including `ExceptionInInitializerError` from a failing constant.
 - CUDA: `-fmad=false -prec-div=true -prec-sqrt=true -ftz=false`, no `--use_fast_math`. Cases
   whose interpreter result is an error aren't compared on CUDA, since it can't trap reliably.
 
@@ -389,22 +412,37 @@ Backends are compared per case. If no interpreter cell has an error and there ar
 `failures`, every backend value must equal the interpreter value bit for bit, and any two NaNs
 are equal. Otherwise the backend must fail the case (any error, panic, exception or watchdog);
 the kind appears in the report but is never compared, so the `Interface` may schedule freely
-(the interpreter's canonical error choice is semantics, not a schedule). The interpreter
-records every `If`/`While` decision per cell. On a mismatch, the report shows the first
-diverging decision (re-running a backend trace mode when one is available), the cell, and both
-values in hex and decimal.
+(the interpreter's canonical error choice is semantics, not a schedule). This also holds for a
+failing const or input that nothing reads: backends must evaluate every listed const, and
+`@knownfail` tracks the ones that don't yet.
+
+A case where the interpreter reports `OutOfFuel` isn't run or scored. A `generate` failure or a build
+failure fails every case of the test, whatever the interpreter says, so a real compile bug can't
+pass unnoticed in an error-only test.
+
+On a mismatch, the report shows the entry, the first differing cell and how many others differ, and
+both values in hex and decimal. Future work: a first-diverging-decision report, probably by an IR
+pass that makes each `If`/`While` condition call a trace extern, so verified code stays untouched.
 
 ## 10. Registry and prelude
 
-- **Primitive externs** (implemented in `prim.rs` and every runtime): `sqrt`, `floor`, `ceil`,
-  `trunc`, `abs`, `min`, `max` (Java), `copysign`, `fma`, `float_to_bits` (canonical),
-  `bits_to_float`, `perm_get(PermTable, i32) -> i32`, `sampler_sample(Sampler, Vec3) -> f64`
-  (toy, integer-hash based, exact). Each one is declared in `registry.toml` with its signature
-  and any domain error (`ExternDomain`).
-- **Toy builders**: a table is `splitmix64(hash(ident, subident, index) ^ seed)`-derived, and
-  the spec is in `registry.toml`. Each language has an identical implementation.
-- **Extern types**: declared records with typed fields. `ConstructExtern`/`Field` work on them
-  structurally.
+- **Primitive externs**: `sqrt`, `floor`, `ceil`, `trunc`, `abs`, `min`, `max` (Java), `copysign`,
+  `fma`, each with a `_f32` variant (names are unique, with no overloads); `float_to_bits(f32) ->
+  i32` and `double_to_bits(f64) -> i64` (canonical); `bits_to_float`, `bits_to_double`;
+  `perm_get(PermTable, i32) -> i32`; `sampler_sample(Sampler, Vec3) -> f64` (toy, integer-hash
+  based, exact); and `test_domain(i32) -> i32`, which fails for negative input so `ExternDomain` is
+  reachable. Each one is declared in `registry.toml` with its signature and any domain error.
+- **Implementations**: hand-written in each runtime. The Rust source is shared: the interpreter's
+  `Externs` adapter includes `runtime/rust/`, and it's also copied into generated builds. A shared
+  bug can't show up as interpreter vs Rust, so Java comparison and hand-computed `@expect` files
+  cover it.
+- **Toy builders**: defined over the arguments generated code already passes, since it never sees
+  the name strings. A Perlin table folds splitmix64 over `(seed, id_lo, id_hi, subident_index,
+  sub_lo, sub_hi)`, with the ids from `xoroshiro_seed`; a Base3D table is `splitmix64(seed)`, so all
+  Base3D tables of one seed are identical. `perm_get` reads `perm[i & 255]` and has no domain error.
+  Full definition in `SPEC.md` §5.3. Each language has an identical implementation.
+- **Extern types**: declared records with typed fields, with definitions generated per language
+  from `registry.toml`. `ConstructExtern`/`Field` work on them structurally.
 - **Prelude** (`prelude.tw`): `sin`, `cos`, `exp`, `log`, `pow`, `lerp`, `smoothstep`,
   `as_index`, `corner*` helpers, all written with basic operations. A test pulls them in with
   `use prelude::{sin, lerp}`, which adds them as helper functions.
@@ -415,27 +453,38 @@ values in hex and decimal.
 | --- | --- | --- |
 | L0 | Unit tests of the parser, checker, interpreter and lowering | each crate |
 | L1 | Round-trip (§8.1) over the corpus and generated programs | `tests/roundtrip.rs` |
-| L2 | Lowering: snapshot of the core IR for the corpus, plus invariants (types and arity preserved, every ref resolved). A lowering bug also shows up indirectly as a differential mismatch | `tests/lowering.rs` |
+| L2 | Lowering: `insta` snapshot of the core IR for the corpus (regressions excluded), plus invariants (types and arity preserved, every ref resolved, `lower` deterministic). A lowering bug also shows up indirectly as a differential mismatch | `tests/lowering.rs` |
 | L3 | Interpreter vs `@expect` (hand-computed) | `tests/corpus.rs` |
 | L4 | Interpreter vs each backend | `tests/corpus.rs` |
 | L5 | Optimizer equivalence (§9.1 step 5) | `tests/corpus.rs` |
-| L6 | Random well-typed programs (proptest, shrinking). Failures are written to `corpus/regressions/`. A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally | `tests/random.rs` |
+| L6 | Random well-typed programs (proptest, shrinking). A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally. Gating below | `tests/random.rs` |
+
+L6 gating: interpreter-side checks (checker accepts, no `Stuck`, round-trip, memo on == off, inlined
+interpreter == original) always fail the run. Backend mismatches only fail it for backends listed in
+`L6_STRICT`, which starts empty; a backend is added once it conforms. For other backends, mismatches
+are printed, and are shrunk and written only when `TW_FUZZ` is set.
+
+Programs are sampled and built in one batch. A failure is shrunk against only the failing backend and
+stage, within a time budget (`TW_SHRINK_SECS`, default 120). Locally it's written to
+`corpus/regressions/<content-hash>.tw` without a `@knownfail`. When `CI` is set, it goes to the log
+and a workflow artifact instead.
 
 Required corpus coverage, at least one file each: every operator × every type, overflow and
 shift masks, every cast edge case (NaN, ±inf, out-of-range), `-0.0`, short-circuit with an
 erroring right side, break/return inside nested loops, `Repeat 0`, constants that reference
 constants, density inputs at `(1,1,1)` / equal / different dims, explicit-index corner reads at
-the grid edge (OOB), and the scale-key collision.
+the grid edge (OOB), the scale-key collision, each extern with hand-computed `@expect`,
+`@expect error(OutOfFuel)`, an unread failing const, and a failing input that nothing reads.
 
 ## 12. CI
 
-GitHub Actions with JDK 21: `cargo test --workspace` runs L0–L6 on Rust and Java. CUDA tests are
-skipped with a notice. Verus: `scripts/verify.sh`, run locally only.
+GitHub Actions with JDK 21: `TW_BACKENDS=rust,java TW_REQUIRE=rust,java INSTA_UPDATE=no cargo test
+--workspace` runs L0–L6 on Rust and Java, so a missing toolchain fails the job rather than being
+skipped. CUDA runs locally only, and so does Verus (`scripts/verify.sh`).
 
 ## 13. Open items
 
-- Confirm in tungsten-mc that every density input of an entry gets the entry's `origin`
-  (§6.1), and that `Vec3` is f64 in the runtime the Rust backend targets (`mathf64.rs`) rather
-  than f32 (`math.rs`).
+- Confirm in tungsten-mc that every density input of an entry gets the entry's `origin` (§6.1).
+  (`Vec3` is f64 for the Rust backend: generated code imports `crate::mathf64`.)
 - Error-kind mapping for Rust panics (needs identifiable panic messages from the generated
   code), or compare only error vs non-error.

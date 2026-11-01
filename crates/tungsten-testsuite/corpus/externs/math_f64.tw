@@ -1,0 +1,13 @@
+// f64 math externs.
+program {
+    fn run() -> [f64; 9] {
+        return [ext sqrt(16.0), ext floor(-1.5), ext ceil(-1.5), ext trunc(-1.5), ext abs(-2.5),
+                ext min(1.0, 2.0), ext max(1.0, 2.0), ext copysign(3.0, -1.0), ext fma(2.0, 3.0, 1.0)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [4.0, -2.0, -1.0, -1.0, 2.5, 1.0, 2.0, -3.0, 7.0]

@@ -1,0 +1,705 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                4,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [
+                FnId(
+                    0,
+                ),
+                FnId(
+                    1,
+                ),
+                FnId(
+                    2,
+                ),
+                FnId(
+                    3,
+                ),
+            ],
+            consts: [
+                ConstId(
+                    0,
+                ),
+                ConstId(
+                    1,
+                ),
+                ConstId(
+                    2,
+                ),
+            ],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [
+                I32,
+                I32,
+            ],
+            ret: I32,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 3,
+                    body: [
+                        While {
+                            cond: Lit(
+                                Bool(
+                                    true,
+                                ),
+                            ),
+                            body: [
+                                Assign {
+                                    target: LocalId(
+                                        0,
+                                    ),
+                                    value: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            I32(
+                                                1,
+                                            ),
+                                        ),
+                                    },
+                                },
+                                Break,
+                            ],
+                        },
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    I32(
+                                        1,
+                                    ),
+                                ),
+                            },
+                        },
+                        If {
+                            cond: Binary {
+                                op: Equal,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    I32(
+                                        2,
+                                    ),
+                                ),
+                            },
+                            then_branch: [
+                                Break,
+                            ],
+                            else_branch: [],
+                        },
+                    ],
+                },
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                            right: Lit(
+                                I32(
+                                    10,
+                                ),
+                            ),
+                        },
+                        right: Local(
+                            LocalId(
+                                1,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [
+                I32,
+            ],
+            ret: I32,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 5,
+                    body: [
+                        Repeat {
+                            count: 5,
+                            body: [
+                                Assign {
+                                    target: LocalId(
+                                        0,
+                                    ),
+                                    value: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            I32(
+                                                1,
+                                            ),
+                                        ),
+                                    },
+                                },
+                                If {
+                                    cond: Binary {
+                                        op: Equal,
+                                        left: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            I32(
+                                                7,
+                                            ),
+                                        ),
+                                    },
+                                    then_branch: [
+                                        Return(
+                                            Binary {
+                                                op: Multiply,
+                                                left: Local(
+                                                    LocalId(
+                                                        0,
+                                                    ),
+                                                ),
+                                                right: Lit(
+                                                    I32(
+                                                        100,
+                                                    ),
+                                                ),
+                                            },
+                                        ),
+                                    ],
+                                    else_branch: [],
+                                },
+                            ],
+                        },
+                    ],
+                },
+                Return(
+                    Lit(
+                        I32(
+                            -1,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [
+                I32,
+            ],
+            ret: I32,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Lit(
+                        I32(
+                            5,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 0,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                0,
+                            ),
+                            value: Lit(
+                                I32(
+                                    1,
+                                ),
+                            ),
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [
+                I32,
+                I32,
+            ],
+            ret: I32,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                While {
+                    cond: Binary {
+                        op: Less,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Lit(
+                            I32(
+                                10,
+                            ),
+                        ),
+                    },
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                0,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                                right: Lit(
+                                    I32(
+                                        1,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            1,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Array(
+                I32,
+                5,
+            ),
+            hosts: [],
+            body: [
+                Return(
+                    ArrayLit(
+                        [
+                            Call {
+                                func: FnId(
+                                    0,
+                                ),
+                                args: [],
+                            },
+                            Call {
+                                func: FnId(
+                                    1,
+                                ),
+                                args: [],
+                            },
+                            Call {
+                                func: FnId(
+                                    2,
+                                ),
+                                args: [],
+                            },
+                            Call {
+                                func: FnId(
+                                    3,
+                                ),
+                                args: [],
+                            },
+                            Const(
+                                ConstId(
+                                    2,
+                                ),
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        },
+    ],
+    consts: [
+        ConstDecl {
+            init: Lit(
+                I32(
+                    3,
+                ),
+            ),
+        },
+        ConstDecl {
+            init: Binary {
+                op: Multiply,
+                left: Const(
+                    ConstId(
+                        0,
+                    ),
+                ),
+                right: Lit(
+                    I32(
+                        2,
+                    ),
+                ),
+            },
+        },
+        ConstDecl {
+            init: Binary {
+                op: Add,
+                left: Const(
+                    ConstId(
+                        1,
+                    ),
+                ),
+                right: Const(
+                    ConstId(
+                        0,
+                    ),
+                ),
+            },
+        },
+    ],
+    hosts: [],
+    tables: [],
+    inputs: [],
+    entries: [
+        Entry {
+            unit: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 1,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                PermTable,
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Sampler,
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}
