@@ -12,7 +12,7 @@ use crate::model as rcl;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
-    BinaryOperator, ConstExpr, Constant, Expression, OptimizedProgram, Ref, VariableType,
+    AmbientKind, BinaryOperator, ConstExpr, Constant, Expression, OptimizedProgram, Ref, VariableType,
 };
 
 /// `base.name`
@@ -151,7 +151,12 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => R::I32Literal(*v),
             Expression::Long(v) => R::I64Literal(*v),
             Expression::Bool(v) => R::BoolLiteral(*v),
-            Expression::Ambient(k) => unimplemented!("Ambient({k:?}) lowering is not implemented for the Rust backend"),
+            Expression::Ambient(k) => match k {
+                AmbientKind::Origin => field(&self.uniform.config, "origin"),
+                AmbientKind::OriginScale => field(&self.uniform.config, "origin_scale"),
+                AmbientKind::PositionScale => field(&self.uniform.config, "position_scale"),
+                AmbientKind::Pos3 => field(&self.uniform.it, "pos"),
+            },
             Expression::FunctionCall {
                 function,
                 parameters,

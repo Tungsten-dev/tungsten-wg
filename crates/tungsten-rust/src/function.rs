@@ -12,7 +12,7 @@ use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
-    ComputeUnit, Constant, Function, Name, OptimizedProgram, Ref, VariableType,
+    ComputeUnit, Constant, Function, OptimizedProgram, Ref, VariableType,
 };
 
 /// A converted function plus the items it still needs generated.
@@ -28,26 +28,6 @@ pub struct Converted<'m> {
 fn add_uniform_parameters(f: &mut rcl::Function<'_>) {
     for p in uniform_parameters() {
         f.add_parameter(p.name, p.t);
-    }
-}
-
-/// Variables the density-function prologue binds from `p` and `config` instead of declaring bare.
-fn default_binding<'m>(conv: &FunctionConverter<'_>, name: &Name) -> Option<rcl::Expression<'m>> {
-    let Name::Named(n) = name else { return None };
-    let config_field = |f: &str| rcl::Expression::Field {
-        base: Box::new(rcl::Expression::Variable(conv.uniform.config.clone())),
-        field: f.to_string(),
-    };
-    match n.as_str() {
-        "origin" => Some(config_field("origin")),
-        "origin_scale" => Some(config_field("origin_scale")),
-        "position_scale" => Some(config_field("position_scale")),
-        // "pos3" => Some(rcl::Expression::Variable(conv.uniform.pos3.clone())),
-        "pos3" => Some(rcl::Expression::Field {
-            base: Box::new(rcl::Expression::Variable(conv.uniform.it.clone())),
-            field: "pos".to_string(),
-        }),
-        _ => None,
     }
 }
 
@@ -70,25 +50,14 @@ pub fn convert_helper<'a, 'm>(
         let v = conv.declare_var(*p);
         out.add_parameter(v.name.clone().unwrap(), v.t.clone());
     }
-    let mut prologue = Vec::new();
     for (r, var) in func.variables.iter() {
         if func.parameters.contains(&r) || matches!(var.t, VariableType::DensityInput) {
             continue;
         }
-
-        // also add bindings here:
         let v = conv.declare_var(r);
-        match default_binding(&conv, &var.name) {
-            Some(init) => prologue.push(rcl::Statement::Declare {
-                variable: v,
-                init: Some(init),
-                mutable: true,
-            }),
-            None => out.add_variable(v),
-        }
+        out.add_variable(v);
     }
-    out.body = prologue;
-    out.body.extend(conv.convert_block(&func.body));
+    out.body = conv.convert_block(&func.body);
     out.inline = true;
 
     Converted {
@@ -100,8 +69,7 @@ pub fn convert_helper<'a, 'm>(
 
 /// Converts a unit's density function for one set of dimensions (named `<name>_d{X}x{Y}x{Z}`).
 ///
-/// It returns the value for the single position `p`; the kernel does the looping. `origin`, `pos3`,
-/// `origin_scale` and `position_scale` are bound from `p` and `config` in a prologue.
+/// It returns the value for the single position `p`; the kernel does the looping.
 pub fn convert_density<'a, 'm>(
     program: &'a OptimizedProgram,
     naming: &'a Interface,
@@ -121,25 +89,15 @@ pub fn convert_density<'a, 'm>(
     );
     add_uniform_parameters(&mut out);
 
-    let mut prologue = Vec::new();
     for (r, var) in func.variables.iter() {
         // Density input variables are read through `buffers`, never declared.
         if matches!(var.t, VariableType::DensityInput) {
             continue;
         }
-
         let v = conv.declare_var(r);
-        match default_binding(&conv, &var.name) {
-            Some(init) => prologue.push(rcl::Statement::Declare {
-                variable: v,
-                init: Some(init),
-                mutable: true,
-            }),
-            None => out.add_variable(v),
-        }
+        out.add_variable(v);
     }
-    out.body = prologue;
-    out.body.extend(conv.convert_block(&func.body));
+    out.body = conv.convert_block(&func.body);
     out.inline = true;
 
     Converted {
