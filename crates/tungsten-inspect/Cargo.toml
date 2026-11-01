@@ -1,0 +1,18 @@
+[package]
+name = "tungsten-inspect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Inspection backend for tungsten: diagrams, IR dumps and buffer charts of an optimized program."
+
+[dependencies]
+tungsten-ir.workspace = true
+tungsten-interface.workspace = true
+tungsten-optimizer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tungsten-legacy.workspace = true
+bumpalo.workspace = true

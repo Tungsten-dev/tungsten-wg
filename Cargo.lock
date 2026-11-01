@@ -9,10 +9,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
+name = "itoa"
+version = "1.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
 name = "md5"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
+
+[[package]]
+name = "memchr"
+version = "2.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "proc-macro2"
@@ -33,10 +45,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
+dependencies = [
+ "serde_core",
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_core"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
+dependencies = [
+ "serde_derive",
+]
+
+[[package]]
+name = "serde_derive"
+version = "1.0.229"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.154"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "syn"
 version = "2.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -60,16 +126,103 @@ checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "tungsten-codegen"
+version = "0.1.2"
+
+[[package]]
+name = "tungsten-cuda"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "tungsten-codegen",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
+ "tungsten-rust",
+]
+
+[[package]]
+name = "tungsten-inspect"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "serde",
+ "serde_json",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
+ "tungsten-optimizer",
+]
+
+[[package]]
+name = "tungsten-interface"
+version = "0.1.2"
+dependencies = [
+ "thiserror",
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-ir"
+version = "0.1.2"
+
+[[package]]
+name = "tungsten-java"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
+ "tungsten-rust",
+]
+
+[[package]]
+name = "tungsten-legacy"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "tungsten-codegen",
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-optimizer"
+version = "0.1.2"
+dependencies = [
+ "tungsten-ir",
+]
+
+[[package]]
+name = "tungsten-rust"
+version = "0.1.2"
+dependencies = [
+ "bumpalo",
+ "md5",
+ "tungsten-codegen",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-legacy",
 ]
 
 [[package]]
 name = "tungsten-wg"
 version = "0.1.2"
 dependencies = [
- "bumpalo",
- "md5",
  "thiserror",
+ "tungsten-codegen",
+ "tungsten-cuda",
+ "tungsten-inspect",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-java",
+ "tungsten-legacy",
+ "tungsten-optimizer",
+ "tungsten-rust",
 ]
 
 [[package]]
@@ -77,3 +230,9 @@ name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
+
+[[package]]
+name = "zmij"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"

@@ -1,0 +1,17 @@
+[package]
+name = "tungsten-java"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Java backend for tungsten density functions."
+
+[dependencies]
+tungsten-ir.workspace = true
+tungsten-interface.workspace = true
+# Shared with the Rust backend: type derivation, constant dependencies, auto-const specs.
+tungsten-rust.workspace = true
+
+[dev-dependencies]
+tungsten-legacy.workspace = true
+bumpalo.workspace = true

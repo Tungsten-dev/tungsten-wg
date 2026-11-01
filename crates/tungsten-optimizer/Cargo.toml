@@ -1,0 +1,10 @@
+[package]
+name = "tungsten-optimizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Optimization passes over tungsten IR."
+
+[dependencies]
+tungsten-ir.workspace = true

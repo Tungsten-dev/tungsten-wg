@@ -1,0 +1,15 @@
+[package]
+name = "tungsten-legacy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Legacy SPMT representation and builder for tungsten."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+tungsten-ir.workspace = true
+tungsten-codegen.workspace = true
+bumpalo.workspace = true

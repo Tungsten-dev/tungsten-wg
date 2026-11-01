@@ -4,10 +4,6 @@
 
 Adapt CUDA code generation and orchestration to consume the reworked SPMT representation. With the renewed code structure similar to the new RCL backend. Validate with a validation frontend against RCL.
 
-## Add Java backend for reworked SPMT
-
-Add a Java code-generation backend that translates the reworked SPMT representation into executable Java for world-generation density functions. Integrate it with the compiler configuration and output APIs, and verify generated code against the existing Rust backend.
-
 ## Implement CU scheduling algorithms to optimize kernels and resource utilization
 
 Develop scheduling strategies for compute units (CUs) that account for dependencies, kernel launch overhead, and (potentially) available compute and memory resources. Compare the strategies on representative workloads to confirm they improve execution efficiency without changing results.

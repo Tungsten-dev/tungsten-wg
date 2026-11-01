@@ -13,13 +13,60 @@ exclude = [
 
 ]
 
-[features]
-default = []
+[workspace]
+members = [
+    "crates/tungsten-codegen",
+    "crates/tungsten-cuda",
+    "crates/tungsten-interface",
+    "crates/tungsten-java",
+    "crates/tungsten-inspect",
+    "crates/tungsten-ir",
+    "crates/tungsten-legacy",
+    "crates/tungsten-optimizer",
+    "crates/tungsten-rust",
+]
+resolver = "3"
 
-[dependencies]
+[workspace.package]
+version = "0.1.2"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/NiekAukes/tungsten-wg"
+
+[workspace.dependencies]
 bumpalo = "3.19.0"
 md5 = "0.8.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1.0.40"
+tungsten-ir = { path = "crates/tungsten-ir" }
+tungsten-codegen = { path = "crates/tungsten-codegen" }
+tungsten-interface = { path = "crates/tungsten-interface" }
+tungsten-optimizer = { path = "crates/tungsten-optimizer" }
+tungsten-rust = { path = "crates/tungsten-rust" }
+tungsten-java = { path = "crates/tungsten-java" }
+tungsten-cuda = { path = "crates/tungsten-cuda" }
+tungsten-legacy = { path = "crates/tungsten-legacy" }
+tungsten-inspect = { path = "crates/tungsten-inspect" }
+
+[features]
+default = ["rust"]
+rust = ["dep:tungsten-rust"]
+java = ["dep:tungsten-java"]
+inspect = ["dep:tungsten-inspect"]
+cuda = ["dep:tungsten-cuda"]
+
+[dependencies]
+thiserror.workspace = true
+tungsten-ir.workspace = true
+tungsten-codegen.workspace = true
+tungsten-interface.workspace = true
+tungsten-optimizer.workspace = true
+tungsten-legacy.workspace = true
+tungsten-rust = { workspace = true, optional = true }
+tungsten-java = { workspace = true, optional = true }
+tungsten-inspect = { workspace = true, optional = true }
+tungsten-cuda = { workspace = true, optional = true }
 
 [lib]
 name = "tungsten_wg"

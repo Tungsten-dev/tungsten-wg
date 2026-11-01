@@ -1,0 +1,10 @@
+[package]
+name = "tungsten-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Intermediate representation for tungsten density functions."
+
+[lib]
+path = "lib.rs"
