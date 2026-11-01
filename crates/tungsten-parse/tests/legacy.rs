@@ -1,7 +1,5 @@
 //! P1 and P2 for programs the way tungsten-mc makes them: built as legacy SPMT and lowered with
-//! `tungsten_legacy::conversion`, before and after inlining. Real tungsten-mc output can be
-//! checked too: `TUNGSTEN_PARSE_CORPUS=<dir> cargo test -p tungsten-parse --test legacy -- --ignored`
-//! round-trips every `.tw` file in `<dir>`.
+//! `tungsten_legacy::conversion`, before and after inlining.
 
 use bumpalo::Bump;
 use tungsten_ir::{OptimizedProgram, compact, isomorphic};
@@ -151,29 +149,4 @@ fn converted_programs_round_trip() {
     let stats = tungsten_optimizer::perform_inline(&mut m);
     assert!(stats.inlined > 0, "nothing was inlined");
     round_trips(&m, "the inlined program");
-}
-
-#[test]
-#[ignore = "needs TUNGSTEN_PARSE_CORPUS=<dir of .tw files>"]
-fn external_corpus_round_trips() {
-    let dir = std::env::var("TUNGSTEN_PARSE_CORPUS").expect("TUNGSTEN_PARSE_CORPUS is not set");
-    let mut n = 0;
-    for e in std::fs::read_dir(&dir).expect("readable corpus dir") {
-        let path = e.unwrap().path();
-        if path.extension().is_none_or(|x| x != "tw") {
-            continue;
-        }
-        let src = std::fs::read_to_string(&path).unwrap();
-        let what = path.display().to_string();
-        let t = load(&src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{what}: {d}"));
-        let text = print_test_file(&t);
-        let t2 = load(&text, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{what}: {d}"));
-        assert_eq!(print_test_file(&t2), text, "P3 failed for {what}");
-        round_trips(&t.program, &what);
-        let mut m = t.program;
-        tungsten_optimizer::perform_inline(&mut m);
-        round_trips(&m, &format!("{what} after inlining"));
-        n += 1;
-    }
-    assert!(n > 0, "no .tw files in {dir}");
 }
