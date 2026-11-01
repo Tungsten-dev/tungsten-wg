@@ -1,6 +1,8 @@
 # Testing policy: verified interpreter, text format, differential backend tests
 
-Status: draft spec, not implemented.
+Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, no
+functional proofs yet) and `tungsten-check` exist. `tungsten-testsuite`, the backend conformance
+work and the CI job do not. Per-item status is marked in §3 and §4.
 
 ## 1. Summary
 
@@ -57,7 +59,7 @@ New pieces:
 ## 3. Crate layout
 
 ```
-crates/tungsten-parse/
+crates/tungsten-parse/         # implemented, tests pass
   src/lib.rs          # load(src, file, &dyn Env) -> Result<TestFile>, print / print_test_file
   src/{lexer,parser,ast}.rs  src/elaborate/  src/printer/   # layout and API: crates/tungsten-parse/SPEC.md
 crates/tungsten-core/          # all inside verus!{}, depends only on vstd/builtin
@@ -69,14 +71,14 @@ crates/tungsten-core/          # all inside verus!{}, depends only on vstd/built
   src/prim.rs         # trusted int/float/cast primitive layer (external_body)
   src/check/          # checker: wf twin, types, flow, scope, acyclic (ranks); later well_typed
   src/exec/           # executable interpreter; later refinement proofs
-  src/spec/           # (later) spec semantics (spec fn)
-  src/proofs/         # (later) type soundness, fuel monotonicity, layout lemma
+  src/spec/           # (not started) spec semantics (spec fn)
+  src/proofs/         # (not started) type soundness, fuel monotonicity, layout lemma
 crates/tungsten-check/         # plain Rust, unverified
   src/registry.rs     # Registry, RegistryBuilder (names + decls)
   src/lower/          # OptimizedProgram -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
-crates/tungsten-testsuite/
+crates/tungsten-testsuite/     # NOT STARTED
   src/harness/        # drivers, protocol, comparison, knownfail bookkeeping
   src/gen.rs          # random well-typed program generator (proptest)
   registry.toml       # extern + extern-type declarations
@@ -116,23 +118,26 @@ to one Verus release.
 
 ## 4. Required changes outside the new crates
 
-1. **`Expression::Ambient(AmbientKind)`** in `tungsten-ir`, with `AmbientKind = Origin | Pos3 |
+Status as of 2026-11-01 is in brackets.
+
+1. [done] **`Expression::Ambient(AmbientKind)`** in `tungsten-ir`, with `AmbientKind = Origin | Pos3 |
    OriginScale | PositionScale`. It carries no `Ref`, so `retag.rs` is unaffected. Remove
    `declare_default_parameters` from legacy conversion and emit `Ambient` reads instead. Every
    backend and inspect lowers `Ambient` to `config.origin`, `p.pos`, and so on. Ambients are
-   read-only.
-2. **`compact()` and structural equality** in `tungsten-ir` (`compact`, `isomorphic` and
+   read-only. A legacy body that assigns to one of the four names gets a real local of that name,
+   initialized from the ambient (`water_levels` in `tungsten-mc-compile` does this with `pos3`).
+2. [done] **`compact()` and structural equality** in `tungsten-ir` (`compact`, `isomorphic` and
    `permute` are in `rebuild.rs`, next to `retag.rs`, and reuse its walker).
    `compact` removes holes and resets generations (it renumbers refs). Structural equality
    (`isomorphic`) ignores tags, compares arenas in iteration order, and compares floats by bit
    pattern.
    The derived `PartialEq` on `Expression` makes `Float(NaN) != Float(NaN)`, so it can't be used
    for this.
-3. **`derive_binop_type`** (shared by rust/java) matches §5.3: shifts and bitwise ops become
+3. [open: `tungsten-rust/src/types.rs` still derives `I32 ∘ Bool` and has no shift/bitwise cases] **`derive_binop_type`** (shared by rust/java) matches §5.3: shifts and bitwise ops become
    derivable, and `I32 ∘ Bool` is dropped.
-4. **Backend conformance** with §5 (wrapping ops, shift masks, cast helpers, Java min/max,
+4. [open] **Backend conformance** with §5 (wrapping ops, shift masks, cast helpers, Java min/max,
    short-circuit). This is tracked through `@knownfail` and isn't a prerequisite for the suite.
-5. **`Interface` scale keying** on exact `f64` bits. Tracked by the scale-key regression.
+5. [not checked] **`Interface` scale keying** on exact `f64` bits. Tracked by the scale-key regression.
 
 ## 5. Semantics (normative)
 

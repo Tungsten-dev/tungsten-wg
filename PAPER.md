@@ -8,8 +8,13 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
 
 ## State of the work (as of 2026-11-01)
 
-- `TESTING.md` is a draft spec, **not implemented**. `tungsten-testsuite` (harness, corpus, test
-  runtimes) does not exist yet. `tungsten-parse` is specified but was not in the workspace tree.
+- `TESTING.md` is a partly implemented spec. `tungsten-parse` (parser, elaborator, canonical
+  printer, `.tw` test-file envelope) is implemented, and its tests pass (round-trip, floats, depth,
+  fuzz, permute, legacy). `tungsten-testsuite` (harness, corpus, test runtimes) does **not exist
+  yet**, so no backend is compared against the interpreter yet.
+- `Expression::Ambient` is implemented in the Rust, Java and CUDA backends, and legacy conversion
+  emits it instead of the four `Named` variables. `derive_binop_type` has not been changed to the
+  §5.3 typing.
 - `tungsten-core` has a checker and an interpreter. There are **no functional proofs yet**.
   `scripts/verify.sh` proves bounds, absence of overflow and termination only. The spec/refinement
   proof, type soundness of the checker, fuel monotonicity and the layout lemma are all "later".
@@ -87,6 +92,33 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
   unit 4 < input 5). Evidence: `crates/tungsten-core/README.md`, `VERUS.md`.
 - 2026-11-01 [limitation] Outside `tungsten-check` and `tungsten-core`, test coverage is thin; real
   validation is currently downstream (compiling and running generated code in `tungsten-mc`).
+- 2026-11-01 [design] Idea (not implemented, unvalidated): bit-exact agreement (contribution 1) is
+  stricter than terrain generation needs, and a pointwise bound |f-g| <= eps is the wrong relaxation
+  because `select`/`floor`/comparisons make rounding errors jump. Candidate approximate-equivalence
+  criterion: (delta, eps)-closeness, i.e. every output g(x) is within eps of f(x') for some x' within
+  delta of x (Hausdorff distance between graphs; discontinuities may shift by delta). Complements:
+  (a) predicate agreement outside an eps-band around the thresholds consumers use (sign of density,
+  biome thresholds); (b) mismatch rate and locality (mismatches only in a thin shell around the
+  isosurface); (c) distribution distance (KS/Wasserstein) to catch bias such as a dropped octave;
+  (d) gradient/spectral closeness. eps/delta could be derived by forward error analysis over the core
+  IR (value error through continuous ops, position shift through discontinuous ones). Sampling gives
+  evidence only; the analytic bound would be the guarantee. Evidence: none yet, discussion only.
+- 2026-11-01 [bug] Backends initialized any local named `origin`, `pos3`, `origin_scale` or
+  `position_scale` by matching the name, while the checker and interpreter treat it as an ordinary
+  uninitialized local. A legacy program reading them could not pass the flow check. Fixed by
+  lowering to `Ambient` and removing the name binding. Evidence: `default_variables_are_ambients`
+  in `crates/tungsten-check/src/tests/legacy.rs`.
+- 2026-11-01 [bug] `aquifer_random` in `tungsten-mc-compile` creates `origin` as `Pos3` (it is a
+  `Vec3`) and only worked because undeclared variables resolved by name. Conversion now resolves it
+  to the ambient, types the field from the ambient and records a warning, but `convert` discards
+  warnings. Evidence: `mistyped_origin_passes_the_checker`, `aquifer.rs:673` in that repo.
+- 2026-11-01 [design] Ambients are read-only in the IR, but `water_levels` in `tungsten-mc-compile`
+  reassigns `pos3` mid-body and reads it through a second variable of that name. A grep of the
+  frontend missed this; only running real generation found it. Conversion gives such a function a
+  local initialized from the ambient. Evidence: `assigned_pos3_starts_as_the_ambient`.
+- 2026-11-01 [eval] Vanilla overworld Rust output before and after the ambient change: 221 functions,
+  0 differing lines once ambient reads, bindings and `inlined_density_N` numbering are normalized
+  (one-off script, not in the repo). Rust only; CUDA and Java output were generated but not diffed.
 
 ## Maintaining this file
 
