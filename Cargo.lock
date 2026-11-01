@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-check"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "proptest",
@@ -608,18 +608,18 @@ dependencies = [
 
 [[package]]
 name = "tungsten-codegen"
-version = "0.1.2"
+version = "0.2.0"
 
 [[package]]
 name = "tungsten-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "vstd",
 ]
 
 [[package]]
 name = "tungsten-cuda"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "tungsten-codegen",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-inspect"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "serde",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-interface"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "thiserror",
  "tungsten-ir",
@@ -652,11 +652,11 @@ dependencies = [
 
 [[package]]
 name = "tungsten-ir"
-version = "0.1.2"
+version = "0.2.0"
 
 [[package]]
 name = "tungsten-java"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "tungsten-interface",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-legacy"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "tungsten-codegen",
@@ -676,14 +676,14 @@ dependencies = [
 
 [[package]]
 name = "tungsten-optimizer"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "tungsten-ir",
 ]
 
 [[package]]
 name = "tungsten-parse"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "codespan-reporting",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-rust"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "bumpalo",
  "md5",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "tungsten-wg"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "thiserror",
  "tungsten-check",
