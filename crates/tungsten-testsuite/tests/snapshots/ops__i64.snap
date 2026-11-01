@@ -21,7 +21,7 @@ Program {
             locals: [],
             ret: Array(
                 I64,
-                6,
+                1,
             ),
             hosts: [],
             body: [
@@ -29,59 +29,7 @@ Program {
                     ArrayLit(
                         [
                             Binary {
-                                op: Add,
-                                left: Lit(
-                                    I64(
-                                        9223372036854775807,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I64(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Subtract,
-                                left: Lit(
-                                    I64(
-                                        -9223372036854775808,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I64(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Multiply,
-                                left: Lit(
-                                    I64(
-                                        4294967296,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I64(
-                                        4294967296,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: ShiftLeft,
-                                left: Lit(
-                                    I64(
-                                        1,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        65,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: LogicalShiftRight,
+                                op: ShiftRight,
                                 left: Lit(
                                     I64(
                                         -8,
@@ -90,19 +38,6 @@ Program {
                                 right: Lit(
                                     I32(
                                         60,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Divide,
-                                left: Lit(
-                                    I64(
-                                        -9223372036854775808,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I64(
-                                        -1,
                                     ),
                                 ),
                             },

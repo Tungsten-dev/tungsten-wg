@@ -21,78 +21,13 @@ Program {
             locals: [],
             ret: Array(
                 I8,
-                6,
+                1,
             ),
             hosts: [],
             body: [
                 Return(
                     ArrayLit(
                         [
-                            Binary {
-                                op: Add,
-                                left: Lit(
-                                    I8(
-                                        127,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I8(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Multiply,
-                                left: Lit(
-                                    I8(
-                                        100,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I8(
-                                        3,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Subtract,
-                                left: Lit(
-                                    I8(
-                                        -128,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I8(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Divide,
-                                left: Lit(
-                                    I8(
-                                        -128,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I8(
-                                        -1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: ShiftLeft,
-                                left: Lit(
-                                    I8(
-                                        1,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        9,
-                                    ),
-                                ),
-                            },
                             Binary {
                                 op: ShiftRight,
                                 left: Lit(

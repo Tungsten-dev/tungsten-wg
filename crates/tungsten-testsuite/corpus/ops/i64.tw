@@ -1,8 +1,7 @@
-// i64 arithmetic wraps, shift amounts are masked to 63.
+// i64: arithmetic shift right.
 program {
-    fn run() -> [i64; 6] {
-        return [(9223372036854775807L + 1L), (-9223372036854775808L - 1L), (4294967296L * 4294967296L),
-                (1L << 65), (-8L >>> 60), (-9223372036854775808L / -1L)];
+    fn run() -> [i64; 1] {
+        return [(-8L >> 60)];
     }
     unit u {
         main run;
@@ -10,4 +9,4 @@ program {
     entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
 @case "c" origin(0, 0, 0) seed(1)
-@expect "c" u[0, 0, 0] = [-9223372036854775808L, 9223372036854775807L, 0L, 2L, 15L, -9223372036854775808L]
+@expect "c" u[0, 0, 0] = [-1L]

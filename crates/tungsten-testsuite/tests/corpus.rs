@@ -1,7 +1,14 @@
 //! L3 and L5 on the interpreter: `::load`, `::interp`, `::inline` for every corpus file, plus the
-//! selection and runtime self-checks. Backend trials arrive in milestone 2.
+//! selection and runtime self-checks, and the Rust backend trials `::rust::original` and
+//! `::rust::inlined` (milestone 2).
+
+mod selftest;
+
+use std::sync::Arc;
 
 use libtest_mimic::{Arguments, Failed, Trial};
+use tungsten_testsuite::harness::batch::{Harness, Stage, probe_rustc, rustc_command};
+use tungsten_testsuite::harness::trial::run_backend_trial;
 use tungsten_testsuite::corpus::{CorpusFile, Loaded, discover, load_file};
 use tungsten_testsuite::env::TestEnv;
 use tungsten_testsuite::oracle;
@@ -22,6 +29,20 @@ fn main() {
     };
     let env = TestEnv::new();
     let mut trials = vec![];
+
+    // Backends: milestone 2 has Rust only. Java and CUDA arrive in milestones 3 and 5.
+    let want_rust = sel.backends.as_ref().is_none_or(|b| b.iter().any(|x| x == "rust"));
+    let require_rust = sel.require.iter().any(|x| x == "rust");
+    let harness: Result<Arc<Harness>, String> = if want_rust || require_rust {
+        Harness::new(std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")), sel.large).map(Arc::new)
+    } else {
+        Err("rust is not in TW_BACKENDS".to_string())
+    };
+    if let (true, Err(e)) = (require_rust, &harness) {
+        eprintln!("error: TW_REQUIRE lists rust, but there is no toolchain: {e}");
+        std::process::exit(2);
+    }
+    let _ = (rustc_command, probe_rustc);
 
     for file in discover() {
         let Loaded { file, result } = load_file(file, &env);
@@ -44,13 +65,40 @@ fn main() {
                 add("interp", interp);
                 if !reject {
                     add("inline", inline);
+                    for stage in [Stage::Original, Stage::Inlined] {
+                        let name = format!("{}::rust::{}", file.name, stage.name());
+                        let f = file.clone();
+                        let trial = match (&harness, want_rust) {
+                            (_, false) => Trial::test(name, || Ok(()))
+                                .with_ignored_flag(true)
+                                .with_kind("rust not in TW_BACKENDS"),
+                            (Ok(h), true) => {
+                                let h = h.clone();
+                                let t = Trial::test(name, move || backend_trial(&h, &f, stage));
+                                if ignore { t.with_ignored_flag(true).with_kind("large (set TW_LARGE=1)") } else { t }
+                            }
+                            (Err(e), true) => Trial::test(name, || Ok(()))
+                                .with_ignored_flag(true)
+                                .with_kind(format!("no rustc: {e}")),
+                        };
+                        trials.push(trial);
+                    }
                 }
             }
         }
     }
 
     trials.push(Trial::test("runtime_externs_registered", runtime_externs_registered));
+    trials.extend(selftest::trials(harness.as_ref().ok().cloned()));
     libtest_mimic::run(&args, trials).exit();
+}
+
+fn backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result<(), Failed> {
+    let notes = run_backend_trial(h, file, stage).map_err(Failed::from)?;
+    for n in notes {
+        println!("{n}");
+    }
+    Ok(())
 }
 
 fn load_ok(file: CorpusFile) -> Result<(TestEnv, tungsten_parse::TestFile), Failed> {

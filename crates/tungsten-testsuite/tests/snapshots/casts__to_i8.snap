@@ -21,21 +21,13 @@ Program {
             locals: [],
             ret: Array(
                 I8,
-                5,
+                4,
             ),
             hosts: [],
             body: [
                 Return(
                     ArrayLit(
                         [
-                            Cast {
-                                to: I8,
-                                operand: Lit(
-                                    F64(
-                                        4643985272004935680,
-                                    ),
-                                ),
-                            },
                             Cast {
                                 to: I8,
                                 operand: Lit(

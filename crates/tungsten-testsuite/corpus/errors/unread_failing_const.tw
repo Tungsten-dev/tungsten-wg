@@ -1,4 +1,5 @@
 // A failing const fails the whole case, even if nothing reads it (TESTING.md §2).
+@knownfail(rust, "Rust const items are evaluated at compile time, so `const bad = 1 / 0` is a build error (E0080) instead of a runtime failure")
 program {
     const bad = (1 / 0);
     fn run() -> i32 {

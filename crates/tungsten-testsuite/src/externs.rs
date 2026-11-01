@@ -112,14 +112,14 @@ impl Externs for CaseExterns {
             "test_domain" => Value::I32(test_domain(i32v(&a[0])).ok_or(ExternFail::Domain)?),
             "perm_get" => match &a[0] {
                 Value::PermTable(id) => match &self.tables[id.0] {
-                    Table::Perm(p) => Value::I32(rt_utils::perm_get(p, i32v(&a[1]))),
+                    Table::Perm(p) => Value::I32(rt_utils::perm_lookup(p, i32v(&a[1]))),
                     Table::Sampler(_) => panic!("perm_get on a sampler"),
                 },
                 v => panic!("perm_get: expected a perm table, got {v:?}"),
             },
             "sampler_sample" => match (&a[0], &a[1]) {
                 (Value::Sampler(id), Value::Vec3(F64x3 { x, y, z })) => match &self.tables[id.0] {
-                    Table::Sampler(st) => mk64(rt_utils::sampler_sample(
+                    Table::Sampler(st) => mk64(rt_utils::sample_state(
                         *st,
                         [f64::from_bits(*x), f64::from_bits(*y), f64::from_bits(*z)],
                     )),
@@ -166,8 +166,8 @@ mod tests {
             seen[x as usize] = true;
         }
         assert!(seen.iter().all(|b| *b));
-        assert_eq!(perm_get(&p, 256 + 5), perm_get(&p, 5));
-        assert_eq!(perm_get(&p, -1), p[255] as i32);
+        assert_eq!(perm_lookup(&p, 256 + 5), perm_lookup(&p, 5));
+        assert_eq!(perm_lookup(&p, -1), p[255] as i32);
     }
 
     #[test]
@@ -179,9 +179,27 @@ mod tests {
     #[test]
     fn sampler_in_unit_interval() {
         let s = base3d_state(7);
-        let v = sampler_sample(s, [1.5, -2.0, 3.0]);
+        let v = sample_state(s, [1.5, -2.0, 3.0]);
         assert!((0.0..1.0).contains(&v));
         // Same cell, same value.
-        assert_eq!(v, sampler_sample(s, [1.9, -1.1, 3.9]));
+        assert_eq!(v, sample_state(s, [1.9, -1.1, 3.9]));
+    }
+}
+
+#[cfg(test)]
+mod golden {
+    use super::rt_utils::*;
+
+    /// Toy-table golden values for fixed seeds (SPEC §5.3, §12). Any port must reproduce these.
+    /// Cross-checked against an independent Python implementation of the definitions.
+    #[test]
+    fn toy_tables() {
+        assert_eq!(splitmix64(0), 0xE220_A839_7B1D_CDAF);
+        let st = perlin_state(1, 2, 3, 4, 5, 6);
+        assert_eq!(st, 0x0c2b_5815_eea8_0ebf);
+        assert_eq!(&make_perm(st)[..8], &[216, 28, 120, 37, 55, 25, 49, 241]);
+        let b = base3d_state(7);
+        assert_eq!(b, 0x63cb_e1e4_5932_0dd7);
+        assert_eq!(sample_state(b, [1.5, -2.0, 3.0]).to_bits(), 0x3fed_e235_7dfd_f669);
     }
 }

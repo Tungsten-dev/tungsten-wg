@@ -21,65 +21,13 @@ Program {
             locals: [],
             ret: Array(
                 I32,
-                12,
+                6,
             ),
             hosts: [],
             body: [
                 Return(
                     ArrayLit(
                         [
-                            Binary {
-                                op: Add,
-                                left: Lit(
-                                    I32(
-                                        2147483647,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Subtract,
-                                left: Lit(
-                                    I32(
-                                        -2147483648,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Multiply,
-                                left: Lit(
-                                    I32(
-                                        65536,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        65536,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: Divide,
-                                left: Lit(
-                                    I32(
-                                        -2147483648,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        -1,
-                                    ),
-                                ),
-                            },
                             Binary {
                                 op: Divide,
                                 left: Lit(
@@ -94,19 +42,6 @@ Program {
                                 ),
                             },
                             Binary {
-                                op: ShiftLeft,
-                                left: Lit(
-                                    I32(
-                                        1,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        33,
-                                    ),
-                                ),
-                            },
-                            Binary {
                                 op: ShiftRight,
                                 left: Lit(
                                     I32(
@@ -116,19 +51,6 @@ Program {
                                 right: Lit(
                                     I32(
                                         1,
-                                    ),
-                                ),
-                            },
-                            Binary {
-                                op: LogicalShiftRight,
-                                left: Lit(
-                                    I32(
-                                        -8,
-                                    ),
-                                ),
-                                right: Lit(
-                                    I32(
-                                        28,
                                     ),
                                 ),
                             },

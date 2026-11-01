@@ -42,7 +42,7 @@ pub fn make_perm(state: u64) -> [u8; 256] {
     perm
 }
 
-pub fn perm_get(perm: &[u8; 256], i: i32) -> i32 {
+pub fn perm_lookup(perm: &[u8; 256], i: i32) -> i32 {
     perm[(i & 255) as usize] as i32
 }
 
@@ -51,7 +51,7 @@ fn f2i(x: f64) -> u64 {
 }
 
 /// `(h >>> 11) as f64 * 2^-53`, `h = fold(state, floor(v) as i32 bits)`.
-pub fn sampler_sample(state: u64, v: [f64; 3]) -> f64 {
+pub fn sample_state(state: u64, v: [f64; 3]) -> f64 {
     let h = fold(state, &[f2i(v[0].floor()), f2i(v[1].floor()), f2i(v[2].floor())]);
     (h >> 11) as f64 * (1.0 / 9007199254740992.0)
 }
