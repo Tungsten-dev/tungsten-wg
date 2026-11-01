@@ -8,7 +8,7 @@ wrapper, so a future fused kernel can call several bodies unchanged.
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::{Instance, Interface};
-use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, Name, OptimizedProgram, Ref, VariableType};
+use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref, VariableType};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
 
@@ -46,21 +46,7 @@ fn function_qualifiers(config: &CudaConfig) -> String {
     .to_string()
 }
 
-/// Variables the prologue binds from `p` and `ctx.config` instead of value-initializing.
-fn default_binding(name: &Name) -> Option<cuda::Expression> {
-    let Name::Named(n) = name else { return None };
-    let config_field = |f: &str| C::field(C::field(C::name(PARAM_CTX), "config"), f);
-    match n.as_str() {
-        "origin" => Some(config_field("origin")),
-        "origin_scale" => Some(config_field("origin_scale")),
-        "position_scale" => Some(config_field("position_scale")),
-        "pos3" => Some(C::field(C::name(PARAM_POS), "pos")),
-        _ => None,
-    }
-}
-
-/// Declares every local at the top of the function: default bindings get their value, everything
-/// else is value-initialized (`T name{};`). The IR guarantees definite assignment; this only keeps
+/// Declares every local at the top of the function, value-initialized (`T name{};`). The IR guarantees definite assignment; this only keeps
 /// the code free of UB and warnings.
 fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<cuda::Statement> {
     let mut out = Vec::new();
@@ -69,7 +55,7 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<cuda
             continue;
         }
         let name = conv.declare_var(r);
-        out.push(S::Declare { t: device_type(&var.t), name, init: default_binding(&var.name), is_const: false });
+        out.push(S::Declare { t: device_type(&var.t), name, init: None, is_const: false });
     }
     out
 }

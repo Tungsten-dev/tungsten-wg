@@ -6,7 +6,7 @@ arithmetic wraps and shifts are masked (Java semantics), and float -> int casts 
 
 use tungsten_interface::Instance;
 use tungsten_interface::naming::cuda_sanitize;
-use tungsten_ir::model::{BinaryOperator, ConstExpr, Expression, UnaryOperator, VariableType};
+use tungsten_ir::model::{AmbientKind, BinaryOperator, ConstExpr, Expression, UnaryOperator, VariableType};
 
 use super::converter::FunctionConverter;
 use super::types::{
@@ -125,7 +125,15 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => C::IntLit(*v),
             Expression::Long(v) => C::LongLit(*v),
             Expression::Bool(v) => C::BoolLit(*v),
-            Expression::Ambient(k) => unimplemented!("Ambient({k:?}) lowering is not implemented for the cuda backend"),
+            Expression::Ambient(k) => {
+                let config = || C::field(C::name(PARAM_CTX), "config");
+                match k {
+                    AmbientKind::Origin => C::field(config(), "origin"),
+                    AmbientKind::OriginScale => C::field(config(), "origin_scale"),
+                    AmbientKind::PositionScale => C::field(config(), "position_scale"),
+                    AmbientKind::Pos3 => C::field(C::name(PARAM_POS), "pos"),
+                }
+            }
             Expression::FunctionCall { function, parameters } => {
                 self.called.push(*function);
                 let program = self.program;
