@@ -16,7 +16,7 @@ use crate::interned::Interned;
 use crate::model as rcl;
 use crate::model::codegen::RustCodeGenerator;
 use crate::random::xoroshiro_seed;
-use tungsten_interface::naming::{NamingRules, unique, unit_base_name};
+use tungsten_interface::naming::{NamingRules, entry_method_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{
     ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref, VariableType,
@@ -398,14 +398,10 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         let init = self.intern(make_auto_consts_fn(&specs));
         self.model.functions.push(init);
 
-        let mut used = HashSet::from(["new".to_string()]);
+        let names = entry_method_names(program, &naming, HashSet::from(["new".to_string()]));
         let mut methods = vec![self.intern(new_fn())];
-        for entry in &program.entry_points {
+        for (entry, name) in program.entry_points.iter().zip(names) {
             let entry = Instance::from_entry(entry);
-            let name = unique(
-                &mut used,
-                format!("orchestrate_{}", unit_base_name(&naming, program, entry.cu)),
-            );
             let method = entry_method(program, interface, name, &entry);
             methods.push(self.intern(method));
         }
