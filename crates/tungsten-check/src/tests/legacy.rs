@@ -6,7 +6,10 @@ use tungsten_legacy::builder::{Builder, SPMTBuilder};
 use tungsten_legacy::conversion::convert;
 use tungsten_legacy::model::*;
 
+use super::eval::{Toy, eval_registry};
 use super::registry;
+use crate::{EvalOptions, NamedCase, prepare};
+use tungsten_core::Value;
 
 fn unit<'m>(
     arena: &'m Bump,
@@ -125,4 +128,103 @@ fn converted_program_lowers() {
     assert_eq!(l.map.externs, vec!["sin".to_string(), "sample".to_string()]);
     assert_eq!(l.program.entries.len(), 1);
     assert_eq!(l.program.inputs.len(), 3);
+}
+
+fn field<'m>(v: Var<'m>, name: &str, t: VariableType) -> Expression<'m> {
+    Expression::Field {
+        base: Box::new(Expression::Variable(v)),
+        field: name.into(),
+        type_of_field: t,
+        known_idnex: None,
+    }
+}
+
+/// Runs a converted one-entry program on a 2x1x1 grid with `origin = (10, 20, 30)`.
+fn eval_cells(spmt: &SPMT<'_>) -> Vec<f64> {
+    let p = convert(spmt).expect("conversion");
+    let prep = prepare(&p, &eval_registry()).unwrap_or_else(|e| panic!("{e}"));
+    let case = prep
+        .case(&NamedCase { origin: [10.0, 20.0, 30.0], hosts: vec![] })
+        .unwrap();
+    let r = prep.eval(&case, &Toy(&prep), EvalOptions::default()).unwrap();
+    r.entries[0]
+        .iter()
+        .map(|c| match c {
+            Ok(Value::F64(b)) => f64::from_bits(*b),
+            other => panic!("expected a double, found {other:?}"),
+        })
+        .collect()
+}
+
+fn entry<'m>(unit: DensityFunctionRef<'m>) -> SPMT<'m> {
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (2, 1, 1),
+            scaled_origin: (2.0, 1.0, 1.0),
+            scaled_position: (0.5, 1.0, 1.0),
+        }],
+    }
+}
+
+/// The four default variables pass the flow check (they used to be uninitialized locals) and
+/// evaluate to the context: `origin.x * origin_scale.x + pos3.x * position_scale.x`.
+#[test]
+fn default_variables_are_ambients() {
+    let arena = Bump::new();
+    let mut b = Builder::new(&arena).named("u").returns(VariableType::F64);
+    let origin = b.alloc_var(Name::Named("origin".into()), VariableType::Vec3);
+    let origin_scale = b.alloc_var(Name::Named("origin_scale".into()), VariableType::Vec3);
+    let position_scale = b.alloc_var(Name::Named("position_scale".into()), VariableType::Vec3);
+    let pos3 = b.local("pos3", VariableType::Pos3);
+    b.set_body(vec![Statement::Return(
+        field(origin, "x", VariableType::F64) * field(origin_scale, "x", VariableType::F64)
+            + Expression::ExplicitCast {
+                to: VariableType::F64,
+                expr: Box::new(field(pos3, "x", VariableType::I32)),
+            } * field(position_scale, "x", VariableType::F64),
+    )]);
+    // 10 * 2 + x * 0.5
+    assert_eq!(eval_cells(&entry(b.finish_compute_unit())), vec![20.0, 20.5]);
+}
+
+/// `aquifer_random` in `tungsten-mc-compile` creates `origin` as a `Pos3`. The converter resolves
+/// it to the `Vec3` ambient, so the field read must be typed from the ambient to pass the checker.
+#[test]
+fn mistyped_origin_passes_the_checker() {
+    let arena = Bump::new();
+    let mut b = Builder::new(&arena).named("u").returns(VariableType::F64);
+    let origin = b.alloc_var(Name::Named("origin".into()), VariableType::Pos3);
+    b.set_body(vec![Statement::Return(field(origin, "z", VariableType::F64))]);
+    assert_eq!(eval_cells(&entry(b.finish_compute_unit())), vec![30.0, 30.0]);
+}
+
+/// `water_levels` in `tungsten-mc-compile` moves `pos3` partway through its body, and other code
+/// reads it through a second variable of the same name. Before the assignment it is the cell.
+#[test]
+fn assigned_pos3_starts_as_the_ambient() {
+    let arena = Bump::new();
+    let mut b = Builder::new(&arena).named("u").returns(VariableType::F64);
+    let written = b.local("pos3", VariableType::Pos3);
+    let read = b.alloc_var(Name::Named("pos3".into()), VariableType::Pos3);
+    let before = b.local("before", VariableType::I32);
+    let x = || field(read, "x", VariableType::I32);
+    b.set_body(vec![
+        Statement::Assign { target: before, value: x() },
+        Statement::Assign {
+            target: written,
+            value: Expression::Construct {
+                t: VariableType::Pos3,
+                args: vec![7i32.into(), 0i32.into(), 0i32.into()],
+            },
+        },
+        Statement::Return(Expression::ExplicitCast {
+            to: VariableType::F64,
+            expr: Box::new(Expression::Variable(before) * 10i32 + x()),
+        }),
+    ]);
+    // cell.x * 10 + 7
+    assert_eq!(eval_cells(&entry(b.finish_compute_unit())), vec![7.0, 17.0]);
 }
