@@ -1,83 +1,81 @@
 # Tungsten Worldgen Compiler
 
-A compiler and code generator for Minecraft world generation algorithms, transforming density functions into optimized Rust and CUDA code.
+A compiler and code generator for Minecraft world generation. It takes density functions in an optimized intermediate representation (IR) and turns them into fast Rust, CUDA or Java code.
 
-## Overview
-
-Tungsten Worldgen Compiler takes Minecraft world generation density functions and compiles them into high-performance implementations in multiple target languages. It uses a Single Program Multiple Target (SPMT) intermediate representation to analyze and optimize worldgen algorithms before generating code for different compute backends.
-
-This crate only provides backend compilation and code generation functionality. The end-to-end Minecraft compiler is available as `tungsten-mc-compile`.
+This repository only contains the backend and code generation side. The end-to-end Minecraft compiler lives in tungsten-mc-compile.
 
 ## Features
 
-- **Multi-Target Compilation**: Generate code for multiple backends from a single source
-  - **Rust**: CPU-optimized Rust code
-  - **CUDA C++**: GPU-accelerated CUDA kernels
-  - **OpenCL**: Cross-platform GPU compute (in development)
+- Several targets from one source. You create the backends you want, hand them to compile as a list, and each backend keeps its own output.
+  - Rust (tungsten-rust): CPU code, enabled by default
+  - CUDA C++ (tungsten-cuda): GPU kernels, behind the cuda feature
+  - Java (tungsten-java): behind the java feature
+  - Inspect (tungsten-inspect): doesn't generate code, but renders the program and its schedule for debugging (IR text, DOT/SVG graphs, diffs). Behind the inspect feature.
+- Built for Minecraft's vanilla worldgen (1.21.1).
+- Optimization is up to the caller. Passes like inlining are run explicitly before compiling, never by a backend.
 
-- **Minecraft Integration**: Designed specifically for Minecraft's world generation algorithms with support for vanilla worldgen formats (1.21.1)
+## Workspace layout
 
-- **Visual Debugging**: Generate DOT graph files for visualizing density function dependencies and execution waves
+The project is a Cargo workspace of small crates. Each one owns a single part of the compiler:
+
+<!-- TODO: add dependency diagram (draw.io) -->
+
+- tungsten-ir: the OptimizedProgram model (compute units, functions, statements, arenas).
+- tungsten-optimizer: passes over the IR. Right now that is inlining.
+- tungsten-interface: the contract between the compiler and the backends (Interface, NamingRules, the codegen traits and the Backend trait).
+- tungsten-codegen: language-agnostic building blocks, like the pretty printer.
+- tungsten-rust, tungsten-cuda, tungsten-java: one backend per target language.
+- tungsten-inspect: the debugging backend.
+- tungsten-legacy: the old SPMT model and builder, plus the conversion that lowers it to the IR. It is kept isolated so it can be deleted later.
+- tungsten-wg: the top-level crate. It re-exports everything, switches backends on and off through features, and provides compile.
+
+Backends never depend on each other or on the optimizer. For the full rules and the reasoning behind them, see [docs/redesign.md](docs/redesign.md).
 
 ## Installation
 
-Add this to your `Cargo.toml`:
+Add this to your Cargo.toml:
 
 ```toml
 [dependencies]
-tungsten-wg = "0.1.0"
+tungsten-wg = "0.2"
+```
+
+To enable more backends:
+
+```toml
+[dependencies]
+tungsten-wg = { version = "0.2", features = ["cuda"] }
 ```
 
 Or install from GitHub:
 
 ```toml
 [dependencies]
-tungsten-wg = { git = "https://github.com/NiekAukes/tungsten-wg" }
+tungsten-wg = { git = "https://github.com/Tungsten-dev/tungsten-wg" }
 ```
 
 ## Usage
 
-### Basic Compilation
-
 ```rust
-use tungsten_wg::{CompilerConfig, Program};
+use tungsten_wg::{RustBackend, RustConfig, RustOutput};
 
-// Load or construct an SPMT program
-let program = Program::from_file("worldgen.spmt")?;
+// Build an OptimizedProgram, or lower a legacy SPMT program to one
+let mut program = /* ... */;
 
-// Configure the compiler
-let config = CompilerConfig::new()
-    .with_rcl(true)      // Enable Rust backend
-    .with_cuda(true);    // Enable CUDA backend
+// Optimization is explicit and happens before compile
+tungsten_wg::optimizer::perform_inline(&mut program);
 
-// Compile to target languages
-let output = program.compile(&config)?;
+// Each backend is created on its own, with its own config
+let mut rust = RustBackend::new(RustConfig::default());
 
-// Write generated code
-std::fs::write("output/density_function.rs", output.rcl_code)?;
-std::fs::write("output/kernels.cu", output.cuda_code)?;
+// Pass as many backends as you like, e.g. &mut [&mut rust, &mut cuda]
+tungsten_wg::compile(&program, &mut [&mut rust])?;
+
+// Read the result from the backend itself
+let out: &RustOutput = rust.output().unwrap();
 ```
 
-### Configuration Options
-
-```rust
-let config = CompilerConfig {
-    generate_rcl: true,                              // Generate Rust code
-    generate_cuda: false,                            // Generate CUDA code
-    generate_gpu_orchestrator: false,                // Generate GPU orchestrator
-    rcl_density_module_name: "density_function".to_string(),
-    rcl_orchestration_module_name: "orchestration".to_string(),
-};
-```
-
-## Architecture
-
-The compiler pipeline consists of several stages:
-
-1. **SPMT Generation**: Parse density function definitions into the SPMT intermediate representation, done by dedicated parsers (not included in this crate)
-2. **Orchestration**: Schedule execution waves and manage inter-kernel dependencies
-3. **Transformation**: Convert SPMT IR to target-specific ASTs (RCL, CUDA)
-4. **Code Generation**: Generate final source code in target languages
+For every backend, compile builds an Interface using that backend's naming rules and then calls generate. If a backend fails, you get a CompileError::Backend with the backend's name and the underlying error. Compilation stops at the first failure, and backends that already ran keep their output.
 
 ## Development
 

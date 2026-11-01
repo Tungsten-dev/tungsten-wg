@@ -1,10 +1,10 @@
 [package]
 name = "tungsten-wg"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 description = "A compiler / code generator for world generation (Rust and CUDA)."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/NiekAukes/tungsten-wg"
+repository = "https://github.com/Tungsten-dev/tungsten-wg"
 keywords = ["minecraft", "worldgen", "compiler", "cuda", "codegen"]
 categories = ["compilers"]
 exclude = [
@@ -28,10 +28,10 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.2"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/NiekAukes/tungsten-wg"
+repository = "https://github.com/Tungsten-dev/tungsten-wg"
 
 [workspace.dependencies]
 bumpalo = "3.19.0"
@@ -39,15 +39,15 @@ md5 = "0.8.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0.40"
-tungsten-ir = { path = "crates/tungsten-ir" }
-tungsten-codegen = { path = "crates/tungsten-codegen" }
-tungsten-interface = { path = "crates/tungsten-interface" }
-tungsten-optimizer = { path = "crates/tungsten-optimizer" }
-tungsten-rust = { path = "crates/tungsten-rust" }
-tungsten-java = { path = "crates/tungsten-java" }
-tungsten-cuda = { path = "crates/tungsten-cuda" }
-tungsten-legacy = { path = "crates/tungsten-legacy" }
-tungsten-inspect = { path = "crates/tungsten-inspect" }
+tungsten-ir = { path = "crates/tungsten-ir", version = "0.2.0" }
+tungsten-codegen = { path = "crates/tungsten-codegen", version = "0.2.0" }
+tungsten-interface = { path = "crates/tungsten-interface", version = "0.2.0" }
+tungsten-optimizer = { path = "crates/tungsten-optimizer", version = "0.2.0" }
+tungsten-rust = { path = "crates/tungsten-rust", version = "0.2.0" }
+tungsten-java = { path = "crates/tungsten-java", version = "0.2.0" }
+tungsten-cuda = { path = "crates/tungsten-cuda", version = "0.2.0" }
+tungsten-legacy = { path = "crates/tungsten-legacy", version = "0.2.0" }
+tungsten-inspect = { path = "crates/tungsten-inspect", version = "0.2.0" }
 
 [features]
 default = ["rust"]
