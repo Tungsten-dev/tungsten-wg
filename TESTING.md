@@ -81,7 +81,7 @@ crates/tungsten-check/         # plain Rust, unverified
   src/lower/          # OptimizedProgram -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
-crates/tungsten-testsuite/     # NOT STARTED; full layout in SPEC.md §2
+crates/tungsten-testsuite/     # milestones 1 and 2 done (Rust differential); full layout in SPEC.md §2
   src/harness/        # batches and cache, protocol, processes, driver generators
   src/registry.rs     # registry.toml loader
   src/env.rs          # tungsten_parse::Env + tungsten_check::Registry

@@ -1,77 +1,62 @@
 # TODO
 
-State at the end of the first session: milestone 1 (Foundation) is done and green. See `SPEC.md`
-at the repo root (§9.4 for the milestones, §14 for implementation notes) and `README.md` here.
-Nothing is committed yet. TESTING.md, SPEC.md and docs/testing-policy.md were already uncommitted
-before this work.
+State at the end of the second session: milestones 1 (Foundation) and 2 (Rust differential) are done
+and green. See `SPEC.md` at the repo root (§9.4 for the milestones, §14 for implementation notes) and
+`README.md` here. Nothing from milestone 2 is committed yet.
 
 ## Before starting
 
-- Commit milestone 1 (suggested message in the last report: "Add tungsten-testsuite foundation
-  (milestone 1)"), or at least decide how to split it from the TESTING.md/SPEC.md edits.
+- Commit milestone 2. It touches `tungsten-interface/naming.rs`, `tungsten-rust` and `tungsten-java`
+  (the `entry_method_names` extraction), so consider splitting that into its own commit.
 - Run `INSTA_UPDATE=no cargo test --workspace` to confirm the baseline is still green.
-
-## Milestone 2: Rust differential (next)
-
-- [ ] **`entry_method_names`.** Extract the inline name computation in
-  `tungsten-rust/src/orchestration.rs` (~line 403) and `tungsten-java/src/orchestration.rs`
-  (~line 205) into a public `tungsten_interface::naming::entry_method_names`. The two backends seed
-  the `used` set differently (Rust: `{"new"}`, Java: `rules.used_set()`), so the function needs a
-  seed parameter. Generated output must not change; check by diffing output before and after.
-- [ ] `runtime/rust/mathf64.rs`: `Vec3` (f64) math, `Pos3`, `Config`, `iter_3d`, `index`,
-  `make_boxed`, samplers. Check what generated code actually imports
-  (`use crate::mathf64::*; use crate::utilsf64::*;`).
-- [ ] Add the table constructors the generated code calls (`make_permutation_table`,
-  `make_base3d_perm_table`) to `runtime/rust/utilsf64.rs`. Today it only has the pure functions.
-- [ ] Records generated per batch from `registry.toml` (Rust `#[repr(C)]` `Copy` struct).
-- [ ] `src/harness/`: `protocol.rs` (SPEC §7.4), `process.rs` (watchdog, resume after crash),
-  `batch.rs` (batches per corpus dir, content-hash cache under `$CARGO_TARGET_TMPDIR/tw-cache/`,
-  per-test fallback), `rust.rs` (driver generator, `rustc --edition 2024 ... --cap-lints allow`).
-- [ ] `src/compare.rs` (scoring table, SPEC §6.3), `src/knownfail.rs` (reconciliation, §6.4),
-  mismatch report (§6.5).
-- [ ] `<path>::rust::original` and `<path>::rust::inlined` trials in `tests/corpus.rs`. Skip cases
-  where the interpreter gives `OutOfFuel` (`oracle::skipped_for_backends` exists). Toolchain probes
-  and ignore-with-reason, `TW_REQUIRE`.
-- [ ] Mark real gaps with `@knownfail`, one concern per file, and log them in `PAPER.md`.
-- [ ] Confirm that `HostConsts` and `Orchestration` members are visible to a sibling `driver` module
-  (SPEC §13). If not, a small backend change is needed.
-- [ ] `mathf64.rs` was left out of milestone 1 and is not in the SPEC §14 notes as "done".
 
 ## Validation still owed (SPEC §12)
 
-- [ ] Mutation self-tests under `selftest::` in `tests/corpus.rs` (wrong value, sign of zero, NaN
-  payloads must pass, crash, hang, truncated response, build error in one test of a batch, stale
-  knownfail, resume after crash).
-- [ ] Protocol round-trip proptest and golden bytes shared by Rust and Java.
-- [ ] Toy-table golden values for fixed seeds, in every language. Milestone 1 only has a splitmix64
-  golden and property tests.
-- [ ] Cache checks: a second run does no builds, and changing a runtime file invalidates the key.
+- [ ] Java halves: golden bytes (`tests/golden/protocol.txt`) and toy-table goldens in Java (milestone 3).
+- [ ] Diff the generated Java output before and after the `entry_method_names` extraction. Only Rust was
+  diffed; the Java change is the same loop and its tests pass.
+- [ ] `runtime_coverage` (SPEC §5.2): one call to every registered extern per backend. The Rust runtime
+  is covered by the per-extern corpus files; the Java one comes with milestone 3.
+- [ ] Optional: a mutation check on the real generated path (edit `runtime/rust/externs.rs`, see the
+  corpus go red). The selftests use stub drivers, so they don't cover this.
 
 ## Later milestones
 
 - [ ] **3. Java differential and CI.** Java runtime and driver, `.github/workflows/test.yml` (JDK 21,
   `TW_BACKENDS=rust,java TW_REQUIRE=rust,java INSTA_UPDATE=no`), the TESTING.md §8.2 example end to end.
+  Reuse `harness/protocol.rs` (the layout is language independent) and the `process.rs` watchdog; the
+  JVM start-up allowance is `STARTUP_ALLOWANCE`.
 - [ ] **4. L6 random programs.** `src/gen.rs`, `tests/random.rs`, batch sampling, manual shrinking,
   `L6_STRICT`, regressions. `proptest` is already a dev-dependency.
 - [ ] **5. CUDA.** `runtime/cuda/tw/`, exact flags, host driver, GPU serialization. Interpreter
   errors are not scored on CUDA.
 
-## Known gaps in milestone 1
+## Backend gaps found (all `@knownfail`, logged in `PAPER.md`)
 
-- [ ] Nothing in the corpus uses the `Wrap` record (record inside a record) or any `@cells` /
-  `@tier(large)` directive. Add files for them, and for array-typed entries and multiple entries
-  per program.
-- [ ] No corpus file has `@expect reject(Kind)` with a kind. Only plain `@expect reject` is used.
-- [ ] The test error for entries returning `PermTable` or `Sampler` (SPEC §3.3) is not implemented.
-  `values::has_table` exists but is unused. It belongs with the backend trials.
-- [ ] Expected values in the corpus were written by hand. A few were corrected after the
-  interpreter disagreed (casts, shifts, i8). Worth a second look at `casts/` and `ops/i8.tw`,
-  to be sure the interpreter is right and not the expectation.
-- [ ] `selection.rs` only validates names. Toolchain probes are not implemented.
+- [ ] Rust integer arithmetic does not wrap (`ops/{i8,i32,i64}_{add,sub,mul}_wraps`,
+  `_div_min_by_minus_one`, `_shift_masked`). Fix the backend, then delete the `@knownfail` lines (the
+  trials go red until you do).
+- [ ] Rust emits `>>>` as `>>` (`ops/{i32,i64}_logical_shift`).
+- [ ] Rust float to `i8` casts saturate (`casts/to_i8_from_float`).
+- [ ] Rust `const` items make a failing constant a build error (`errors/unread_failing_const`). Once it
+  builds, check that the "unread" part of the contract holds too.
+
+## Known gaps in the corpus
+
+- [ ] Expected values in the corpus were written by hand. A few were corrected after the interpreter
+  disagreed (casts, shifts, i8). Worth a second look at `casts/` and `ops/i8*.tw`, to be sure the
+  interpreter is right and not the expectation. (The Rust backend now disagrees with them in the way
+  Rust semantics predict, which is some evidence the expectations follow Java.)
+- [ ] There is no corpus file for `@cells` that fails (a sampled-out cell that differs is meant to be
+  ignored). The selection function is unit tested.
+- [ ] `selection.rs` only knows `rust` for toolchain probes; `javac`, `java` and `nvcc` come later.
 
 ## Open questions from SPEC §13
 
 - Does every density input of an entry receive the entry's `origin` in tungsten-mc (TESTING.md §13)?
-- Compile time of a whole Rust or Java batch is unmeasured. Split a corpus directory if it gets slow.
+- Compile time of a whole Rust batch is about 1 to 2 seconds per directory with the current corpus;
+  Java is unmeasured. Split a corpus directory if it gets slow.
 - Inlining has no `@knownfail` escape hatch by design. If a long-lived inliner bug appears, consider
   a `stage=inlined` skip.
+- A `@knownfail` without `case=` fails when one of the cases it covers passes (SPEC §6.4 read literally).
+  If that proves too strict for multi-case files, relax it to "stale only if none of the covered cases fail".

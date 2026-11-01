@@ -1,6 +1,6 @@
 # `tungsten-testsuite`: differential test harness, corpus and runtimes
 
-Status: approved design, not started. This implements `TESTING.md` §9–§12 and the
+Status: approved design; milestones 1 and 2 are implemented (§14). This implements `TESTING.md` §9–§12 and the
 `tungsten-testsuite` entry in §3. `TESTING.md` remains the normative source for semantics (§5, §6)
 and the text format (§8, plus `crates/tungsten-parse/SPEC.md`). The amendments in §10 below have
 already been applied to it.
@@ -513,8 +513,9 @@ The harness itself must be shown to detect failures, or a green run means nothin
 
 - Confirm that every density input of an entry receives the entry's `origin` in tungsten-mc
   (`TESTING.md` §13).
-- Rust-generated `HostConsts` and `Orchestration` members must be visible to a sibling `driver` module.
-  This is believed to hold and gets confirmed in milestone 2; if not, it's a small backend change.
+- ~~Rust-generated `HostConsts` and `Orchestration` members must be visible to a sibling `driver` module.~~
+  Confirmed in milestone 2: the driver builds `HostConsts { .. }` and calls `Orchestration` methods, and no
+  backend change was needed.
 - Inlining with `@knownfail` has no interpreter-level escape hatch by design (§3.3). If a known inliner
   bug has to wait for a long fix, a `stage=inlined` skip could be added.
 - Rust and Java compile time for a whole batch is unmeasured. If a directory becomes slow, split it.
@@ -550,3 +551,53 @@ prelude, the `roundtrip`, `lowering` (invariants plus insta snapshots in `tests/
   shared function needs a seed parameter to leave generated output unchanged.
 - **Prelude accuracy.** Transcendentals are series approximations (`exp` range-reduced, `log` via
   atanh series). Corpus files check exact points and agreement with libm to 1e-9.
+
+### Milestone 2 (Rust differential)
+
+Implemented: `entry_method_names`, the Rust runtime, protocol, driver generator, child processes with
+a watchdog and crash resume, batches with the content-hash cache and per-test fallback, scoring,
+`@knownfail` reconciliation, the `::rust::original` and `::rust::inlined` trials, the validation of §12
+(except the Java half of the golden bytes), and 26 new corpus files. Deviations and details:
+
+- **`entry_method_names`** takes the seed set as a third parameter
+  (`entry_method_names(program, rules, used)`), as predicted. Rust output for the whole corpus was diffed
+  before and after and is byte-identical. Java is the same loop and its tests pass, but its output was not
+  diffed.
+- **Runtime files.** `mathf64.rs` is vendored from `tungsten-frontends/tungsten-mc/src/{mathf64,utilsf64}.rs`
+  (commit 88b88ae of that repo): `Vec3`, `Pos3`, their operators, `index`, `Iter3D`, `PositionIterator`,
+  `iter_3d`, `Config`. It adds `Neg for Vec3`. New files: `api.rs` (the registry externs by plain name, the
+  toy samplers, `make_boxed`) and `proto.rs` (driver side of §7.4 and the request loop). Upstream's `make_boxed`
+  returns uninitialised memory, so ours is zero-initialised. `min`/`max`/`floor`/`ceil`/`pow` are not taken
+  from upstream: the registry versions have Java semantics.
+- **Rename.** The pure toy-table functions in `utilsf64.rs` are now `perm_lookup` and `sample_state`, so the
+  glob imports of generated code can't see two `perm_get` / `sampler_sample`.
+- **Index type.** `index(p)` returns `usize` upstream (not `i32`), and the iterator type is `Iter3D`, not
+  `PositionIter`. The generated code is `buffers.x[index(p) as usize]`.
+- **Module layout.** Generated modules start with `use super::*;`, not `use crate::mathf64::*;`. Each
+  `t_<hash>.rs` therefore begins with those two imports, then holds the backend's `density_function` and
+  `orchestration` modules and a generated `driver` module. Records are `records.rs`, re-exported through
+  `mathf64`.
+- **Panic mapping.** Rust's own panics are mapped to protocol kinds by message (`divide by zero` is 0,
+  `out of bounds` is 1, the marker `tw:ExternDomain` raised by `test_domain` is 2, anything else, such as
+  `attempt to add with overflow`, is 3). A kind-3 failure still counts as "the backend failed".
+- **Batch contents.** A batch holds the files of a directory that load, aren't reject files, aren't
+  `@tier(large)` (unless `TW_LARGE=1`) and have at least one case the backend can run. Both stages are
+  separate batches. `CARGO_TARGET_TMPDIR` reaches the library as a parameter of `Harness::new`, since
+  only integration tests have it.
+- **Knownfail scope.** Reconciliation is exactly per `(case, stage)` as in §6.4, so a `@knownfail` without
+  `case=` fails the trial when any of the cases it covers passes. All 19 current knownfails have a
+  single-case file.
+- **Corpus split.** `ops/i8`, `ops/i32`, `ops/i64` and `casts/to_i8` were split into one file per
+  concern, because a single panic hides the rest of the array. The old files keep the operations that
+  already agree. Their snapshots in `tests/snapshots/` were regenerated and the new ones added.
+- **`CellSample` rule.** `@cells(sample, seed)` compares the `sample` cells with the smallest
+  `splitmix64(seed ^ entry << 40 ^ cell)`.
+- **Selftests** drive stub drivers through the real build, process and scoring code (14 of them,
+  `tests/selftest/mod.rs`). Golden bytes are `tests/golden/protocol.txt`, checked from the Rust side
+  (host encoder and driver-side `Writer`/`Reader`); the Java driver reuses the file in milestone 3.
+  Toy-table goldens (`src/externs.rs`) were cross-checked against an independent Python implementation.
+- **Not done:** a Java side for the goldens, decision traces, and any fix of the gaps below.
+
+Gaps found (all `@knownfail(rust, ...)`, logged in `PAPER.md`): integer overflow does not wrap (15 files),
+`>>>` is emitted as `>>` (2 files), float to `i8` casts saturate (1 file), and a failing `const` is a
+build error (1 file).

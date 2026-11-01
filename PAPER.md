@@ -10,8 +10,9 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
 
 - `TESTING.md` is a partly implemented spec. `tungsten-parse` (parser, elaborator, canonical
   printer, `.tw` test-file envelope) is implemented, and its tests pass (round-trip, floats, depth,
-  fuzz, permute, legacy). `tungsten-testsuite` (harness, corpus, test runtimes) does **not exist
-  yet**, so no backend is compared against the interpreter yet.
+  fuzz, permute, legacy). `tungsten-testsuite` (harness, corpus, test runtimes) exists: milestones 1
+  and 2 are done, so the Rust backend is compared bit for bit against the interpreter (original and
+  inlined). Java, CUDA and the random generator are not built yet.
 - `Expression::Ambient` is implemented in the Rust, Java and CUDA backends, and legacy conversion
   emits it instead of the four `Named` variables. `derive_binop_type` has not been changed to the
   §5.3 typing.
@@ -119,6 +120,42 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
 - 2026-11-01 [eval] Vanilla overworld Rust output before and after the ambient change: 221 functions,
   0 differing lines once ambient reads, bindings and `inlined_density_N` numbering are normalized
   (one-off script, not in the repo). Rust only; CUDA and Java output were generated but not diffed.
+- 2026-11-01 [eval] First Rust differential (testsuite milestone 2): 59 non-reject corpus files, each
+  run on the original and the inlined program. 19 files carry a `@knownfail(rust, ...)`, all for the
+  four bugs below. Of the other 40, 38 agree with the interpreter bit for bit on both stages; the 2 left
+  send nothing to the backend (`errors/out_of_fuel`, interpreter-only by design) or are `@tier(large)` and
+  skipped unless `TW_LARGE=1`. Cold run of
+  the whole suite (including the Rust builds) takes about 4.5 s, a warm one about 1.5 s. Evidence:
+  `cargo test -p tungsten-testsuite --test corpus`, `grep -rl @knownfail crates/tungsten-testsuite/corpus`.
+- 2026-11-01 [bug] The Rust backend emits plain `+ - * / <<` for integers. With overflow checks on, `i32`,
+  `i64` and `i8` add, subtract, multiply and `MIN / -1` panic where the IR (and Java) wrap, and a shift
+  by the type width or more panics where the amount should be masked. Fifteen files, one per type and
+  operation. Evidence: `corpus/ops/{i8,i32,i64}_{add_wraps,sub_wraps,mul_wraps,div_min_by_minus_one,shift_masked}.tw`.
+  Unverified: whether a release build without overflow checks would hide it for add/sub/mul (it would
+  still not mask shifts or wrap `MIN / -1`).
+- 2026-11-01 [bug] The Rust backend emits `>>>` (logical shift right) as `>>`, which is an arithmetic shift
+  on signed types: `-8 >>> 28` gives `-1` instead of `15`. Evidence: `corpus/ops/i32_logical_shift.tw`,
+  `corpus/ops/i64_logical_shift.tw`; `convert_binary_op` in `tungsten-rust/src/types.rs` maps both
+  `ShiftRight` and `LogicalShiftRight` to `RightShift`.
+- 2026-11-01 [bug] The Rust backend casts a float to `i8` with `as i8`, which saturates (`300.0 as i8` is 127),
+  while the IR goes through `i32` and truncates like Java (44). Evidence: `corpus/casts/to_i8_from_float.tw`.
+- 2026-11-01 [bug] The Rust backend emits constants as `const` items, so a failing constant
+  (`const bad = 1 / 0`) is a build error (E0080) instead of a runtime failure of the case. The "unread
+  failing const must still fail the case" contract is therefore untestable on Rust until this is fixed.
+  Evidence: `corpus/errors/unread_failing_const.tw`.
+- 2026-11-01 [design] The harness scores a build failure as a failure even for cases where the interpreter
+  errors, so a genuine compile bug cannot hide in an error-only test; the cost is that a failing `const`
+  needs a `@knownfail` (previous entry). A `@knownfail` also covers every case in its scope, so files are
+  kept to one concern each. Evidence: `SPEC.md` §6.3, §6.4.
+- 2026-11-01 [limitation] The verified runtime in the sister project (`tungsten-frontends/tungsten-mc`,
+  `src/utilsf64.rs`) implements `make_boxed` with `Box::new_uninit().assume_init()`, so `InternalBuffers`
+  and `AutoConsts` start with uninitialised contents (undefined behaviour for `bool` cells, and
+  nondeterministic otherwise). The test runtime zero-initialises instead
+  (`crates/tungsten-testsuite/runtime/rust/api.rs`). Unverified: whether any generated program reads a
+  buffer cell before writing it.
+- 2026-11-01 [design] Host values are bound by name when a case is sent to a backend, so the same case works
+  on the inlined program, where host arena order can differ. Evidence: `TestIo::encode_request` in
+  `crates/tungsten-testsuite/src/harness/protocol.rs`.
 
 ## Maintaining this file
 
