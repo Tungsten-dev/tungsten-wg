@@ -6,7 +6,7 @@ declarations the device code is generated against), the CUDA-free public header
 The host source is mostly fixed text with per-program loops, so it is written as raw lines.
 */
 
-use tungsten_interface::naming::{NamingRules, unique, unit_base_name};
+use tungsten_interface::naming::{NamingRules, entry_base_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, VariableType};
 use tungsten_rust::orchestration::{AutoConstArg, permutation_table_specs};
@@ -63,12 +63,13 @@ impl Entry {
 fn entries(program: &OptimizedProgram, rules: &NamingRules) -> Vec<Entry> {
     let mut used = rules.used_set();
     used.extend(["create", "sync", "query", "profile", "required_flags", "impl_"].map(String::from));
+    let bases = entry_base_names(program, rules, used);
     program
         .entry_points
         .iter()
-        .map(|e| {
+        .zip(bases)
+        .map(|(e, base)| {
             let inst = Instance::from_entry(e);
-            let base = unique(&mut used, unit_base_name(rules, program, inst.cu));
             let element = unit_return_type(program, inst.cu).clone();
             let public = public_type(&element).unwrap_or_else(|| {
                 panic!("entry point `{}` returns {:?}, which has no public mirror type", base, element)

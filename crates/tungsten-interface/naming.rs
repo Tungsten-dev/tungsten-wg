@@ -288,6 +288,21 @@ pub fn entry_method_names(
         .collect()
 }
 
+/// Base names of the entries of a CUDA-style orchestration class, one per entry point in order:
+/// the unit's base name made unique against `used` (which the backend seeds with the member names
+/// already taken) and against each other. `enqueue_<base>` and `result_<base>` derive from it.
+pub fn entry_base_names(
+    program: &OptimizedProgram,
+    rules: &NamingRules,
+    mut used: HashSet<String>,
+) -> Vec<String> {
+    program
+        .entry_points
+        .iter()
+        .map(|entry| unique(&mut used, unit_base_name(rules, program, entry.density_function)))
+        .collect()
+}
+
 /// Field name of a permutation table in `AutoConsts`.
 pub fn auto_const_field_name(rules: &NamingRules, table: &PermutationTableInput) -> String {
     match table {
