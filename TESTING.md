@@ -1,8 +1,10 @@
 # Testing policy: verified interpreter, text format, differential backend tests
 
 Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, no
-functional proofs yet) and `tungsten-check` exist. `tungsten-testsuite`, the backend conformance
-work and the CI job do not. Per-item status is marked in §3 and §4. The design of
+functional proofs yet), `tungsten-check` and `tungsten-testsuite` exist. The testsuite does
+differential testing against Rust, Java and CUDA (milestones 1 to 3 and 5; per-milestone notes in
+`SPEC.md`). Backend conformance is still open (§4 item 4) and is tracked through `@knownfail`. The CI
+workflow is deferred (§12). Per-item status is marked in §3 and §4. The design of
 `tungsten-testsuite` is in `SPEC.md` at the repo root; this file reflects its decisions.
 
 ## 1. Summary
@@ -81,7 +83,7 @@ crates/tungsten-check/         # plain Rust, unverified
   src/lower/          # OptimizedProgram -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
-crates/tungsten-testsuite/     # milestones 1 and 2 done (Rust differential); full layout in SPEC.md §2
+crates/tungsten-testsuite/     # Rust, Java and CUDA differential done; full layout in SPEC.md §2
   src/harness/        # batches and cache, protocol, processes, driver generators
   src/registry.rs     # registry.toml loader
   src/env.rs          # tungsten_parse::Env + tungsten_check::Registry
@@ -147,9 +149,13 @@ Status as of 2026-11-01 is in brackets.
 4. [open] **Backend conformance** with §5 (wrapping ops, shift masks, cast helpers, Java min/max,
    short-circuit). This is tracked through `@knownfail` and isn't a prerequisite for the suite.
 5. [not checked] **`Interface` scale keying** on exact `f64` bits. Tracked by the scale-key regression.
-6. [open] **`entry_method_names`**: a public `tungsten_interface::naming::entry_method_names(program,
-   rules) -> Vec<String>`, extracted from the Rust and Java orchestration, so generated drivers can
-   call `orchestrate_<entry>`. Generated output doesn't change.
+6. [done] **`entry_method_names`**: public in `tungsten_interface::naming`, extracted from the Rust
+   and Java orchestration, so generated drivers can call `orchestrate_<entry>`. It takes a third
+   parameter, `used: HashSet<String>`, which each backend seeds with the names already taken (Rust:
+   `"new"`, Java: `rules.used_set()`): `entry_method_names(program, rules, used) -> Vec<String>`.
+   CUDA uses the sibling `entry_base_names(program, rules, used)`, which returns the unit base names
+   without the `orchestrate_` prefix (`enqueue_<base>` and `result_<base>` derive from them).
+   Generated output is unchanged (diffed for Rust and Java).
 
 ## 5. Semantics (normative)
 
@@ -481,6 +487,9 @@ the grid edge (OOB), the scale-key collision, each extern with hand-computed `@e
 GitHub Actions with JDK 21: `TW_BACKENDS=rust,java TW_REQUIRE=rust,java INSTA_UPDATE=no cargo test
 --workspace` runs L0–L5 on Rust and Java, so a missing toolchain fails the job rather than being
 skipped. CUDA runs locally only, and so does Verus (`scripts/verify.sh`).
+
+Status: deferred. `test.yml` was written in milestone 3 and then removed on purpose, so there is no
+CI workflow in the repo yet. The command above is what it ran.
 
 ## 13. Open items
 

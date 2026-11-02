@@ -6,7 +6,7 @@ use tungsten_ir::{OptimizedProgram, compact, isomorphic};
 use tungsten_legacy::builder::{Builder, SPMTBuilder};
 use tungsten_legacy::conversion::convert;
 use tungsten_legacy::model::*;
-use tungsten_parse::{FileId, NoEnv, load, print, print_test_file};
+use tungsten_parse::{FileId, NoEnv, load, print};
 
 fn unit<'m>(
     arena: &'m Bump,
