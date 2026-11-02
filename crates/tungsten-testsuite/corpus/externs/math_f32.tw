@@ -1,0 +1,14 @@
+// f32 math externs.
+program {
+    fn run() -> [f32; 9] {
+        return [ext sqrt_f32(16.0f), ext floor_f32(-1.5f), ext ceil_f32(-1.5f), ext trunc_f32(-1.5f),
+                ext abs_f32(-2.5f), ext min_f32(1.0f, 2.0f), ext max_f32(1.0f, 2.0f),
+                ext copysign_f32(3.0f, -1.0f), ext fma_f32(2.0f, 3.0f, 1.0f)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [4.0f, -2.0f, -1.0f, -1.0f, 2.5f, 1.0f, 2.0f, -3.0f, 7.0f]

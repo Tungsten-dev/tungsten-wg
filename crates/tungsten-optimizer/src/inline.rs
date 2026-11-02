@@ -571,6 +571,7 @@ fn visit_expr(e: &Expression, f: &mut dyn FnMut(&Expression)) {
         | Expression::Long(_)
         | Expression::Bool(_)
         | Expression::PermutationTable(_)
+        | Expression::Ambient(_)
         | Expression::HostInput(_) => {}
     }
 }
@@ -647,6 +648,7 @@ fn visit_expr_mut(e: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
         | Expression::Long(_)
         | Expression::Bool(_)
         | Expression::PermutationTable(_)
+        | Expression::Ambient(_)
         | Expression::HostInput(_) => {}
     }
 }

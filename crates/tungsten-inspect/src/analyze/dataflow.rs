@@ -516,6 +516,10 @@ impl DagBuilder<'_> {
             Expression::Int(x) => self.leaf(NodeKind::Literal(Literal::Int(*x)), region),
             Expression::Long(x) => self.leaf(NodeKind::Literal(Literal::Long(*x)), region),
             Expression::Bool(x) => self.leaf(NodeKind::Literal(Literal::Bool(*x)), region),
+            Expression::Ambient(k) => {
+                let var = format!("ambient({k:?})");
+                self.leaf(NodeKind::Free { var }, region)
+            }
             Expression::Constant(c) => {
                 let constant = self.ctx.constants[c].id.clone();
                 self.leaf(NodeKind::Constant { constant }, region)

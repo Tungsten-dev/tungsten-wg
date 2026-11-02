@@ -1,0 +1,12 @@
+// An entry returning an array, on a grid with more than one cell.
+program {
+    fn run() -> [i32; 3] {
+        return [ambient(pos3).x, (ambient(pos3).x * 2), (ambient(pos3).x * 3)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u = [[0, 0, 0], [1, 2, 3]]

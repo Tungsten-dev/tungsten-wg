@@ -1,5 +1,5 @@
 //! CUDA C++ generator from optimized SPMT. Mirrors `tungsten-rust` and is validated against its
-//! output downstream. The full contract is `SPEC.md` in this crate.
+//! output downstream. Contracts and design decisions are in this crate's `README.md`.
 //!
 //! The generator is split into a device side and an orchestration side:
 //! - Device side ([`CudaCodegen`], implementing [`DeviceCodegen`]): `__device__` density functions,
@@ -24,7 +24,7 @@
 //! - `orchestration`: `interface.cuh`, `orchestration.h`, `orchestration.cu`.
 //!
 //! Assumed runtime (not generated, `tw::` namespace): vector operators, `tw::Array`, `tw::Config`,
-//! `tw::PositionIterator`, samplers, math externs and host initializers. See SPEC.md §12.
+//! `tw::PositionIterator`, samplers, math externs and host initializers. See the runtime contract in `README.md`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -221,7 +221,8 @@ impl<'a> CudaCodegen<'a> {
         self.kernel_wrappers.push(function::build_kernel_wrapper(self.naming, self.config, &inst, true));
     }
 
-    /// Panics if a kernel body name collides with a generated function or constant (SPEC.md §4.3).
+    /// Panics if a kernel body name collides with a generated function or constant (the `_body`
+    /// suffix isn't from the `Interface`).
     fn check_body_names(&self) {
         let mut taken: HashSet<&str> = self.functions.iter().map(|f| f.name.as_str()).collect();
         for item in self.constants.values() {

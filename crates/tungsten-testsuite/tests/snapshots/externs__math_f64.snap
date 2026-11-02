@@ -1,0 +1,444 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                0,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [],
+            ret: Array(
+                F64,
+                9,
+            ),
+            hosts: [],
+            body: [
+                Return(
+                    ArrayLit(
+                        [
+                            ExternCall {
+                                ext: ExternId(
+                                    0,
+                                ),
+                                params: [
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4625196817309499392,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    1,
+                                ),
+                                params: [
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            13832806255468478464,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    2,
+                                ),
+                                params: [
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            13832806255468478464,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    3,
+                                ),
+                                params: [
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            13832806255468478464,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    4,
+                                ),
+                                params: [
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            13836183955189006336,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    5,
+                                ),
+                                params: [
+                                    F64,
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4611686018427387904,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    6,
+                                ),
+                                params: [
+                                    F64,
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4611686018427387904,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    7,
+                                ),
+                                params: [
+                                    F64,
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4613937818241073152,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            13830554455654793216,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            ExternCall {
+                                ext: ExternId(
+                                    8,
+                                ),
+                                params: [
+                                    F64,
+                                    F64,
+                                    F64,
+                                ],
+                                ret: F64,
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4611686018427387904,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4613937818241073152,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                ],
+                            },
+                        ],
+                    ),
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [],
+    tables: [],
+    inputs: [],
+    entries: [
+        Entry {
+            unit: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 1,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                PermTable,
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Sampler,
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

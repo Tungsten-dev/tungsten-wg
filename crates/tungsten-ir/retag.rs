@@ -8,16 +8,38 @@ use std::collections::HashMap;
 
 use crate::model::*;
 
-/// Visits every `Ref` embedded in the IR, by type.
-pub(crate) trait RefVisitor {
-    fn compute_unit(&mut self, r: &mut Ref<ComputeUnit>);
-    fn function(&mut self, r: &mut Ref<Function>);
-    fn constant(&mut self, r: &mut Ref<Constant>);
-    fn host_input(&mut self, r: &mut Ref<HostInput>);
-    fn table(&mut self, r: &mut Ref<PermutationTableInput>);
-    fn var(&mut self, r: &mut Ref<Var>);
-    fn density_input(&mut self, r: &mut Ref<DensityInput>);
+/// Every kind of `Ref` the IR embeds, as `method: Target, field, "readable name", ordinal;`.
+/// Calls `$m!` with the list, so each `RefVisitor` impl is written once for all kinds.
+macro_rules! ref_kinds {
+    ($m:ident) => {
+        $m! {
+            compute_unit: ComputeUnit, cus, "compute unit", 1;
+            function: Function, fns, "function", 2;
+            constant: Constant, consts, "constant", 3;
+            host_input: HostInput, hosts, "host input", 4;
+            table: PermutationTableInput, tables, "permutation table", 5;
+            var: Var, vars, "variable", 6;
+            density_input: DensityInput, inputs, "density input", 7;
+        }
+    };
 }
+pub(crate) use ref_kinds;
+
+macro_rules! visitor {
+    ($($method:ident: $t:ty, $field:ident, $what:literal, $ord:literal;)*) => {
+        /// Visits every `Ref` embedded in the IR, by type.
+        pub(crate) trait RefVisitor {
+            $(fn $method(&mut self, r: &mut Ref<$t>);)*
+        }
+
+        impl RefVisitor for Retag {
+            $(fn $method(&mut self, r: &mut Ref<$t>) {
+                self.retag(r)
+            })*
+        }
+    };
+}
+ref_kinds!(visitor);
 
 /// Rewrites tags through `map`. With `strict`, a tag missing from the map panics (used for whole
 /// programs, where every tag must be known); otherwise it is left as is (partial clones, whose
@@ -37,36 +59,12 @@ impl Retag {
     }
 }
 
-impl RefVisitor for Retag {
-    fn compute_unit(&mut self, r: &mut Ref<ComputeUnit>) {
-        self.retag(r)
-    }
-    fn function(&mut self, r: &mut Ref<Function>) {
-        self.retag(r)
-    }
-    fn constant(&mut self, r: &mut Ref<Constant>) {
-        self.retag(r)
-    }
-    fn host_input(&mut self, r: &mut Ref<HostInput>) {
-        self.retag(r)
-    }
-    fn table(&mut self, r: &mut Ref<PermutationTableInput>) {
-        self.retag(r)
-    }
-    fn var(&mut self, r: &mut Ref<Var>) {
-        self.retag(r)
-    }
-    fn density_input(&mut self, r: &mut Ref<DensityInput>) {
-        self.retag(r)
-    }
-}
-
 // ---------------------------------------------------------------------------------------------
 // Raw clones: fresh tags for the nested arenas, embedded refs untouched.
 // ---------------------------------------------------------------------------------------------
 
 impl ComputeUnit {
-    fn clone_raw(&self) -> Self {
+    pub(crate) fn clone_raw(&self) -> Self {
         let ComputeUnit::DensityFunction {
             function,
             density_inputs,
@@ -94,7 +92,7 @@ impl ComputeUnit {
 }
 
 impl Function {
-    fn clone_raw(&self) -> Self {
+    pub(crate) fn clone_raw(&self) -> Self {
         Self {
             canonical_name: self.canonical_name.clone(),
             host_inputs: self.host_inputs.clone(),
@@ -260,6 +258,7 @@ fn walk_expr(e: &mut Expression, v: &mut impl RefVisitor) {
         }
         Expression::PermutationTable(r) => v.table(r),
         Expression::HostInput(r) => v.host_input(r),
+        Expression::Ambient(_) => {}
         Expression::BinaryOp { left, right, .. } => {
             walk_expr(left, v);
             walk_expr(right, v);

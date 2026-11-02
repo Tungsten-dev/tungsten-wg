@@ -1,0 +1,41 @@
+// Description and comments are free text.
+@knownfail(cuda, "f2i cast is UB in device code")
+
+program {
+    host scale: f64;
+    table t0 = perlin("minecraft:offset", none, 0);
+    const half = 0.5;
+
+    fn lerp(a: f64, b: f64, t: f64) -> f64 {
+        return (a + (t * (b - a)));
+    }
+
+    fn base_main() -> f64 @hosts(scale) {
+        let x: f64 = ((ambient(pos3) as vec3).x * host(scale));
+        return lerp(x, half, 0.25);
+    }
+
+    unit base {
+        main base_main;
+        tables [t0];
+        hosts [scale];
+        helpers [lerp];
+        consts [half];
+    }
+
+    fn top_main() -> f64 {
+        return (density(b) * 2.0);
+    }
+
+    unit top {
+        main top_main;
+        input b = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
+    }
+
+    entry top @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
+}
+
+@case "origin" origin(0, 0, 0) seed(1) host(scale = 2.0)
+@case "far"    origin(1000000, -64, 3) seed(1) host(scale = -0.0)
+@expect "origin" top[0, 0, 0] = 0.25
+@expect "far" error(OutOfBounds)

@@ -46,7 +46,7 @@ fn build_program<'m>(arena: &'m Bump) -> SPMT<'m> {
     scalar.host_inputs = vec![HostInput::Static(sea)];
     let scalar: DensityFunctionRef = Interned::new(arena.alloc(scalar));
 
-    // A 4x4x4 noise unit: constants (one depending on another), permutation table, pos3 binding.
+    // A 4x4x4 noise unit: constants (one depending on another), permutation table, an ambient read.
     let n = Builder::new(arena).named("minecraft:noise").returns(VariableType::F64);
     let base = n.constant("base", VariableType::F64, 0.25f64);
     let scale = n.constant("scale", VariableType::F64, Expression::Variable(base) * 2.0f64);
@@ -174,7 +174,7 @@ fn generates_java_for_small_program() {
         "(flag ? 1 : 0)",
         "final DoubleRef v_ref = new DoubleRef(v);",
         "v = v_ref.value;",
-        "origin.equals(new Vec3(0.0, 0.0, 0.0))",
+        "config.origin.equals(new Vec3(0.0, 0.0, 0.0))",
         "Helpers.sample(auto_constants.",
         "host_consts.sea_level",
         "buffers.minecraft_noise_d4x4x4_output[p.index]",
@@ -244,4 +244,47 @@ fn bytes() {
     ] {
         assert!(java.contains(e), "missing `{}` in:\n{}", e, java);
     }
+}
+
+/// A unit reading all four default variables, which lower to ambient reads.
+fn build_ambient_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let mut b = Builder::new(arena).named("minecraft:ambients").returns(VariableType::F64);
+    let field = |name: &str, t: VariableType, f: &str, field_t: VariableType| Expression::Field {
+        base: Box::new(var(b.alloc_var(Name::Named(name.into()), t))),
+        field: f.into(),
+        type_of_field: field_t,
+        known_idnex: None,
+    };
+    let body = vec![Statement::Return(
+        field("origin", VariableType::Vec3, "x", VariableType::F64)
+            * field("origin_scale", VariableType::Vec3, "x", VariableType::F64)
+            + field("pos3", VariableType::Pos3, "x", VariableType::I32).cast(VariableType::F64)
+                * field("position_scale", VariableType::Vec3, "x", VariableType::F64),
+    )];
+    b.set_body(body);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn ambients() {
+    let arena = Bump::new();
+    let program = convert(&build_ambient_program(&arena)).expect("conversion");
+    let mut backend = JavaBackend::new(JavaConfig::default());
+    let interface = Interface::build(&program, backend.naming_rules());
+    backend.generate(&program, &interface).unwrap();
+    let java = &backend.output().expect("java output").source;
+    for e in ["config.origin.x", "config.origin_scale.x", "config.position_scale.x", "p.pos.x"] {
+        assert!(java.contains(e), "missing `{e}` in:\n{java}");
+    }
+    assert!(!java.contains("Vec3 origin"), "{java}");
 }

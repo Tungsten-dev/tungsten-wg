@@ -1,0 +1,13 @@
+// With @cells only a deterministic subset of cells is compared; every cell still runs.
+@cells(sample = 3, seed = 5)
+program {
+    fn run() -> i32 {
+        return (ambient(pos3).x + (ambient(pos3).y * 10));
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(4, 4, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u = [0, 1, 2, 3, 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33]

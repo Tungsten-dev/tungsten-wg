@@ -1,0 +1,139 @@
+// Test prelude (TESTING.md §10): transcendentals and helpers written with basic operations only,
+// so every backend compiles the same `+ - * /`. Accuracy is that of the series used, enough for
+// differential testing; the interpreter's result is the reference, not libm.
+//
+// `use prelude::{sin}` copies `sin` plus what it reaches. A unit must still list those fns and
+// consts in `helpers` / `consts`.
+program {
+    const PI = 3.141592653589793;
+    const TAU = 6.283185307179586;
+    const HALF_PI = 1.5707963267948966;
+    const LN2 = 0.6931471805599453;
+
+    fn lerp(a: f64, b: f64, t: f64) -> f64 {
+        return (a + (t * (b - a)));
+    }
+
+    fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
+        let t: f64 = ((x - e0) / (e1 - e0));
+        if (t < 0.0) {
+            t = 0.0;
+        }
+        if (t > 1.0) {
+            t = 1.0;
+        }
+        return ((t * t) * (3.0 - (2.0 * t)));
+    }
+
+    // x + y*dx + z*dx*dy: x varies fastest (TESTING.md §6.2).
+    fn as_index(x: i32, y: i32, z: i32, dx: i32, dy: i32) -> i32 {
+        return ((x + (y * dx)) + ((z * dx) * dy));
+    }
+
+    // Bit k of a corner index 0..8.
+    fn corner_x(i: i32) -> i32 {
+        return (i & 1);
+    }
+    fn corner_y(i: i32) -> i32 {
+        return ((i >> 1) & 1);
+    }
+    fn corner_z(i: i32) -> i32 {
+        return ((i >> 2) & 1);
+    }
+
+    fn sin(x: f64) -> f64 {
+        let k: f64 = ext floor(((x / const(TAU)) + 0.5));
+        let r: f64 = (x - (k * const(TAU)));
+        let r2: f64 = (r * r);
+        let term: f64 = r;
+        let sum: f64 = r;
+        let n: f64 = 1.0;
+        repeat 12 {
+            term = (((0.0 - term) * r2) / ((n + 1.0) * (n + 2.0)));
+            sum = (sum + term);
+            n = (n + 2.0);
+        }
+        return sum;
+    }
+
+    fn cos(x: f64) -> f64 {
+        let k: f64 = ext floor(((x / const(TAU)) + 0.5));
+        let r: f64 = (x - (k * const(TAU)));
+        let r2: f64 = (r * r);
+        let term: f64 = 1.0;
+        let sum: f64 = 1.0;
+        let n: f64 = 0.0;
+        repeat 12 {
+            term = (((0.0 - term) * r2) / ((n + 1.0) * (n + 2.0)));
+            sum = (sum + term);
+            n = (n + 2.0);
+        }
+        return sum;
+    }
+
+    fn exp(x: f64) -> f64 {
+        if (x > 710.0) {
+            return inf;
+        }
+        if (x < -746.0) {
+            return 0.0;
+        }
+        let k: f64 = ext floor(((x / const(LN2)) + 0.5));
+        let r: f64 = (x - (k * const(LN2)));
+        let term: f64 = 1.0;
+        let sum: f64 = 1.0;
+        let n: f64 = 1.0;
+        repeat 20 {
+            term = ((term * r) / n);
+            sum = (sum + term);
+            n = (n + 1.0);
+        }
+        while (k > 0.0) {
+            sum = (sum * 2.0);
+            k = (k - 1.0);
+        }
+        while (k < 0.0) {
+            sum = (sum / 2.0);
+            k = (k + 1.0);
+        }
+        return sum;
+    }
+
+    fn log(x: f64) -> f64 {
+        if (!(x > 0.0)) {
+            return nan;
+        }
+        if (x == inf) {
+            return inf;
+        }
+        let m: f64 = x;
+        let e: f64 = 0.0;
+        while (m > 1.5) {
+            m = (m / 2.0);
+            e = (e + 1.0);
+        }
+        while (m < 0.75) {
+            m = (m * 2.0);
+            e = (e - 1.0);
+        }
+        let y: f64 = ((m - 1.0) / (m + 1.0));
+        let y2: f64 = (y * y);
+        let p: f64 = y;
+        let sum: f64 = y;
+        let n: f64 = 1.0;
+        repeat 20 {
+            p = (p * y2);
+            n = (n + 2.0);
+            sum = (sum + (p / n));
+        }
+        return ((e * const(LN2)) + (2.0 * sum));
+    }
+
+    // x > 0 only; anything else is NaN.
+    fn pow(x: f64, y: f64) -> f64 {
+        if (!(x > 0.0)) {
+            return nan;
+        }
+        return exp((y * log(x)));
+    }
+}

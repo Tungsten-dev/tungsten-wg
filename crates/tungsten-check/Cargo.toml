@@ -1,0 +1,18 @@
+[package]
+name = "tungsten-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lowers tungsten-ir programs to the tungsten-core IR, with a name registry."
+
+[dependencies]
+thiserror.workspace = true
+tungsten-core.workspace = true
+tungsten-ir.workspace = true
+
+[dev-dependencies]
+bumpalo.workspace = true
+proptest.workspace = true
+tungsten-legacy.workspace = true
+tungsten-parse.workspace = true

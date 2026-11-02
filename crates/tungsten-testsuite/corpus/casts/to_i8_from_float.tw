@@ -1,0 +1,15 @@
+// A float cast to i8 goes through i32 and then truncates, like Java (byte); it doesn't saturate.
+@knownfail(rust, "float to i8 casts saturate in Rust instead of going through i32 like Java")
+@knownfail(java, "the Java backend clamps float to i8 casts to -128..127 (Rust saturating semantics) instead of truncating through int like the interpreter")
+@knownfail(cuda, "the CUDA backend's tw::f2i8 clamps to -128..127 (its README contract) instead of truncating through int like the interpreter")
+program {
+    fn run() -> [i8; 1] {
+        return [(300.0 as i8)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [44b]

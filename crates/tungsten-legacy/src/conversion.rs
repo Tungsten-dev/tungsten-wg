@@ -13,7 +13,15 @@
 //!   deduplicated per compute unit by their target (matching `add_density_input`).
 //! * Inputs, permutation tables and helper functions that are used but not declared
 //!   are registered on first use, so the produced lists always match the bodies.
-//! * Variable lookup is strict: a variable that is used but never declared is an error.
+//! * Variable lookup is strict: a variable that is used but never declared is an error, except
+//!   for the ambient names below.
+//! * Variables named `origin`, `pos3`, `origin_scale` or `position_scale` are ambients: reads
+//!   become `Ambient(..)` and they are not variables in the new model. A declared local of another
+//!   type, a helper parameter, a constant or a host input with such a name shadows the ambient. An
+//!   undeclared variable matches on its name alone, whatever its type.
+//! * Ambients are read-only in the new model, but legacy bodies may assign to these names
+//!   (`water_levels` in `tungsten-mc-compile` moves `pos3`). A function that does gets a real local
+//!   of that name, initialized from the ambient at the top of its body.
 
 use std::{collections::HashMap, fmt};
 
@@ -40,6 +48,15 @@ pub enum ConvertError {
     NotConstant {
         constant: String,
         found: &'static str,
+    },
+    /// The type of a field access base can't be determined (e.g. an empty array literal or an
+    /// index into a non-array).
+    UnknownFieldBaseType { context: String, field: String },
+    /// A variable that resolved to an ambient by name was created with another type (warning only).
+    AmbientTypeMismatch {
+        context: String,
+        var: String,
+        found: new::VariableType,
     },
 }
 
@@ -72,6 +89,15 @@ impl fmt::Display for ConvertError {
                     f,
                     "constant `{constant}` is not a constant expression ({found})"
                 )
+            }
+            ConvertError::UnknownFieldBaseType { context, field } => {
+                write!(
+                    f,
+                    "in `{context}`: can't determine the type of the base of field `{field}`"
+                )
+            }
+            ConvertError::AmbientTypeMismatch { context, var, found } => {
+                write!(f, "in `{context}`: ambient {var} is used with the wrong type {found:?}")
             }
         }
     }
@@ -200,23 +226,66 @@ fn declare_var<'m>(scope: &mut Scope<'m>, v: old::Var<'m>) -> Ref<new::Var> {
     r
 }
 
-fn declare_default_parameters<'m>(scope: &mut Scope<'m>) {
-    scope.vars.insert(new::Var {
-        name: old::Name::Named("origin".into()),
-        t: old::VariableType::Vec3,
-    });
-    scope.vars.insert(new::Var {
-        name: old::Name::Named("pos3".into()),
-        t: old::VariableType::Pos3,
-    });
-    scope.vars.insert(new::Var {
-        name: old::Name::Named("origin_scale".into()),
-        t: old::VariableType::Vec3,
-    });
-    scope.vars.insert(new::Var {
-        name: old::Name::Named("position_scale".into()),
-        t: old::VariableType::Vec3,
-    });
+/// The ambient a variable name stands for.
+fn ambient_kind(name: &old::Name) -> Option<new::AmbientKind> {
+    let Named(name) = name else { return None };
+    match name.as_str() {
+        "origin" => Some(new::AmbientKind::Origin),
+        "pos3" => Some(new::AmbientKind::Pos3),
+        "origin_scale" => Some(new::AmbientKind::OriginScale),
+        "position_scale" => Some(new::AmbientKind::PositionScale),
+        _ => None,
+    }
+}
+
+fn ambient_type(kind: new::AmbientKind) -> old::VariableType {
+    match kind {
+        new::AmbientKind::Pos3 => old::VariableType::Pos3,
+        _ => old::VariableType::Vec3,
+    }
+}
+
+/// `v` has both the name and the type of an ambient, so declaring it declares nothing.
+fn is_ambient_var(v: &old::Var<'_>) -> bool {
+    ambient_kind(&v.name).is_some_and(|k| ambient_type(k) == v.t)
+}
+
+/// Declares a local for every ambient name `stmts` assign to (unless something else in the scope
+/// already owns the name) and returns the assignments that initialize them from the ambient.
+fn bind_assigned_ambients<'m>(
+    scope: &mut Scope<'m>,
+    stmts: &[old::Statement<'m>],
+    out: &mut Vec<new::Statement>,
+) {
+    for s in stmts {
+        match s {
+            old::Statement::Assign { target, .. } => {
+                let Some(kind) = ambient_kind(&target.name) else { continue };
+                if scope.var_map.contains_key(target)
+                    || scope.is_read_only(target)
+                    || scope.find_named_var(target).is_some()
+                {
+                    continue;
+                }
+                let local = scope.vars.insert(new::Var {
+                    name: target.name.clone(),
+                    t: ambient_type(kind),
+                });
+                out.push(new::Statement::Assign {
+                    target: local,
+                    value: new::Expression::Ambient(kind),
+                });
+            }
+            old::Statement::If { then_branch, else_branch, .. } => {
+                bind_assigned_ambients(scope, then_branch, out);
+                bind_assigned_ambients(scope, else_branch, out);
+            }
+            old::Statement::While { body, .. } | old::Statement::Repeat { body, .. } => {
+                bind_assigned_ambients(scope, body, out);
+            }
+            old::Statement::Return(_) | old::Statement::Break => {}
+        }
+    }
 }
 
 struct Converter<'m> {
@@ -288,9 +357,6 @@ impl<'m> Converter<'m> {
             .unwrap_or_else(|| "<anonymous density function>".to_string());
         let mut scope = Scope::new(label, true);
 
-        // 0. Automatic parameters: origin, pos3
-        declare_default_parameters(&mut scope);
-
         // 1. Host inputs (their vars become HostInput expressions, not variables).
         let mut host_refs = Vec::with_capacity(df.host_inputs.len());
         for h in &df.host_inputs {
@@ -310,7 +376,7 @@ impl<'m> Converter<'m> {
 
         // 3. Declared variables.
         for v in &df.variables {
-            if !scope.is_read_only(v) {
+            if !scope.is_read_only(v) && !is_ambient_var(v) {
                 declare_var(&mut scope, *v);
             }
         }
@@ -340,7 +406,9 @@ impl<'m> Converter<'m> {
         }
 
         // 8. Body.
-        let body = self.statements(&mut scope, &df.body)?;
+        let mut body = Vec::new();
+        bind_assigned_ambients(&mut scope, &df.body, &mut body);
+        body.extend(self.statements(&mut scope, &df.body)?);
 
         // 9. Fill the reserved slots.
         let Scope {
@@ -397,10 +465,14 @@ impl<'m> Converter<'m> {
             parameters.push(declare_var(&mut scope, *p));
         }
         for v in &f.variables {
-            declare_var(&mut scope, *v);
+            if !is_ambient_var(v) {
+                declare_var(&mut scope, *v);
+            }
         }
 
-        let body = self.statements(&mut scope, &f.body)?;
+        let mut body = Vec::new();
+        bind_assigned_ambients(&mut scope, &f.body, &mut body);
+        body.extend(self.statements(&mut scope, &f.body)?);
 
         self.program.functions[function_ref] = new::Function {
             canonical_name: f.canonical_name.clone(),
@@ -626,6 +698,15 @@ impl<'m> Converter<'m> {
                         var: format!("{:?}", v),
                     });
                     N::Variable(r)
+                } else if let Some(kind) = ambient_kind(&v.name) {
+                    if ambient_type(kind) != v.t {
+                        self.warn(ConvertError::AmbientTypeMismatch {
+                            context: scope.label.clone(),
+                            var: format!("{:?}", v.name),
+                            found: v.t.clone(),
+                        });
+                    }
+                    N::Ambient(kind)
                 } else {
                     // return Err(scope.unknown_var(v));
                     panic!("Unknown variable: {:?}", **v);
@@ -688,13 +769,25 @@ impl<'m> Converter<'m> {
                 base,
                 field,
                 type_of_field,
-                known_idnex,
-            } => N::Field {
-                base: self.boxed(scope, base)?,
-                field: field.clone(),
-                type_of_field: type_of_field.clone(),
-                known_idnex: *known_idnex,
-            },
+                known_idnex: _,
+            } => {
+                let converted = self.boxed(scope, base)?;
+                // An ambient has its own type, whatever the legacy variable was created with.
+                let base_type = match *converted {
+                    N::Ambient(kind) => Some(ambient_type(kind)),
+                    _ => base_type(base),
+                }
+                .ok_or_else(|| ConvertError::UnknownFieldBaseType {
+                    context: scope.label.clone(),
+                    field: field.clone(),
+                })?;
+                N::Field {
+                    base_type,
+                    base: converted,
+                    field: field.clone(),
+                    type_of_field: type_of_field.clone(),
+                }
+            }
             E::ArrayAccess { array, index } => N::ArrayAccess {
                 array: self.boxed(scope, array)?,
                 index: self.boxed(scope, index)?,
@@ -773,12 +866,15 @@ fn const_expr<'m>(
             base,
             field,
             type_of_field,
-            known_idnex,
+            known_idnex: _,
         } => C::Field {
+            base_type: base_type(base).ok_or_else(|| ConvertError::UnknownFieldBaseType {
+                context: constant.to_string(),
+                field: field.clone(),
+            })?,
             base: boxed(base)?,
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
         },
         E::ArrayAccess { array, index } => C::ArrayAccess {
             array: boxed(array)?,
@@ -803,6 +899,60 @@ fn const_expr<'m>(
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
+
+/// The type of a field access base, stored in the new IR's `Field::base_type`. `None` if no rule
+/// gives one (empty array literal, index into a non-array). Unlike `try_derive_type` it handles
+/// mixed `vec3`/`pos3`/scalar arithmetic and indexing into arrays.
+fn base_type(e: &old::Expression<'_>) -> Option<old::VariableType> {
+    use old::BinaryOperator as B;
+    use old::Expression as E;
+    use old::VariableType as T;
+    Some(match e {
+        E::Variable(v) => v.t.clone(),
+        E::Float(_) => T::F32,
+        E::Double(_) => T::F64,
+        E::Byte(_) => T::I8,
+        E::Int(_) => T::I32,
+        E::Long(_) => T::I64,
+        E::Bool(_) => T::Bool,
+        E::FunctionCall { function, .. } => function.return_type.clone(),
+        E::ExternCall { return_type, .. } => return_type.clone(),
+        E::DensityVariable(input, _) => input.density_function.return_type.clone(),
+        E::PermutationTable(old::PermutationTableInput::PerlinNoise { .. }) => T::PermutationTable,
+        E::PermutationTable(old::PermutationTableInput::Base3DNoise) => {
+            T::InterpolatedNoiseSampler
+        }
+        E::BinaryOp { op, left, right } => match op {
+            B::Equal
+            | B::NotEqual
+            | B::Less
+            | B::LessEqual
+            | B::Greater
+            | B::GreaterEqual
+            | B::And
+            | B::Or => T::Bool,
+            B::Add | B::Subtract | B::Multiply | B::Divide => {
+                let l = base_type(left)?;
+                match (&l, base_type(right)) {
+                    (T::Vec3, Some(T::Pos3)) | (T::Pos3, Some(T::Vec3)) => T::Vec3,
+                    _ => l,
+                }
+            }
+            _ => base_type(left)?,
+        },
+        E::UnaryOp { operand, .. } => base_type(operand)?,
+        E::Field { type_of_field, .. } => type_of_field.clone(),
+        E::ArrayAccess { array, .. } => match base_type(array)? {
+            T::Array(elem, _) => *elem,
+            T::Vec3 => T::F64,
+            T::Pos3 => T::I32,
+            _ => return None,
+        },
+        E::Construct { t, .. } | E::ConstructExtern { t, .. } => t.clone(),
+        E::ExplicitCast { to, .. } => to.clone(),
+        E::ArrayLiteral(items) => T::Array(Box::new(base_type(items.first()?)?), items.len()),
+    })
+}
 
 fn empty_function(return_type: old::VariableType) -> new::Function {
     new::Function {
@@ -994,3 +1144,240 @@ fn unary_op(op: old::UnaryOperator) -> new::UnaryOperator {
 //         ));
 //     }
 // }
+
+#[cfg(test)]
+mod base_type_tests {
+    use super::base_type;
+    use crate::spmt::{self as old, BinaryOperator as B, Expression as E, VariableType as T};
+
+    fn var<'m>(v: &'m old::Variable) -> E<'m> {
+        E::Variable(old::Interned::new(v))
+    }
+
+    fn bin<'m>(op: B, l: E<'m>, r: E<'m>) -> E<'m> {
+        E::BinaryOp {
+            op,
+            left: Box::new(l),
+            right: Box::new(r),
+        }
+    }
+
+    #[test]
+    fn rules() {
+        let v3 = old::Variable {
+            name: old::Name::Named("v".into()),
+            t: T::Vec3,
+        };
+        let p3 = old::Variable {
+            name: old::Name::Named("p".into()),
+            t: T::Pos3,
+        };
+        let arr = old::Variable {
+            name: old::Name::Named("a".into()),
+            t: T::Array(Box::new(T::Pos3), 2),
+        };
+        // Mixed binops, which `try_derive_type` can't type.
+        assert_eq!(base_type(&bin(B::Multiply, var(&v3), E::Double(2.0))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Add, var(&p3), var(&v3))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Add, var(&v3), var(&p3))), Some(T::Vec3));
+        assert_eq!(base_type(&bin(B::Less, var(&v3), var(&p3))), Some(T::Bool));
+        // Indexing.
+        fn index(a: E<'_>) -> E<'_> {
+            E::ArrayAccess {
+                array: Box::new(a),
+                index: Box::new(E::Int(0)),
+            }
+        }
+        assert_eq!(base_type(&index(var(&arr))), Some(T::Pos3));
+        assert_eq!(base_type(&index(var(&v3))), Some(T::F64));
+        assert_eq!(base_type(&index(E::Double(1.0))), None);
+        // Array literals.
+        assert_eq!(
+            base_type(&E::ArrayLiteral(vec![E::Float(1.0), E::Float(2.0)])),
+            Some(T::Array(Box::new(T::F32), 2))
+        );
+        assert_eq!(base_type(&E::ArrayLiteral(vec![])), None);
+        // Nested fields use the field's type.
+        let field = E::Field {
+            base: Box::new(var(&v3)),
+            field: "x".into(),
+            type_of_field: T::F64,
+            known_idnex: None,
+        };
+        assert_eq!(base_type(&field), Some(T::F64));
+    }
+}
+
+#[cfg(test)]
+mod ambient_tests {
+    use bumpalo::Bump;
+
+    use super::{ConvertError, Converter, Result};
+    use crate::builder::{Builder, SPMTBuilder};
+    use crate::model::{DensityFunctionRef, Expression as E, FunctionRef, Name, Statement, Var, VariableType as T};
+    use tungsten_ir::model::{self as new, AmbientKind as K, Expression as N};
+
+    fn field<'m>(v: Var<'m>, name: &str, t: T) -> E<'m> {
+        E::Field {
+            base: Box::new(E::Variable(v)),
+            field: name.into(),
+            type_of_field: t,
+            known_idnex: None,
+        }
+    }
+
+    fn named(name: &str) -> Name {
+        Name::Named(name.into())
+    }
+
+    /// Converts a unit and returns its function plus the warnings.
+    fn unit<'m>(df: DensityFunctionRef<'m>) -> Result<(new::Function, Vec<ConvertError>)> {
+        let mut c = Converter::new();
+        let r = c.density_function(df)?;
+        let new::ComputeUnit::DensityFunction { function, .. } = &c.program.compute_units[r];
+        let f = std::mem::replace(&mut c.program.functions[*function], super::empty_function(T::F64));
+        Ok((f, c.warnings))
+    }
+
+    fn helper<'m>(f: FunctionRef<'m>) -> new::Function {
+        let mut c = Converter::new();
+        let r = c.function(f).expect("conversion");
+        std::mem::replace(&mut c.program.functions[r], super::empty_function(T::F64))
+    }
+
+    fn returned(f: &new::Function) -> &N {
+        match f.body.last() {
+            Some(new::Statement::Return(e)) => e,
+            other => panic!("expected a return, found {other:?}"),
+        }
+    }
+
+    fn var_names(f: &new::Function) -> Vec<String> {
+        f.variables.iter().map(|(_, v)| format!("{:?}", v.name)).collect()
+    }
+
+    #[test]
+    fn all_four_names_become_ambients() {
+        for (name, t, kind) in [
+            ("origin", T::Vec3, K::Origin),
+            ("pos3", T::Pos3, K::Pos3),
+            ("origin_scale", T::Vec3, K::OriginScale),
+            ("position_scale", T::Vec3, K::PositionScale),
+        ] {
+            // Undeclared, which is how `tungsten-mc-compile` mostly does it.
+            let arena = Bump::new();
+            let mut b = Builder::new(&arena).named("u").returns(t.clone());
+            let v = b.alloc_var(named(name), t.clone());
+            b.set_body(vec![Statement::Return(E::Variable(v))]);
+            let (f, warnings) = unit(b.finish_compute_unit()).unwrap();
+            assert_eq!(returned(&f), &N::Ambient(kind));
+            assert_eq!(f.variables.iter().count(), 0, "{name}");
+            assert!(warnings.is_empty(), "{warnings:?}");
+
+            // Declared.
+            let mut b = Builder::new(&arena).named("u").returns(t.clone());
+            let v = b.local(name, t.clone());
+            b.set_body(vec![Statement::Return(E::Variable(v))]);
+            let (f, warnings) = unit(b.finish_compute_unit()).unwrap();
+            assert_eq!(returned(&f), &N::Ambient(kind));
+            assert_eq!(f.variables.iter().count(), 0, "{name}");
+            assert!(warnings.is_empty(), "{warnings:?}");
+        }
+    }
+
+    #[test]
+    fn helpers_read_ambients_too() {
+        let arena = Bump::new();
+        let mut h = Builder::new(&arena).named("h").returns(T::Pos3);
+        let v = h.alloc_var(named("pos3"), T::Pos3);
+        h.set_body(vec![Statement::Return(E::Variable(v))]);
+        let f = helper(h.finish_function());
+        assert_eq!(returned(&f), &N::Ambient(K::Pos3));
+    }
+
+    #[test]
+    fn helper_parameter_shadows_the_ambient() {
+        let arena = Bump::new();
+        let mut h = Builder::new(&arena).named("h").returns(T::Vec3);
+        let v = h.param("origin", T::Vec3);
+        h.set_body(vec![Statement::Return(E::Variable(v))]);
+        let f = helper(h.finish_function());
+        assert!(matches!(returned(&f), N::Variable(_)));
+        assert_eq!(f.parameters.len(), 1);
+    }
+
+    #[test]
+    fn declared_local_of_another_type_stays_a_local() {
+        let arena = Bump::new();
+        let mut b = Builder::new(&arena).named("u").returns(T::F64);
+        let v = b.local("origin", T::F64);
+        b.set_body(vec![
+            Statement::Assign { target: v, value: 1.0f64.into() },
+            Statement::Return(E::Variable(v)),
+        ]);
+        let (f, _) = unit(b.finish_compute_unit()).unwrap();
+        assert!(matches!(returned(&f), N::Variable(_)));
+        assert_eq!(var_names(&f).len(), 1);
+    }
+
+    /// `aquifer_random` in `tungsten-mc-compile` creates `origin` as a `Pos3` and reads `.x` as `F64`.
+    #[test]
+    fn undeclared_mistyped_variable_is_the_ambient_with_its_real_type() {
+        let arena = Bump::new();
+        let mut b = Builder::new(&arena).named("u").returns(T::F64);
+        let v = b.alloc_var(named("origin"), T::Pos3);
+        b.set_body(vec![Statement::Return(field(v, "x", T::F64))]);
+        let (f, warnings) = unit(b.finish_compute_unit()).unwrap();
+        let N::Field { base, base_type, .. } = returned(&f) else {
+            panic!("expected a field read");
+        };
+        assert_eq!(**base, N::Ambient(K::Origin));
+        assert_eq!(*base_type, T::Vec3);
+        assert!(
+            matches!(warnings[..], [ConvertError::AmbientTypeMismatch { found: T::Pos3, .. }]),
+            "{warnings:?}"
+        );
+    }
+
+    /// `water_levels` in `tungsten-mc-compile`: it assigns one `pos3` variable and reads another.
+    #[test]
+    fn assigned_ambient_becomes_a_local_initialized_from_the_ambient() {
+        let arena = Bump::new();
+        let mut b = Builder::new(&arena).named("u").returns(T::Pos3);
+        let written = b.local("pos3", T::Pos3);
+        let read = b.alloc_var(named("pos3"), T::Pos3);
+        b.set_body(vec![
+            Statement::If {
+                condition: true.into(),
+                then_branch: vec![Statement::Assign { target: written, value: E::Variable(read) }],
+                else_branch: vec![],
+            },
+            Statement::Return(E::Variable(read)),
+        ]);
+        let (f, _) = unit(b.finish_compute_unit()).unwrap();
+        assert_eq!(f.variables.iter().count(), 1);
+        let local = f.variables.iter().next().unwrap().0;
+        match &f.body[0] {
+            new::Statement::Assign { target, value } => {
+                assert_eq!(*target, local);
+                assert_eq!(*value, N::Ambient(K::Pos3));
+            }
+            other => panic!("expected the initializer, found {other:?}"),
+        }
+        assert_eq!(returned(&f), &N::Variable(local));
+    }
+
+    #[test]
+    fn assigned_parameter_gets_no_initializer() {
+        let arena = Bump::new();
+        let mut h = Builder::new(&arena).named("h").returns(T::Vec3);
+        let v = h.param("origin", T::Vec3);
+        h.set_body(vec![
+            Statement::Assign { target: v, value: E::Variable(v) },
+            Statement::Return(E::Variable(v)),
+        ]);
+        let f = helper(h.finish_function());
+        assert_eq!(f.body.len(), 2);
+        assert_eq!(f.variables.iter().count(), 1);
+    }
+}

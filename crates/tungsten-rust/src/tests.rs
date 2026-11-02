@@ -77,3 +77,45 @@ fn bytes() {
         "pub minecraft_bytes_d4x4x4_output: [i8; 64],",
     ]);
 }
+
+/// A unit reading all four default variables, which lower to ambient reads.
+fn build_ambient_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let mut b = Builder::new(arena).named("minecraft:ambients").returns(VariableType::F64);
+    let field = |name: &str, t: VariableType, f: &str, field_t: VariableType| Expression::Field {
+        base: Box::new(var(b.alloc_var(Name::Named(name.into()), t))),
+        field: f.into(),
+        type_of_field: field_t,
+        known_idnex: None,
+    };
+    let body = vec![Statement::Return(
+        field("origin", VariableType::Vec3, "x", VariableType::F64)
+            * field("origin_scale", VariableType::Vec3, "x", VariableType::F64)
+            + field("pos3", VariableType::Pos3, "x", VariableType::I32).cast(VariableType::F64)
+                * field("position_scale", VariableType::Vec3, "x", VariableType::F64),
+    )];
+    b.set_body(body);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn ambients() {
+    let arena = Bump::new();
+    let output = generate(&build_ambient_program(&arena));
+    assert_contains(&output.full_source, &[
+        "config.origin.x",
+        "config.origin_scale.x",
+        "config.position_scale.x",
+        "p.pos.x",
+    ]);
+    assert!(!output.full_source.contains("let mut origin"), "{}", output.full_source);
+}

@@ -1,0 +1,19 @@
+[package]
+name = "tungsten-parse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Text format, parser, elaborator and canonical printer for tungsten programs."
+
+[dependencies]
+codespan-reporting.workspace = true
+logos.workspace = true
+stacker.workspace = true
+tungsten-ir.workspace = true
+
+[dev-dependencies]
+bumpalo.workspace = true
+proptest.workspace = true
+tungsten-legacy.workspace = true
+tungsten-optimizer.workspace = true
