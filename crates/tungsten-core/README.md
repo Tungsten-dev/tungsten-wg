@@ -40,6 +40,7 @@ OptimizedProgram ──(tungsten-check::lower)──▶ core_ir::Program ──�
 | [CHECK.md](CHECK.md) | Every checker rule, what it accepts and why, with every error kind |
 | [EXEC.md](EXEC.md) | The interpreter function by function: data, termination, memo, costs |
 | [VERUS.md](VERUS.md) | What Verus verifies, how to run it, the rules the code follows and why, known pitfalls |
+| [PROOF.md](PROOF.md) | The specs and proofs: what each theorem says, how its proof works, what it still trusts |
 
 ## The files
 
@@ -277,6 +278,23 @@ Each line gives the choice and the alternative that was rejected, so it doesn't 
 | Verus binary | `verify.sh` downloads the pinned release (sha256-checked) to `target/verus/<tag>/`. | Requiring it on `PATH`. |
 | Re-export | Reachable as `tungsten_check::core_ir`. | As `core`: shadows `::core` in derive output. |
 | CI | Verus runs locally only. | Gating CI on it. |
+| Proof scope | Refinement, fuel, layout, type soundness and wf agreement. | Interpreter theorems only, or refinement only: smaller, but they leave the main result undone. |
+| Spec shape | One total, stateless mirror of `exec/`, with ranks as data and every `Stuck` path kept. | A separate clean semantics: a second semantics plus an equivalence proof. Rank-free: refinement would need the checker, against "never trust the checker". |
+| Normative source | `spec/` defines what cells compute; SEMANTICS.md explains it. | The interpreter as the reference: undersells T1. |
+| Spec values | `SValue` over `Seq`. | An uninterpreted `Seq → Vec` function: a needless axiom. |
+| Spec validation | `SEMANTICS.md` citations, the corpus through T1, `verify-negative.sh`. | Spec-level tests with `by(compute)`: programs contain `Vec`s, which a spec can't build. |
+| Float determinism | Computed `NaN`s are canonical. | Documenting the assumption: it rests on something Rust doesn't promise. A relational spec: every theorem would hold only up to `NaN` equivalence. |
+| Extern `NaN`s | Purity, including `NaN` bits, is a contract only. | Canonicalizing extern results: a walk over every result on the noise path. Fixing `copysign` across runtimes: effort for a corner no program uses. |
+| `neg` and float-to-`i8` | Written over verified code. | Keeping them trusted: a larger base for no gain. |
+| Trusted file | `prim_float.rs` is the only exemption, separate from `prim.rs`. | Exempting `prim.rs`: `external_body` could creep back onto integers unnoticed. |
+| Diagnostics | Cells and const failures exact, input failures sound with no repeats. | Full equality: threads state through every spec function. Cells only: `Prepared::eval` and the oracle read `failures`. |
+| `well_typed` | Only what no-`Stuck` needs, with const types as an existential witness. | Mirroring all of `check`: it would prove scoping rules no theorem uses. |
+| Extern assumption in T4 | Unconditional, plus a corollary for externs that respect their declarations. | A hypothesis only: says nothing about a misbehaving extern. |
+| Graph sums | `spec_program_fits` is a named hypothesis of `check`'s contract. | A new error kind: no test could reach it. Rewriting the graph code: about 490 lines of working code. |
+| Wf agreement | An iff, with the plain-Rust mirror deleted. | One-way: leaves three definitions of wf. |
+| Exec edits for proofs | Allowed if they preserve behavior. | Add-only: heavier proofs, and an unenforceable `requires` on `eval_program`. |
+| Memo-off and property tests | All kept next to the proofs. | Removing memo-off: the `failures` order loses its only test. Pruning tests: nothing would catch a false trust assumption. |
+| Proof budget | Under 10 minutes at the default rlimit. | Under 3: heavy engineering up front. None: proofs stop being run, since CI doesn't gate them. |
 
 ## Open questions
 

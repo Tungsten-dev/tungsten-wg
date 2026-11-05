@@ -1,4 +1,4 @@
-//! From "no cycle reported" to "every id has a rank and every edge goes strictly down" (SPEC.md §5.5).
+//! From "no cycle reported" to "every id has a rank and every edge goes strictly down" (PROOF.md §7.5).
 //!
 //! The bounded fixpoint first: ranks only ever get added, every one is valid when added, and with
 //! one more round than there are nodes the loop stops at a real fixpoint. At a fixpoint an unranked

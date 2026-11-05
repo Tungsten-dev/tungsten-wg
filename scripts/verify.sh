@@ -90,7 +90,7 @@ N_BODIES="$(grep -cE '^#\[verifier::external_body\]' "$SRC/prim_float.rs" || tru
 N_UNINTERP="$(grep -cE '^pub uninterp spec fn' "$SRC/spec/prim.rs" || true)"
 if [[ "$N_BODIES" != 22 || "$N_UNINTERP" != 22 ]]; then
     echo "verify.sh: expected 22 trusted primitives, found $N_BODIES bodies and $N_UNINTERP uninterpreted functions." >&2
-    echo "Changing the trusted base is a decision: update this check, and SPEC.md's list, on purpose." >&2
+    echo "Changing the trusted base is a decision: update this check, and VERUS.md §1, on purpose." >&2
     exit 1
 fi
 

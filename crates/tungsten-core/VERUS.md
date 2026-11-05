@@ -169,7 +169,8 @@ them. A raised rlimit needs a comment saying why. There are none today.
 
 **Edits to exec code must preserve behavior.** `cargo test --workspace` and the corpus stay green,
 and a real bug found by a proof gets fixed in the code with a regression test, never by weakening a
-spec.
+spec. If the fix changes what a checked program computes, the backends and SEMANTICS.md change with
+it, which is a decision for the maintainer.
 
 **3. Each exec function is shaped like its spec.** Same name and arguments as its `spec fn`, plus
 `memo: &mut Memo` where needed. The exception is loops (rule 7), which are Rust loops even though
@@ -448,6 +449,8 @@ make proofs pass or fail differently.
 ---
 
 ## 7. How the proofs are laid out
+
+[PROOF.md](PROOF.md) explains what the specs say and how each proof works.
 
 - `spec/`: definitions only, which is what a reader has to audit. `value.rs` (`SValue` and views),
   `prim.rs`, `layout.rs`, `ops.rs` (operators), `eval.rs` (the semantics), `ranks.rs` (the graph and

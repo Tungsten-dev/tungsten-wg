@@ -19,9 +19,10 @@ and the test fails as soon as the bug is fixed, so that the note gets removed.
 
 ## Where things stand
 
-**The comparison is built; the proofs and CI are not.** The Rust, Java and CUDA backends are each
-compared with the interpreter today, on a hand-written corpus. "Verified interpreter" is still a goal:
-the interpreter is proven not to crash or hang, but not yet proven to compute the right answer.
+**The comparison and the proofs are built; CI is not.** The Rust, Java and CUDA backends are each
+compared with the interpreter today, on a hand-written corpus. And the interpreter is proven to compute
+what its specification says, so "verified interpreter" now means something exact: see
+[`VERUS.md`](../crates/tungsten-core/VERUS.md) §1 for the theorems and what they trust.
 
 | Piece | Status |
 | --- | --- |
@@ -29,7 +30,7 @@ the interpreter is proven not to crash or hang, but not yet proven to compute th
 | Lowering and registry (`tungsten-check`) | Working, tested |
 | Checker and interpreter (`tungsten-core`) | Working, tested |
 | Proofs that the checker and interpreter can't go out of bounds, overflow or loop forever | Run by hand with `scripts/verify.sh` |
-| Proofs that the interpreter is correct, and that accepted programs can't get stuck | Not started |
+| Proofs that the interpreter is correct, and that accepted programs can't get stuck | Done, run by hand with `scripts/verify.sh` |
 | Test harness, test corpus and backend comparison (`tungsten-testsuite`) | Working: Rust, Java and CUDA are compared with the interpreter on the corpus (see [SPEC.md](../SPEC.md)) |
 | Random program testing against backends | Out of scope for now |
 | Backends following the required semantics | Mostly not yet: Rust and Java carry `@knownfail` notes for the gaps (see [PAPER.md](../PAPER.md)). CUDA has one |
@@ -58,14 +59,14 @@ so it's the one to trust when results differ.
 
 | Part | How it earns trust |
 | --- | --- |
-| `tungsten-core` (checker, interpreter) | Verus proofs, plus tests. The proofs are only partial so far (see above) |
-| `prim.rs` (primitive int, float and cast operations) | Trusted, and kept small on purpose. It's the only file in `tungsten-core` allowed to skip verification, and `verify.sh` refuses gaps anywhere else |
+| `tungsten-core` (checker, interpreter) | Verus proofs, plus tests |
+| `prim_float.rs` (22 primitive float operations) | Trusted, and kept small on purpose. It's the only file in `tungsten-core` allowed to skip verification, and `verify.sh` refuses gaps anywhere else. Integer primitives are verified |
 | `tungsten-check` (lowering) | Tested, not proven. It only resolves names and normalizes shapes, and leaves type checking to the checker |
 | `tungsten-parse`, the harness and test runtimes | Tested, not proven |
 | Hand-computed `@expect` values | Checks on the interpreter itself, by a human doing the maths |
 
-The dividing rule is that everything inside `tungsten-core` is meant to be proven, and everything
-outside it is tested.
+The dividing rule is that everything inside `tungsten-core` is proven, and everything outside it is
+tested.
 
 ## What backends must do
 

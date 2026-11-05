@@ -485,6 +485,7 @@ pub open spec fn spec_ranks_valid(p: Program, ranks: SRanks) -> bool {
     &&& ranks.units.len() == p.units@.len()
     &&& forall|k: int| #![trigger ranks.fns[k]] 0 <= k < ranks.fns.len() ==> ranks.fns[k] is Some && forall|j: int| #![trigger p.functions@[k].body@[j]]
         0 <= j < p.functions@[k].body@.len() ==> spec_stmt_ranked(ranks, ranks.fns[k]->0, p.functions@[k].body@[j])
+    // Below `usize::MAX`, because `const_types` runs one round more than the highest const rank.
     &&& forall|k: int| #![trigger ranks.consts[k]] 0 <= k < ranks.consts.len() ==> ranks.consts[k] is Some
         && ranks.consts[k]->0 < usize::MAX
         && spec_expr_ranked(ranks, ranks.consts[k]->0, p.consts@[k].init)

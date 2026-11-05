@@ -474,7 +474,7 @@ pass that makes each `If`/`While` condition call a trace extern, so verified cod
 | L3 | Interpreter vs `@expect` (hand-computed) | `tests/corpus.rs` |
 | L4 | Interpreter vs each backend | `tests/corpus.rs` |
 | L5 | Optimizer equivalence (§9.1 step 5) | `tests/corpus.rs` |
-| L6 | **Out of scope for now; not implemented.** Random well-typed programs (proptest, shrinking). A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally. Gating below | `tests/random.rs` |
+| L6 | **Out of scope for now; not implemented.** Random well-typed programs (proptest, shrinking). A fixed seed and a small count run in the normal suite; `TW_FUZZ=<n>` runs longer locally. Must not generate programs whose result depends on a NaN's sign, like `copysign(x, 0.0 / 0.0)`: they are outside the differential contract, and biasing toward NaN could hit them. Gating below | `tests/random.rs` |
 
 L6 gating (design for later, out of scope for now): interpreter-side checks (checker accepts, no `Stuck`, round-trip, memo on == off, inlined
 interpreter == original) always fail the run. Backend mismatches only fail it for backends listed in
