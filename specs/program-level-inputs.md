@@ -24,8 +24,9 @@ This has two effects:
 - **Sharing.** Several units can list one input, and a helper shared between units can read it if each of those
   units lists it.
 
-This version also deletes `tungsten-legacy`, as the last code milestone here (§6.8). That needs `tungsten-mc-compile`
-to build IR directly first, which is separate work in `tungsten-frontends`.
+This version also deletes `tungsten-legacy`, as the last code milestone here (§6.8). `tungsten-mc-compile` stays on a
+pinned version from before the deletion until it's ported to `tungsten-builder` (`specs/builder.md`), which is separate
+work in `tungsten-frontends`.
 
 ### Goals
 
@@ -38,8 +39,8 @@ to build IR directly first, which is separate work in `tungsten-frontends`.
 ### Non-goals
 
 - Merging structurally equal inputs (§9).
-- Porting `tungsten-mc-compile` to build IR directly. This spec states what it must provide, but the work is in
-  `tungsten-frontends` (§6.8).
+- Porting `tungsten-mc-compile` to build IR directly. The work is in `tungsten-frontends`, and `specs/builder.md` §9
+  records what a port must show.
 - Extending the legacy model before it's deleted, or relaxing its `DensityInputInHelperFunction` error.
 - Changing `Instance`, buffers, scheduling or the backend runtimes.
 - Byte-identical code for inlined programs. Their values must still match bit for bit (§7).
@@ -261,11 +262,11 @@ Conversion stays working through milestones 2–4, so vanilla can still be compi
 
 ### 6.8 Removing `tungsten-legacy`
 
-**Prerequisite.** `tungsten-mc-compile` builds `OptimizedProgram` directly and no longer uses `tungsten_wg::spmt`
-or the re-exported macros. Today that use covers about 14 source files, including `compile.rs` (`spmt::conversion::convert`),
-`main.rs` (`spmt::pretty`, `spmt::dag`) and the 5,000+ lines in `transform_spmt/`, plus 35 macro uses. The frontend's new
-IR builder must also produce what this spec requires: program-level inputs, each unit's `inputs` list, and an input
-`name`. Milestone 5 can't land until this port is ready, or the frontend stops compiling against this repo.
+**Prerequisite.** `tungsten-mc-compile` is pinned to a tag on the last commit with `tungsten-legacy`, taken after
+milestone 4 (`specs/builder.md` §8). It uses `tungsten_wg::spmt` and the re-exported macros in about 14 source files,
+including `compile.rs` (`spmt::conversion::convert`), `main.rs` (`spmt::pretty`, `spmt::dag`) and the 5,000+ lines in
+`transform_spmt/`, plus 35 macro uses. Its dependency on this repo is a path today, so without the pin it stops
+compiling when milestone 5 lands. Porting it isn't a prerequisite.
 
 | Area | Change |
 | --- | --- |
@@ -288,7 +289,7 @@ Rust's `transformer.rs` mentions `spmt` only in a commented-out import, so that 
 | L2 snapshots | The only diff is removed `owner` lines. Corpus files keep their inputs in today's order, so ids don't move |
 | Protocol goldens | No change |
 | `tungsten-mc-compile`, milestones 1–4 | Compiles unchanged, as it uses only the legacy model and builds no `OptimizedProgram` literal |
-| `tungsten-mc-compile`, milestone 5 | Needs the §6.8 port. `tungsten_wg::spmt` and the macros are a breaking API removal, so this needs a version bump |
+| `tungsten-mc-compile`, milestone 5 | Needs the §6.8 pin. `tungsten_wg::spmt` and the macros are a breaking API removal, so this needs a version bump |
 
 ## 8. Testing
 
@@ -328,8 +329,8 @@ fixtures and the `gen_program` generator in `tungsten-parse/tests/common/mod.rs`
   commit before this work and after it, with inlining off, on all backends. They must be identical.
   This goes through legacy conversion, so it must happen at milestone 3, before the deletion.
 - **Vanilla.** `check::prepare` accepts the vanilla overworld, inlined and not inlined.
-- **Baseline for the frontend port.** At milestone 4, save vanilla's generated code, not inlined, on all backends. The
-  port compares against it to show that its IR means the same as conversion's.
+- **Baseline for a later frontend port.** The §6.8 tag can regenerate vanilla's code, not inlined, on all backends. A
+  port compares against that output to show that its IR means the same as conversion's (`specs/builder.md` §9).
 - **After deletion.** `cargo tree` shows no `tungsten-legacy`, `cargo test` passes for the workspace with every feature, and
   `scripts/verify.sh` passes. Corpus results and L2 snapshots don't change at milestone 5.
 - **Mutation checks, done once and recorded.** Each must turn the suite red: dropping the listed-input check;
@@ -351,8 +352,9 @@ Each lands green.
    host rule, still per unit.
 3. **Arena move.** §3.1 and §6, in all crates at once, since the type change can't be split. Corpus migration and the
    byte comparison happen here.
-4. **Sharing.** New corpus and mutation checks, with any backend fixes they turn up. Save the vanilla baseline.
-5. **Remove legacy.** §6.8. Blocked on the frontend port.
+4. **Sharing.** New corpus and mutation checks, with any backend fixes they turn up. `tungsten-builder` lands after
+   milestone 3 and before milestone 5, on its own milestones (`specs/builder.md` §10).
+5. **Remove legacy.** §6.8. First tag the last commit with legacy and pin the frontend to it.
 6. **Documentation.** `SEMANTICS.md` §9, `CHECK.md` (wf table, §6(e), error table), `tungsten-core/README.md`,
    `tungsten-check/README.md`, `tungsten-parse/SPEC.md` (§2, §4, §5, §6.1, §14), `TESTING.md` §8, `docs/redesign.md`
    (layout, dependency rule, decisions), the root `README.md` (workspace layout, usage) and `PAPER.md` where it
@@ -365,7 +367,7 @@ Each lands green.
 | Meaning of program level | Shared inputs, with core dropping `owner` | Shared with core unchanged: lowering splits inputs per unit, IR and core stop matching 1:1, and shared-helper reads stay rejected. Storage move only: no new capability |
 | Core change | Accepted, unlike the other two specs' stance | `owner` isn't used by `exec` and no proof depends on it, so the cost is one `verify.sh` run and the checker edits |
 | `var` | Replaced by `name: Name` | Keeping it: a shared input's var would point into an arbitrary function's arena |
-| Removing legacy | In this spec, as the last code milestone, after the frontend port | Before this work: no vanilla path for the byte comparison. After these specs: density-mappings and refinement would have to extend or work around a crate about to go |
+| Removing legacy | In this spec, as the last code milestone, with the frontend pinned to the last legacy tag | Before this work: no vanilla path for the byte comparison. After these specs: density-mappings and refinement would have to extend or work around a crate about to go. Waiting for the frontend port: it has no owner or date, and would block both later specs |
 | `VariableType::DensityInput` | Deleted with legacy at milestone 5 | Own enum in legacy in the meantime: type translation at each conversion site, for a crate about to be deleted |
 | Compatibility | Byte-identical unless inlined | Byte-identical everywhere: keeps arena slot-reuse behaviour in the inliner permanently. Values only: gives up the byte comparison |
 | Text format | Top-level `input` and a unit `inputs` list | Nested sugar as well: two forms for one thing |
@@ -383,8 +385,8 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
 - **Merging equal inputs.** An explicit optimizer pass could do this later. It must compare `mapping` and `previous`
   once those exist, and it changes `MultipleUses` counts.
 - **Removing unlisted inputs.** This belongs in `perform_dce`, in `crates/tungsten-optimizer/SPEC.md`.
-- **The frontend port.** Its owner and timing aren't set here, and it blocks milestone 5 and therefore both specs that
-  land after this one. The port may also want a replacement for the builder macros and `spmt::pretty`. `tungsten-parse`'s
-  printer and `tungsten-inspect` already print IR, so nothing new is planned in this repo.
-- **Frontend use of shared inputs.** Once it builds IR directly, the frontend can share inputs and read them from shared
-  helpers. Whether it should is its own decision.
+- **The frontend port.** Its owner and timing aren't set here, and it no longer blocks milestone 5. The builder macros'
+  replacement is `tungsten-builder` (`specs/builder.md`). `tungsten-parse`'s printer and `tungsten-inspect` already
+  print IR, so `spmt::pretty` gets no replacement.
+- **Frontend use of shared inputs.** `tungsten-builder` merges equal inputs by default, so a ported frontend shares them
+  and can read them from shared helpers.

@@ -117,8 +117,8 @@ pub struct DensityInput {
 - Readers name the **target**, also when it's replaced. `input d = detail ...` reads `detail`'s buffer, whichever
   unit wrote it last.
 - A new `Ref`-holding field must be added to `retag.rs` and `rebuild.rs`, per the note on `OptimizedProgram`.
-- `OptimizedProgram` and `DensityInput` struct literals break at the next version bump. Coordinate this with the
-  `mapping` field's bump in `tungsten-mc-compile`.
+- `OptimizedProgram` and `DensityInput` struct literals break at the next version bump. `tungsten-builder` gains
+  `InputSpec::previous`, which joins its input merge key, and `pb.refinement(...)` (`specs/builder.md` §8).
 
 ## 4. Semantics
 
@@ -481,8 +481,8 @@ instance's `@previous`; `with` units getting their own kernels per target; conte
 
 ## 12. Open and deferred
 
-- **Frontend adoption.** `tungsten-mc-compile` builds IR directly by this point (program-level-inputs §6.8), so it can declare
-  refinements. `find_top_surface` is the first candidate.
+- **Frontend adoption.** `tungsten-mc-compile` can declare refinements once it's ported to `tungsten-builder`
+  (`specs/builder.md` §9). `find_top_surface` is the first candidate.
 - **Core semantics** for sequences, once T1–T5 land: a verified step semantics, and a host or frozen-buffer read without a clone (§7.4).
 - **Unmeasured:** march cost compared with an eager 3D buffer. Each step launches its kernels, so the cost per step matters on CUDA. Measure before
   the frontend moves. On CUDA, wave fusion would reduce it.

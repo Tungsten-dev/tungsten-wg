@@ -280,9 +280,10 @@ factor    = UINT | "*" ;
 
 ### 5.6 Other crates
 
-`tungsten-legacy` is gone by the time this lands (program-level-inputs §6.8). The frontend builds IR directly, so
-it sets `mapping` itself. For strict 1-to-1 to accept its existing reads, a `(1,1,1)` input read from a larger grid must
-be `Expand([Repeat; 3])`, which generates the same code.
+`tungsten-legacy` is gone by the time this lands (program-level-inputs §6.8). `tungsten-builder` gains
+`InputSpec::mapping`, and the mapping joins its input merge key (`specs/builder.md` §8). `tungsten-mc-compile` stays on
+its pinned version until it's ported. Once it is, for strict 1-to-1 to accept its existing reads, a `(1,1,1)` input read
+from a larger grid must be `Expand([Repeat; 3])`, which generates the same code.
 
 | Crate | Change |
 | --- | --- |
@@ -370,9 +371,8 @@ Each lands green.
 
 ## 9. Open and deferred
 
-- **Frontend follow-up** in `tungsten-mc-compile`: emit `@expand` and `@lerp` in place of the extern calls.
-  New `mapping` fields break its `DensityInput` struct literals at the next version bump, so the two
-  changes should be coordinated.
+- **Frontend follow-up** in `tungsten-mc-compile`: emit `@expand` and `@lerp` in place of the extern calls, once it's
+  ported to `tungsten-builder`. New IR fields don't break builder users.
 - **Unmeasured:** how much faster folded lerp is than the extern calls. Measure when the frontend moves,
   before starting on any of the deeper options.
 - **Later optimizations:** kernel hoisting and materialized buffers, without IR changes. Hoisting benefits
