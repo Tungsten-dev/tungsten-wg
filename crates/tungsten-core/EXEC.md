@@ -34,8 +34,8 @@ It is a straightforward **tree-walking interpreter**: one Rust function per kind
 (program, entry, unit, cell, call, statement, expression), each calling the next.
 
 What makes it a bit unusual is that it lives inside `verus!{}` and Verus proves that **every one
-of these functions terminates and never indexes out of bounds or overflows**. That explains most
-of the oddities you'll see:
+of these functions terminates, never indexes out of bounds or overflows, and computes its
+counterpart in `src/spec/eval.rs`**. That explains most of the oddities you'll see:
 
 - no closures, iterators, `?` on `Option`, or `HashMap`: plain `while` loops and `match`;
 - `util::get(&v, i)` instead of `v[i]` whenever `i` is an id from the program;
@@ -170,12 +170,13 @@ order (a **lexicographic measure**):
 
    | Layer | Functions |
    | --- | --- |
-   | 5 | `build_input` |
-   | 4 | `eval_unit_ctx` |
+   | 6 | `build_input` |
+   | 5 | `eval_unit_ctx` |
+   | 4 | `eval_cells` |
    | 3 | `eval_cell` |
    | 2 | `eval_call`, `eval_const` |
    | 1 | `eval_stmts`, `eval_stmt` |
-   | 0 | `eval_expr`, `eval_args`, `read_density` |
+   | 0 | `eval_expr` and its per-arm helpers, `eval_args`, `eval_fields`, `read_density` |
 
    Going from a statement to one of its expressions drops from layer 1 to layer 0. (Verus can't
    compare the size of a `Stmt` with the size of an `Expr`, so the layer does that job.)
@@ -194,21 +195,20 @@ longer be invisible. Ranks are a property of the program alone, so it doesn't ma
 
 ### Why the rank comparison is written out inline
 
-Each call site reads `if r < rank { call(…, r, …) } else { Stuck(Rank) }` directly. A helper
-returning `Option<usize>` would be tidier, but exec functions have no `ensures` in this phase,
-so Verus wouldn't know that the helper's result is below `rank`. The comparison has to be visible
-in the caller. `rank_or(target, current)` only turns *none* into `current`, which then fails the
-inline `<` check.
+Each call site reads `if r < rank { call(…, r, …) } else { Stuck(Rank) }` directly, matching the
+spec's shape. `rank_or(target, current)` only turns *none* into `current`, which then fails the
+inline `<` check, so a call that gets through had a rank: the memo proof relies on that (§2).
 
 ---
 
 ## 4. The functions
 
-### 4.1 `eval_program(p, case, ext, fuel, memo) -> CaseResult` (`exec/mod.rs`)
+### 4.1 `eval_program(p, case, ext, fuel, memo_enabled) -> CaseResult` (`exec/mod.rs`)
 
-The entry point. In order:
+The entry point, and the statement of T1: its cells are `spec_eval_program` of an environment
+built from the program alone, and its diagnostics are sound. In order:
 
-1. Computes `ranks(p)` and builds the `Env`.
+1. Creates the memo, computes `ranks(p)` and builds the `Env`.
 2. Evaluates **every constant**, in id order, through `eval_const` at the constant's own rank (a
    constant with no rank is `Stuck(Rank)`). Remembers each failure as `Failure::Const` and the
    **first** (lowest-id) failing error.
@@ -219,13 +219,15 @@ The entry point. In order:
 4. Builds `failures`: the constant failures first, then `memo.failures` (failing inputs, in
    discovery order).
 
-The `memo` is passed in by the caller so that tests can turn it off. `tungsten-check`'s
-`Prepared::eval` creates it.
+The memo is created here, not passed in, so that no precondition about it falls on unverified
+callers. `memo_enabled` exists so that tests can turn it off.
 
 ### 4.2 `eval_entry(env, e, memo)` (`exec/unit.rs`)
 
 Builds the base context for entry `e`: the case's origin, the entry's scales and dims. Then
-calls `eval_unit_ctx` at the unit's rank. If the unit has no rank, every cell is `Stuck(Rank)`.
+calls `eval_unit_ctx` at the unit's rank. If the unit has no rank, every cell is `Stuck(Rank)`, or
+a single `Stuck(Layout)` cell if the dims don't give a cell count (the layout comes first, as it
+does in the failing-const path, so a result can't change kind with fuel).
 
 ### 4.3 `eval_unit_ctx(env, rank, u, base, memo)` (`exec/unit.rs`, layer 4)
 
@@ -237,8 +239,8 @@ building an input from its source unit.
    rank check). It doesn't stop at the first failure: all inputs are built, and it keeps the
    error of the failing input with the **lowest `InputId`**.
 3. If any input failed: returns that error `n` times. No cell runs.
-4. Otherwise, for `k = 0 .. n` in order: decodes `k` to a position, builds the cell's `Ctx`, and
-   calls `eval_cell`. Collects the results.
+4. Otherwise `eval_cells`: for `k = 0 .. n` in order, decodes `k` to a position, builds the cell's
+   `Ctx`, and calls `eval_cell`. Collects the results.
 
 Building all inputs (instead of stopping early) means every failing input ends up in the
 diagnostics, and the choice of error is by id, independent of the list order.
@@ -304,12 +306,15 @@ a `Return` or an error) and passes that up. Returns `Next` if all of them did.
 
 **Loops are Rust loops, not recursion.** A recursive `while` (one call per iteration) would match
 a mathematical definition more closely, but the Rust stack would grow with the fuel, and with
-`DEFAULT_FUEL = 2^20` that would overflow. The later spec will define loops recursively and the
-proof will connect the two.
+`DEFAULT_FUEL = 2^20` that would overflow. The spec defines loops recursively (`spec_while`,
+`spec_repeat`), and each loop's invariant connects the two.
 
 ### 4.10 `eval_expr(env, rank, ctx, frame, e, memo)` (`exec/expr.rs`, layer 0)
 
-One `match` arm per expression kind, following SEMANTICS.md §5. Points worth knowing:
+One `match` arm per expression kind, following SEMANTICS.md §5. The longer arms are functions of
+their own (`eval_binary`, `eval_extern_call`, `eval_index`, `eval_make_vec3`, `eval_make_pos3`),
+which take the whole expression as `Ghost` for their measure, so that each arm's proof is its own
+Z3 query. `frame` is `&Frame`: expressions never assign. Points worth knowing:
 
 - **`Local`**: `Some(v)` → a copy of `v`; `None` → `Stuck(Unassigned)`; missing slot →
   `Stuck(BadIndex)`.
@@ -331,16 +336,16 @@ One `match` arm per expression kind, following SEMANTICS.md §5. Points worth kn
   `OutOfBounds`. Anything other than `Array` + `I32` is `Stuck(Shape)`.
 - **`MakeVec3` / `MakePos3`**: evaluate x, y, z in order, `Stuck(Shape)` unless they are three
   `F64`s / three `I32`s.
-- **`MakeRecord`**: starts with one empty slot per declared field. Evaluates the written fields
-  in written order and drops each into its slot (`Stuck(Shape)` if the slot is already filled,
+- **`MakeRecord`** (`empty_slots`, `eval_fields`, `collect_slots`): starts with one empty slot per
+  declared field. Evaluates the written fields in written order and drops each into its slot (`Stuck(Shape)` if the slot is already filled,
   `Stuck(BadIndex)` if it doesn't exist). Then `Stuck(Shape)` if any slot is still empty.
   Otherwise the record, in declaration order.
-- **`ArrayLit`**: evaluates the elements in order.
+- **`ArrayLit`**: `eval_args` over the elements.
 
 ### 4.11 `eval_args(env, rank, ctx, frame, args, memo)` (`exec/expr.rs`, layer 0)
 
 Evaluates a list of expressions left to right, stopping at the first error. Used for function and
-extern arguments.
+extern arguments and array elements.
 
 ### 4.12 `read_density(env, rank, ctx, frame, input, index, memo)` (`exec/expr.rs`, layer 0)
 
@@ -385,16 +390,19 @@ Every actual arithmetic operation, comparison and conversion goes through `prim.
 
 ## 5. The primitives: `prim.rs`
 
-`prim.rs` is a flat list of tiny functions on raw values: `i32_add`, `i8_ushr`, `f64_lt`,
-`f32_to_i8`, `i64_to_f32` and so on. Floats are passed and returned as bits (`u32`/`u64`).
+`prim.rs` and `prim_float.rs` are flat lists of tiny functions on raw values: `i32_add`, `i8_ushr`,
+`f64_lt`, `f32_to_i8`, `i64_to_f32` and so on. Floats are passed and returned as bits
+(`u32`/`u64`).
 
-They are the **trusted base**: each body is ordinary Rust (`wrapping_add`, `as` casts,
-`f64::from_bits(a) + f64::from_bits(b)`), marked `external_body` so Verus doesn't look inside.
-This is the only file allowed to do that. In the proof phase each will get an `ensures` that
-equates it to a mathematical definition.
+`prim.rs` is **verified** against definitions in `spec/prim.rs`: every integer operation, `neg` on
+floats (a flip of the sign bit), and float to `i8`. `prim_float.rs` is the **trusted base**: 22
+functions (`f64::from_bits(a) + f64::from_bits(b)` and so on), marked `external_body` so Verus
+doesn't look inside. It is the only file allowed to do that, and `verify.sh` counts them.
 
 Things to know:
 
+- Arithmetic and float-to-float conversions return one canonical `NaN` for a `NaN` result, because
+  the `ensures` says each is a function of its input bits and Rust doesn't otherwise promise that.
 - Rust's `as` from float to int already rounds toward zero, saturates and maps `NaN` to 0, which
   is exactly Java's rule, so `f64_to_i32` is just `as i32`.
 - `f32_to_i8` / `f64_to_i8` go through `i32` first (`(x as i32) as i8`), because that's what
@@ -404,7 +412,8 @@ Things to know:
   the sign-extended 32-bit value, matching Java.
 - Shift amounts are masked (`& 31` or `& 63`).
 - The division primitives return `0` for a zero divisor so they never panic, but the caller
-  always checks first and reports `DivByZero`.
+  always checks first and reports `DivByZero`. They use `checked_div` because this vstd has no spec
+  for `wrapping_div`, and negation is `0.wrapping_sub(a)` for the same reason.
 
 `prim.rs` has its own unit tests for the edge cases (`MIN / -1`, shift masks, `NaN` and infinity
 casts, `-0.0`, rounding).
@@ -452,7 +461,7 @@ let case = prep.case(&NamedCase { origin: [0.0; 3], hosts: vec![…] })?; // bin
 let result = prep.eval(&case, &my_externs, EvalOptions::default())?;  // per case
 ```
 
-`Prepared::eval` runs `check_case`, creates a `Memo`, calls `eval_program`, and then scans the
+`Prepared::eval` runs `check_case`, calls `eval_program`, and then scans the
 result: any `Stuck` (in a cell or in `failures`) turns the whole call into
 `EvalFailure::Stuck { reasons, failures }`, because it means a checker or interpreter bug.
 `EvalOptions` holds the fuel (`DEFAULT_FUEL = 2^20`) and the memo switch. `evaluate` does all
@@ -489,4 +498,5 @@ An `Externs` implementation usually needs names (which extern is `ExternId(3)`? 
 - Keep the error order canonical (SEMANTICS.md §10.3): if you add a place where several things
   can fail, decide which one wins by id or position, never by evaluation order that a backend
   might do differently.
-- Run `scripts/verify.sh` afterwards: it is the acceptance test for termination and bounds.
+- Change `src/spec/eval.rs` with it: the `ensures` says the two agree.
+- Run `scripts/verify.sh` afterwards: it is the acceptance test for this crate.

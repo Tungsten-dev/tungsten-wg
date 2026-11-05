@@ -26,8 +26,11 @@ The checker's promise is:
 SEMANTICS.md §10.2). Real run-time failures, such as dividing by zero or running out of fuel,
 are still possible. Those depend on the data, and no checker could rule them out.
 
-Today that promise is tested: programs are mutated at random, and the ones the checker still
-accepts are run, and must never get stuck. The later proof phase will prove it.
+That promise is proven (`proofs/soundness.rs` and the `ensures` on `check`), apart from the two
+`Stuck` reasons only an extern breaking its own declaration can cause. Programs are also still
+mutated at random in tests, and the ones the checker accepts must never get stuck: that runs the
+real primitives and externs. The scoping rules (§6) aren't part of the proof, because the
+interpreter never reads those lists.
 
 A second job is to make sure **backends** can compile the program: the scoping rules (§6) exist
 because the backends generate code per unit and need every unit's lists to be complete.
@@ -101,13 +104,10 @@ reported once per function, a scoping violation once per unit and offending id, 
 ## 3. Well-formedness
 
 Well-formedness ("wf") is only about **ids and links**. It says nothing about types. It is
-defined twice, and both must agree:
+defined twice, and Verus proves they agree (`check_wf(p)` is empty exactly when `wf_program(p)`):
 
-- as a mathematical definition (`spec fn wf_program` in `src/wf.rs`), which the proofs will use;
+- as a mathematical definition (`spec fn wf_program` in `src/wf.rs`), which the proofs use;
 - as executable code that reports errors (`check_wf` in `src/check/wf.rs`).
-
-`tungsten-check`'s tests also hold a plain-Rust copy (`wf_mirror.rs`) and check that it agrees
-with `check_wf`. If you change one of the three, change all of them.
 
 ### The rules
 

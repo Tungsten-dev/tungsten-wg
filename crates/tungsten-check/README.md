@@ -300,9 +300,8 @@ the result. `tests/mod.rs` has the helpers:
 | `check_errors.rs` | One reject test per `CheckErrorKind` (both hints), with its rendered location; hand-built core programs for wf and forbidden const inits |
 | `check_rejects.rs` | The lowering tests whose programs the checker rejects on purpose, with reasons |
 | `eval.rs` | Interpreter results computed by hand (operators × types, overflow, shifts, casts, `-0.0`, short-circuit, loops, fuel, consts, density inputs, eager failures, canonical errors, externs) and the `prepare`/`Prepared`/`evaluate` API |
-| `stuck_mutation.rs` | proptest: checker-accepted programs mutated on the core IR; those still accepted never get `Stuck` |
-| `memo.rs` | proptest: memo on == memo off; results are monotone in fuel per cell |
-| `wf_mirror.rs` | A plain-Rust copy of `tungsten-core/src/wf.rs`, and the proptest that `check_wf` agrees with it |
+| `stuck_mutation.rs` | proptest: checker-accepted programs mutated on the core IR; those still accepted never get `Stuck`. Proven in `tungsten-core`; this runs the real primitives and externs |
+| `memo.rs` | proptest: memo on == memo off, including the order of diagnostics, which isn't proven; results are monotone in fuel per cell |
 
 Run them with `cargo test -p tungsten-check`.
 
@@ -337,7 +336,7 @@ Open questions:
 - **New `tungsten-ir` `Expression` variant:** add an arm in `lower/expr.rs::expr`, plus a
   normalization test.
 - **New core IR variant:** see the checklist in `tungsten-core/README.md`. On this side: the
-  lowering, `tests/wf_mirror.rs`, and the rendering in `check.rs`.
+  lowering and the rendering in `check.rs`.
 - **New `CheckErrorKind`:** its message in `check.rs::Names::message` and a test in
   `tests/check_errors.rs`.
 - **New error kind:** add it to `LowerErrorKind` in `error.rs` with a `Display` message, and

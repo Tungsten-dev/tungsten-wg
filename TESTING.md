@@ -1,7 +1,7 @@
 # Testing policy: verified interpreter, text format, differential backend tests
 
-Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, no
-functional proofs yet), `tungsten-check` and `tungsten-testsuite` exist. The testsuite does
+Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, with the
+theorems of §7 proven), `tungsten-check` and `tungsten-testsuite` exist. The testsuite does
 differential testing against Rust, Java and CUDA (milestones 1 to 3 and 5; per-milestone notes in
 `SPEC.md`). Backend conformance is still open (§4 item 4) and is tracked through `@knownfail`. The CI
 workflow is deferred (§12). Per-item status is marked in §3 and §4. The design of
@@ -34,7 +34,7 @@ New pieces:
 | Topic | Decision |
 | --- | --- |
 | Verification tool | Verus. The crates build with plain `cargo` (`verus!{}` erases). `vstd` comes from crates.io, `=`-pinned. Proofs run with `scripts/verify.sh` (downloads the pinned release, runs `cargo verus verify -p tungsten-core`), locally only. They don't gate CI. |
-| What is proven | Spec + refinement: exec interpreter == spec semantics. Plus type soundness of the checker, fuel monotonicity, and the layout lemma (§6.3). Floats are uninterpreted in both spec and exec. |
+| What is proven | Spec + refinement: exec interpreter == spec semantics. Plus type soundness of the checker, fuel monotonicity, the layout lemma (§6.3) and wf agreement. Integers are defined and verified; floats are uninterpreted in both spec and exec. |
 | Verified IR | A lowered **core IR** (dense `Vec` indices, resolved types, no names). The lowering from `OptimizedProgram` is ordinary Rust and is tested, not proven. |
 | Checker | Verified. `check(p) == Ok` ⇒ the interpreter never gets stuck. |
 | Termination | Fuel **per `While` execution**: one `While` may run at most `fuel` iterations, else `OutOfFuel`. This outcome is interpreter-only: it fails the test unless the file says `@expect "<case>" error(OutOfFuel)`, and either way that case is never sent to a backend, which has no fuel. `Repeat` costs nothing. Recursion and cyclic consts/inputs are rejected by the checker. Every function, const, input and unit has a **rank** (its depth in the dependency DAG), and every call/read checks that the rank decreases. |
@@ -73,11 +73,12 @@ crates/tungsten-core/          # all inside verus!{}, depends only on vstd/built
   src/value.rs        # value domain, EvalError/StuckReason, Case, trait Externs, value_has_type
   src/util.rs         # bounds-checked Vec access, clone_* for the recursive types
   src/layout.rs       # len / flat / decode, overflow-checked
-  src/prim.rs         # trusted int/float/cast primitive layer (external_body)
-  src/check/          # checker: wf twin, types, flow, scope, acyclic (ranks); later well_typed
-  src/exec/           # executable interpreter; later refinement proofs
-  src/spec/           # (not started) spec semantics (spec fn)
-  src/proofs/         # (not started) type soundness, fuel monotonicity, layout lemma
+  src/prim.rs         # verified integer primitives, negation and float-to-i8
+  src/prim_float.rs   # the trusted float primitives (external_body)
+  src/check/          # checker: wf twin, types, flow, scope, acyclic (ranks)
+  src/exec/           # executable interpreter, proven to refine src/spec/
+  src/spec/           # spec semantics, typing, ranks (spec fn)
+  src/proofs/         # type soundness, fuel monotonicity, layout, acyclicity
 crates/tungsten-check/         # plain Rust, unverified
   src/registry.rs     # Registry, RegistryBuilder (names + decls)
   src/lower/          # OptimizedProgram -> core IR
@@ -270,28 +271,38 @@ Lemma (verified): `decode(flat(c, dims), dims) == c` for every `c` in range, and
 
 ### 7.1 Structure
 
-- `spec fn eval_*` define the semantics over the core IR with explicit fuel.
-- Exec `fn eval_*` have `ensures result == spec_eval_*(…)`. The memo invariant is per id:
-  `∀ c ∈ memo.consts. memo[c] == spec_eval_const(p, case, fuel, c)`, and likewise for
+- `spec fn spec_eval_*` define the semantics over the core IR with explicit fuel. `Vec`s can't be
+  built in a spec, so values are `SValue`s over `Seq`, viewed from exec with `view_value`.
+- Exec `fn eval_*` have `ensures view_*(result) == spec_eval_*(…)`. The memo invariant is per id:
+  `∀ c ∈ memo.consts. memo[c] == spec_eval_const(env, rank(c), c)`, and likewise for
   `memo.inputs` with `spec_build_input`.
-- `check` has `ensures result.is_ok() ⇒ well_typed(p)`.
+- `check` has `ensures result is Ok ∧ program_fits(p) ⇒ well_typed(p)`. `program_fits` says the node
+  table fits `usize`, which is physically always true.
 
 ### 7.2 Theorems
 
-1. **Refinement**: exec interpreter == spec, for every fuel.
-2. **Type soundness**: `well_typed(p)` ⇒ spec evaluation never returns `Stuck`, and every `Ok`
-   value has its declared type.
+1. **Refinement**: exec interpreter == spec, for every program and every fuel, memo on or off.
+   Const failures are exact; each input failure is correct. The discovery order of input failures
+   is tested, not proven.
+2. **Type soundness**: `well_typed(p)` ⇒ spec evaluation never returns `Stuck`, except the two
+   reasons only an extern breaking its declaration can cause, and every `Ok` value has its declared
+   type. If the extern respects its declaration, there is no `Stuck` at all.
 3. **Fuel monotonicity**, per cell: if fuel `f` gives a cell result other than `OutOfFuel`,
    every `f' ≥ f` gives the same result for that cell.
 4. **Layout**: §6.3 lemma.
+5. **Wf agreement**: `check_wf(p)` is empty exactly when `wf_program(p)`.
 
 ### 7.3 Trusted base
 
-Verus itself. The primitive layer `prim.rs`: every integer, float and cast operation is an
-`external_body` fn whose `ensures` (added in the proof phase) equates it to an uninterpreted
-`spec fn`. Externs are supplied through the `Externs` trait
-(`call(&self, ExternId, &[Value]) -> Result<Value, ExternFail>`), which gets an uninterpreted
-spec too; its results are checked against the decl at runtime. Everything else outside
+Verus itself, with vstd's specifications of the standard library. `prim_float.rs`: 22 float
+primitives, each an `external_body` fn whose `ensures` equates it to an uninterpreted `spec fn`.
+That claims each is a function of its input bits, so arithmetic and float-to-float conversions
+return one canonical NaN (Rust doesn't otherwise promise that NaN results are deterministic).
+Integer operations, negation and float-to-`i8` are verified. Externs are supplied through the
+`Externs` trait (`call(&self, ExternId, &[Value]) -> Result<Value, ExternFail>`), with an
+uninterpreted spec per implementation: nothing checks that an implementation is pure, including the
+bits of a NaN it returns. Its results are checked against the decl at runtime. `spec/` itself is
+reviewed, not proven. Stack overflow and allocation failure aren't modeled. Everything else outside
 `tungsten-core` (the lowering in `tungsten-check`, the parser, the harness and the runtimes) is
 tested, not proven. Kani harnesses for the lowering
 and for cast/shift edge cases are possible later work.

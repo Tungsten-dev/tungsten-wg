@@ -5,7 +5,8 @@
 #
 # Downloads the pinned Verus release into target/verus/<tag>/ on first use (checksum-checked),
 # installs the Rust toolchain it needs with rustup, checks that the vstd pin matches, rejects
-# trusted gaps in tungsten-core, then runs `cargo verus verify -p tungsten-core`.
+# trusted gaps in tungsten-core, then runs `cargo verus verify -p tungsten-core`. A pass proves the
+# theorems listed in crates/tungsten-core/VERUS.md.
 #
 # To bump Verus: change VERUS_TAG, VSTD_VERSION, VERUS_TOOLCHAIN and the checksums together, and
 # the `vstd` pin in the root Cargo.toml. The pin check enforces the last part. VSTD_VERSION and
@@ -71,11 +72,25 @@ if [[ "$PINNED" != "$VSTD_VERSION" ]]; then
     exit 1
 fi
 
-# 2. Proof-free guard (this phase): no trusted gaps in tungsten-core, except prim.rs (the trusted
-#    primitive layer).
-if GAPS="$(grep -rnE 'admit\(|assume\(|external_body|#\[verifier::external\]' crates/tungsten-core/src --include='*.rs' | grep -v '/prim\.rs:')"; then
+# 2. Trusted-gap guard. Nothing may be trusted without proof, except the float primitives in
+#    prim_float.rs: exactly 22 external_body functions, each equated to one of exactly 22
+#    uninterpreted functions in spec/prim.rs.
+SRC=crates/tungsten-core/src
+if GAPS="$(grep -rnE 'admit\(|assume\(|external_body|verifier::external|assume_specification|axiom fn|exec_allows_no_decreases_clause|assume_termination' "$SRC" --include='*.rs' | grep -v "^$SRC/prim_float\.rs:")"; then
     echo "verify.sh: trusted gaps in tungsten-core:" >&2
     echo "$GAPS" >&2
+    exit 1
+fi
+if GAPS="$(grep -rnE '\buninterp\b' "$SRC" --include='*.rs' | grep -vE "^$SRC/(spec/prim|prim_float)\.rs:")"; then
+    echo "verify.sh: uninterpreted functions outside spec/prim.rs:" >&2
+    echo "$GAPS" >&2
+    exit 1
+fi
+N_BODIES="$(grep -cE '^#\[verifier::external_body\]' "$SRC/prim_float.rs" || true)"
+N_UNINTERP="$(grep -cE '^pub uninterp spec fn' "$SRC/spec/prim.rs" || true)"
+if [[ "$N_BODIES" != 22 || "$N_UNINTERP" != 22 ]]; then
+    echo "verify.sh: expected 22 trusted primitives, found $N_BODIES bodies and $N_UNINTERP uninterpreted functions." >&2
+    echo "Changing the trusted base is a decision: update this check, and SPEC.md's list, on purpose." >&2
     exit 1
 fi
 

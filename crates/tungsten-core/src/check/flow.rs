@@ -9,6 +9,7 @@ use vstd::prelude::*;
 
 use crate::check::error::*;
 use crate::ir::*;
+use crate::spec::typing::*;
 use crate::util::*;
 
 verus! {
@@ -29,7 +30,23 @@ pub struct FCx {
     pub reported: Vec<bool>,
 }
 
-fn copy_state(s: &FState) -> FState {
+pub open spec fn view_state(s: FState) -> SFlowState {
+    SFlowState { reach: s.reach, assigned: s.assigned@, in_loop: s.depth > 0 }
+}
+
+pub open spec fn all_false(s: Seq<bool>) -> bool {
+    forall|l: int| 0 <= l < s.len() ==> !s[l]
+}
+
+/// No new error, and nothing had been reported: then nothing was suppressed.
+pub open spec fn clean(errs0: nat, errs1: nat, reported0: Seq<bool>) -> bool {
+    errs1 == errs0 && all_false(reported0)
+}
+
+fn copy_state(s: &FState) -> (r: FState)
+    ensures
+        view_state(r) == view_state(*s),
+{
     FState {
         reach: s.reach,
         assigned: copy_bools(&s.assigned),
@@ -52,24 +69,38 @@ fn union_into(dst: &mut Vec<bool>, src: &Vec<bool>) {
     }
 }
 
-fn intersect(a: &Vec<bool>, b: &Vec<bool>) -> Vec<bool> {
+fn intersect(a: &Vec<bool>, b: &Vec<bool>) -> (out: Vec<bool>)
+    ensures
+        out@ == Seq::new(a@.len(), |i: int| a@[i] && i < b@.len() && b@[i]),
+{
     let mut out: Vec<bool> = Vec::new();
     let mut i: usize = 0;
     while i < a.len()
         invariant
             i <= a.len(),
+            out@.len() == i,
+            forall|j: int| 0 <= j < i ==> out@[j] == (a@[j] && j < b@.len() && b@[j]),
         decreases a.len() - i,
     {
         out.push(a[i] && get_bool(b, i));
         i = i + 1;
+    }
+    proof {
+        assert(out@ =~= Seq::new(a@.len(), |i: int| a@[i] && i < b@.len() && b@[i]));
     }
     out
 }
 
 #[verifier::loop_isolation(false)]
 fn flow_expr(cx: &mut FCx, st: &FState, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        clean(old(errs)@.len(), final(errs)@.len(), old(cx).reported@)
+            ==> spec_expr_flows(view_state(*st), *e) && final(cx).reported@ == old(cx).reported@,
     decreases e,
 {
+    let ghost e0 = errs@.len();
+    let ghost r0 = cx.reported@;
     match e {
         Expr::Local(l) => {
             if st.reach && !get_bool(&st.assigned, l.0) && !get_bool(&cx.reported, l.0) {
@@ -96,6 +127,9 @@ fn flow_expr(cx: &mut FCx, st: &FState, e: &Expr, path: &mut Vec<CoreStep>, errs
             while i < args.len()
                 invariant
                     i <= args.len(),
+                    errs@.len() >= e0,
+                    clean(e0, errs@.len(), r0) ==> cx.reported@ == r0
+                        && (st.reach ==> forall|k: int| #![trigger args@[k]] 0 <= k < i ==> spec_reads_assigned(st.assigned@, args@[k])),
                 decreases args.len() - i,
             {
                 path.push(CoreStep::Arg(i));
@@ -146,6 +180,9 @@ fn flow_expr(cx: &mut FCx, st: &FState, e: &Expr, path: &mut Vec<CoreStep>, errs
             while i < fields.len()
                 invariant
                     i <= fields.len(),
+                    errs@.len() >= e0,
+                    clean(e0, errs@.len(), r0) ==> cx.reported@ == r0
+                        && (st.reach ==> forall|k: int| #![trigger fields@[k]] 0 <= k < i ==> spec_reads_assigned(st.assigned@, fields@[k].value)),
                 decreases fields.len() - i,
             {
                 path.push(CoreStep::Field(*record, fields[i].field));
@@ -159,6 +196,9 @@ fn flow_expr(cx: &mut FCx, st: &FState, e: &Expr, path: &mut Vec<CoreStep>, errs
             while i < es.len()
                 invariant
                     i <= es.len(),
+                    errs@.len() >= e0,
+                    clean(e0, errs@.len(), r0) ==> cx.reported@ == r0
+                        && (st.reach ==> forall|k: int| #![trigger es@[k]] 0 <= k < i ==> spec_reads_assigned(st.assigned@, es@[k])),
                 decreases es.len() - i,
             {
                 path.push(CoreStep::Element(i));
@@ -233,6 +273,12 @@ pub fn has_return_stmt(s: &Stmt) -> bool
 }
 
 fn flow_loop_body(cx: &mut FCx, st: &mut FState, body: &Vec<Stmt>, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        view_state(*final(st)) == view_state(*old(st)),
+        final(errs)@.len() >= old(errs)@.len(),
+        clean(old(errs)@.len(), final(errs)@.len(), old(cx).reported@)
+            ==> spec_flow_stmts(SFlowState { in_loop: true, ..view_state(*old(st)) }, *body, 0) is Some
+                && final(cx).reported@ == old(cx).reported@,
     decreases body, 1int,
 {
     let mut inner = copy_state(st);
@@ -247,12 +293,23 @@ fn flow_loop_body(cx: &mut FCx, st: &mut FState, body: &Vec<Stmt>, path: &mut Ve
 
 #[verifier::loop_isolation(false)]
 pub fn flow_stmts(cx: &mut FCx, st: &mut FState, ss: &Vec<Stmt>, kind: StepKind, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        clean(old(errs)@.len(), final(errs)@.len(), old(cx).reported@)
+            ==> spec_flow_stmts(view_state(*old(st)), *ss, 0) == Some(view_state(*final(st)))
+                && final(cx).reported@ == old(cx).reported@,
     decreases ss, 0int,
 {
+    let ghost e0 = errs@.len();
+    let ghost r0 = cx.reported@;
+    let ghost v0 = view_state(*st);
     let mut i: usize = 0;
     while i < ss.len()
         invariant
             i <= ss.len(),
+            errs@.len() >= e0,
+            clean(e0, errs@.len(), r0) ==> cx.reported@ == r0
+                && spec_flow_stmts(v0, *ss, 0) == spec_flow_stmts(view_state(*st), *ss, i as int),
         decreases ss.len() - i,
     {
         path.push(mk_step(kind, i));
@@ -263,6 +320,11 @@ pub fn flow_stmts(cx: &mut FCx, st: &mut FState, ss: &Vec<Stmt>, kind: StepKind,
 }
 
 pub fn flow_stmt(cx: &mut FCx, st: &mut FState, s: &Stmt, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        clean(old(errs)@.len(), final(errs)@.len(), old(cx).reported@)
+            ==> spec_flow_stmt(view_state(*old(st)), *s) == Some(view_state(*final(st)))
+                && final(cx).reported@ == old(cx).reported@,
     decreases s, 0int,
 {
     match s {
@@ -330,17 +392,30 @@ fn ends_in_loop_with_return(body: &Vec<Stmt>) -> bool {
     }
 }
 
-pub fn check_flow_fn(f: &Function, item: CoreItem, errs: &mut Vec<CheckError>) {
+pub fn check_flow_fn(f: &Function, item: CoreItem, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() ==> spec_flow_ok(*f),
+{
     let n = f.locals.len();
     let mut st = FState { reach: true, assigned: bools(n, false), loop_assigned: bools(n, false), depth: 0 };
     let mut k: usize = 0;
     while k < f.params && k < n
         invariant
             k <= n,
+            n == f.locals@.len(),
+            k <= f.params,
+            st.reach,
+            st.depth == 0,
+            st.assigned@.len() == n,
+            forall|j: int| 0 <= j < n ==> st.assigned@[j] == (j < k),
         decreases n - k,
     {
         set(&mut st.assigned, k, true);
         k = k + 1;
+    }
+    proof {
+        assert(view_state(st).assigned =~= spec_flow_start(*f).assigned);
     }
     let mut cx = FCx { item, reported: bools(n, false) };
     let mut path: Vec<CoreStep> = Vec::new();
@@ -355,11 +430,19 @@ pub fn check_flow_fn(f: &Function, item: CoreItem, errs: &mut Vec<CheckError>) {
     }
 }
 
-pub fn check_flow(p: &Program, errs: &mut Vec<CheckError>) {
+pub fn check_flow(p: &Program, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len()
+            ==> forall|k: int| 0 <= k < p.functions@.len() ==> spec_flow_ok(#[trigger] p.functions@[k]),
+{
+    let ghost e0 = errs@.len();
     let mut k: usize = 0;
     while k < p.functions.len()
         invariant
             k <= p.functions.len(),
+            errs@.len() >= e0,
+            errs@.len() == e0 ==> forall|j: int| 0 <= j < k ==> spec_flow_ok(#[trigger] p.functions@[j]),
         decreases p.functions.len() - k,
     {
         check_flow_fn(&p.functions[k], CoreItem::Function(FnId(k)), errs);

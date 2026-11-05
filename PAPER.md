@@ -6,7 +6,7 @@ the differential testing plan. It is the running log for a second paper.
 
 Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bottom.
 
-## State of the work (as of 2026-11-01)
+## State of the work (as of 2026-11-04)
 
 - `TESTING.md` is a partly implemented spec. `tungsten-parse` (parser, elaborator, canonical
   printer, `.tw` test-file envelope) is implemented, and its tests pass (round-trip, floats, depth,
@@ -16,10 +16,10 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
 - `Expression::Ambient` is implemented in the Rust, Java and CUDA backends, and legacy conversion
   emits it instead of the four `Named` variables. `derive_binop_type` has not been changed to the
   §5.3 typing.
-- `tungsten-core` has a checker and an interpreter. There are **no functional proofs yet**.
-  `scripts/verify.sh` proves bounds, absence of overflow and termination only. The spec/refinement
-  proof, type soundness of the checker, fuel monotonicity and the layout lemma are all "later".
-- Without those proofs, "verified interpreter as ground truth" is aspirational, not a result.
+- `tungsten-core`'s checker and interpreter are proven, with `scripts/verify.sh` green and no gaps:
+  refinement with memo soundness, type soundness, fuel monotonicity, layout, wf agreement.
+  What that trusts is in `crates/tungsten-core/VERUS.md` §1: 22 float primitives, extern purity, and
+  a spec that is reviewed, not proven. The lowering and backends remain tested, not proven.
 - Backends exist: Rust (reference), Java, CUDA, plus an inspection backend.
 
 ## Candidate contributions
@@ -39,8 +39,8 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
    - A rich IR (`OptimizedProgram`) for compiling, and a plain core IR (dense ids, resolved types,
      no names, floats as bits) for proving. An unverified, tested lowering connects them.
    - Everything inside `tungsten-core` is proven, everything outside is tested.
-   - The trust boundary is `prim.rs`, the only `external_body` file. `verify.sh` refuses
-     `admit`/`assume`/`external_body`/`external` elsewhere.
+   - The trust boundary is `prim_float.rs`, the only `external_body` file. `verify.sh` refuses
+     `admit`/`assume`/`external_body`/`external` elsewhere and counts the 22 trusted functions.
    - Good experience-report material for Verus users.
 3. **Termination and evaluation model.**
    - Every function, const, input and unit has a rank (depth in the dependency DAG). Calls and reads
@@ -68,9 +68,7 @@ Human: Additional one: intrinsic float to integer conversion cases. floor_int.
 2. Random well-typed program generation, to get bug counts.
 3. Mutation testing (e.g. `cargo-mutants`, or deliberately broken backends) to show the suite catches
    real faults.
-4. Prove checker type soundness ("check OK implies never stuck"), ideally also interpreter-to-spec
-   refinement.
-5. Decide the framing relative to the submitted paper: cite it for SPMT and the Minecraft lowering,
+4. Decide the framing relative to the submitted paper: cite it for SPMT and the Minecraft lowering,
    and keep this paper about correctness infrastructure.
 
 ## Evaluation ideas
@@ -175,6 +173,38 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
 - 2026-11-01 [design] First CUDA differential run (GTX 1650 Ti, nvcc 13.4, exact profile): 58 of 59 corpus
   files agree bit for bit on both stages with no backend change; integer wrapping, masked shifts and `>>>`
   that Rust gets wrong are right in CUDA. Cases where the interpreter errors are not run on CUDA.
+
+- 2026-11-04 [bug] Found by working out the fuel-monotonicity proof by hand, before writing it: `eval_entry`
+  checked a unit's rank before the entry's layout, so with a const that runs out of fuel, overflowing dims and
+  a unit on a cycle, a cell was `Stuck(Layout)` at low fuel and `Stuck(Rank)` at high fuel. Unchecked programs
+  only; the 256-case property test never hit it. Evidence: `crates/tungsten-check/src/tests/memo.rs`
+  `no_layout_is_stuck_layout_at_every_fuel`, `eval_entry` in `crates/tungsten-core/src/exec/unit.rs`.
+- 2026-11-04 [design] An `uninterp` float axiom `r == spec_f64_add(a, b)` is false as stated, since Rust leaves
+  a `NaN` result's sign and payload non-deterministic, and memo soundness would rest on it. Canonicalizing
+  `NaN` results in the primitives makes it true. Cost: `copysign(x, 0.0 / 0.0)` can differ from a backend on
+  x86, so `NaN` sign and payload are declared outside the differential contract. Evidence: `prim_float.rs`,
+  `crates/tungsten-core/VERUS.md` §5.6.
+- 2026-11-04 [proof] T1 needed no facts about ranks, or about the checker: the spec takes ranks as data, and only
+  the top-level statement ties them to `spec_ranks(p)`. So refinement holds for unchecked programs, which is what
+  keeps "the interpreter never trusts the checker" true. Evidence: `exec/mod.rs` `eval_program`.
+- 2026-11-04 [proof] Verus limitations hit: a `spec fn` can't construct a `Vec`, so the semantics needs a `Seq`
+  twin of `Value` (`SValue`); `decreases` positions must have one type across a recursion group; a long `match`
+  exceeds the default rlimit once each arm has refinement obligations, solved with one function per arm taking
+  the node as `Ghost` for the measure; `A { xs, .. } | B { xs, .. }` in a `spec fn` defeats triggers on `xs`.
+  Evidence: `crates/tungsten-core/VERUS.md` §6.2.
+- 2026-11-04 [proof] "No cycle reported" to "every node ranked" is a pigeonhole: at the fixpoint an unranked node
+  has an unranked successor, and a path of distinct unranked nodes can't grow past the node count. `check_scope`
+  needed no contract at all, because its errors now go through a list of their own, and no theorem depends
+  on scoping. Evidence: `proofs/ranks.rs`, `check/mod.rs`.
+- 2026-11-04 [eval] Proof size in `crates/tungsten-core/src`, by `wc -l`: `spec/` 2,174 lines, `proofs/` 3,563
+  lines. The exec code carrying contracts: `check/` 4,000, `exec/` 1,858, `prim.rs` 268. Trusted: `prim_float.rs`, 22
+  functions in 99 lines. 531 verified items, 0 errors, about 20 s wall on 16 cores with Z3 4.16.0, up from 313
+  items before the proofs. No raised rlimits. Evidence: `scripts/verify.sh`.
+- 2026-11-04 [eval] All 8 deliberate faults in `scripts/verify-negative.sh` were caught by verification (vacuity,
+  exec without spec, spec without exec, memo id, `MIN / -1`, checker rule, well_typed rule).
+- 2026-11-04 [limitation] The spec mirrors the interpreter's shape, so it is reviewed rather than independently
+  meaningful; T1 means the hand-written `@expect` corpus is evidence for the spec too. Proven properties
+  stop at `tungsten-core`: the lowering and backends are tested. Discovery order of input failures isn't proven.
 
 ## Maintaining this file
 

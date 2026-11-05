@@ -15,7 +15,6 @@ mod no_panic;
 mod normalization;
 mod registry;
 mod stuck_mutation;
-mod wf_mirror;
 
 use tungsten_core::{Expr, FnId, Stmt};
 use tungsten_ir::*;

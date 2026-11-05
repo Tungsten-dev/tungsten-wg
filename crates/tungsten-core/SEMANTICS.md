@@ -4,8 +4,10 @@ This document explains what a core IR program *computes*: what its values are, w
 expression and statement does, in what order things happen, and what can go wrong. It is
 written for people. It doesn't assume you have read the code.
 
-The interpreter in `src/exec/` is the reference: when this document and the interpreter
-disagree, the interpreter wins and this document has a bug. How the interpreter is built is in
+`src/spec/` is the definition of what a program computes, and the interpreter in `src/exec/` is
+proven to implement it. This document is its readable explanation: when they disagree, this document
+has a bug. (Only the discovery order of failing inputs in the diagnostics is outside the spec. There
+the interpreter is the reference.) How the interpreter is built is in
 [EXEC.md](EXEC.md). Which programs are allowed to run at all is in [CHECK.md](CHECK.md). Why the
 code looks the way it does (Verus) is in [VERUS.md](VERUS.md).
 
@@ -72,7 +74,7 @@ errors.
 | --- | --- | --- |
 | `Bool` | `true`, `false` | |
 | `I8`, `I32`, `I64` | signed integers of that width | Arithmetic wraps around (see §6) |
-| `F32`, `F64` | IEEE-754 floats | Stored as their raw bits. `NaN` keeps its payload, `-0.0` and `0.0` are different values |
+| `F32`, `F64` | IEEE-754 floats | Stored as their raw bits. Literals and hosts keep any `NaN` payload, computed `NaN`s are canonical (§6.2), `-0.0` and `0.0` are different values |
 | `Vec3` | three `f64`s | A position or direction in world space |
 | `Pos3` | three `i32`s | A cell position in a grid |
 | `Array(T, n)` | exactly `n` values of type `T` | The length is part of the type |
@@ -239,6 +241,13 @@ truncates to `-4`. It does **not** give `124`, which an 8-bit logical shift woul
 | unary `-` | Flips the sign bit: `-(0.0) == -0.0` |
 
 There are no bitwise operators or shifts on floats.
+
+**Computed `NaN`s are canonical.** `+ - * /` and conversions between `F32` and `F64` that produce a
+`NaN` produce the one quiet `NaN` (`0x7ff8000000000000`, `0x7fc00000`, the bits Java's
+`doubleToLongBits` gives). *Why:* Rust doesn't otherwise say which `NaN` an operation returns, and
+the proofs need each operation to be a function of its input bits. Backends can't be expected to
+match, so bits of a `NaN` are not part of what's compared. A program whose result depends on a
+`NaN`'s sign or payload, for example `copysign(x, 0.0 / 0.0)`, is outside the differential contract.
 
 ### 6.3 Booleans
 
@@ -456,9 +465,11 @@ and so on:
 The interpreter doesn't trust the checker: it checks all of this as it goes and reports `Stuck`
 instead of crashing. But for a program that passes the checker and a case that passes
 `check_case`, `Stuck` never happens. This is the **type soundness** property. For now it is
-tested (random mutations of real programs, see TESTING.md), and later it will be proven.
+proven (`proofs/soundness.rs`), with two reasons left to the extern: `ExternResult` and
+`ExternDomainUndeclared` are what an extern breaking its own declaration looks like, and with an
+extern that keeps its declaration they don't happen either.
 `tungsten-check`'s `Prepared::eval` turns any `Stuck` into an error of its own, because it always
-means a bug in the checker or the interpreter.
+means a bug in the lowering's output, an extern, or something the proof trusts.
 
 `Stuck` is still a per-cell result, not an abort of the whole case. One stuck cell doesn't stop
 the other cells.
@@ -500,9 +511,10 @@ domain error.
 - A domain error becomes `ExternDomain` if the extern is declared with `domain_error: true`, and
   `Stuck(ExternDomainUndeclared)` otherwise.
 
-Externs are assumed to be **pure**: the same id and arguments always give the same answer. The
-interpreter may call an extern any number of times (with the memo off, it recomputes
-everything), so an extern with side effects would give results that depend on that.
+Externs are assumed to be **pure**: the same id and arguments always give the same answer, down to
+the bits of any `NaN`. The interpreter may call an extern any number of times (with the memo off,
+it recomputes everything), so an extern with side effects would give results that depend on that.
+The theorems trust this; nothing checks it.
 
 Tables (`PermTable`, `Sampler`) are only handles. Sampling noise or looking up a permutation is
 an ordinary extern call that receives the handle as an argument. The `Externs` implementation
@@ -516,11 +528,13 @@ decides what each handle means (usually through the table's name and seed in `tu
 - **Determinism.** The result of a case is a function of `(program, case, fuel)` and the
   externs. Nothing else matters: not the memo, not the scheduling that backends use, not the
   order in which things happen to be cached.
-- **Memo independence.** Evaluating with the memo on or off gives identical results (tested).
+- **Memo independence.** Evaluating with the memo on or off gives identical cells (proven) and
+  identical diagnostics (only their contents are proven; their order is tested).
 - **Fuel monotonicity.** A cell whose result isn't `OutOfFuel` at fuel `f` has the same result
-  at every fuel `≥ f` (tested, proof planned).
+  at every fuel `≥ f` (proven, for every program).
 - **No stuck states for checked programs.** A program that passes `check`, with a case that
-  passes `check_case`, never produces `Stuck` (tested, proof planned).
+  passes `check_case`, never produces `Stuck`, except through an extern breaking its declaration
+  (proven).
 - **Termination.** Evaluation always ends: `While` is bounded by fuel, everything else by the
   program's structure and by the ranks (EXEC.md §3). Verus proves this for the interpreter as it
   is written.

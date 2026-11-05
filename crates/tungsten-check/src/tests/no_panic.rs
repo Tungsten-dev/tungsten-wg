@@ -133,8 +133,6 @@ proptest! {
             }
             if let Ok(l) = r {
                 prop_assert!(tungsten_core::check::wf::check_wf(&l.program).is_empty());
-                // The mirror agrees on the generator's output too.
-                prop_assert!(wf_mirror::is_wf(&l.program));
             }
         }
     }

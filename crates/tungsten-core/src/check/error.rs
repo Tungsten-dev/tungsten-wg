@@ -228,12 +228,18 @@ pub fn copy_steps(s: &Vec<CoreStep>) -> Vec<CoreStep> {
 }
 
 /// Appends an error at `item` / `steps`.
-pub fn report(errs: &mut Vec<CheckError>, kind: CheckErrorKind, item: CoreItem, steps: &Vec<CoreStep>) {
+pub fn report(errs: &mut Vec<CheckError>, kind: CheckErrorKind, item: CoreItem, steps: &Vec<CoreStep>)
+    ensures
+        final(errs)@.len() == old(errs)@.len() + 1,
+{
     errs.push(CheckError { kind, at: CorePath { item, steps: copy_steps(steps) } });
 }
 
 /// Moves every error of `src` to the end of `dst`, in order.
-pub fn append_errors(dst: &mut Vec<CheckError>, src: Vec<CheckError>) {
+pub fn append_errors(dst: &mut Vec<CheckError>, src: Vec<CheckError>)
+    ensures
+        final(dst)@.len() >= old(dst)@.len(),
+{
     let mut src = src;
     let mut rev: Vec<CheckError> = Vec::new();
     let n = src.len();
@@ -251,9 +257,12 @@ pub fn append_errors(dst: &mut Vec<CheckError>, src: Vec<CheckError>) {
     }
     let m = rev.len();
     let mut j: usize = 0;
+    let ghost d0 = dst@.len();
     while j < m
         invariant
             j <= m,
+            dst@.len() >= d0,
+            d0 == old(dst)@.len(),
         decreases m - j,
     {
         match rev.pop() {

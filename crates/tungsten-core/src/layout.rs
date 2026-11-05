@@ -6,12 +6,17 @@
 use vstd::prelude::*;
 
 use crate::ir::*;
+use crate::spec::layout::*;
 use crate::value::*;
 
 verus! {
 
 /// A dims component as `usize`, or `None` if negative.
-pub fn dim(x: i32) -> Option<usize> {
+pub fn dim(x: i32) -> (r: Option<usize>)
+    ensures
+        x < 0 ==> r is None,
+        x >= 0 ==> r == Some(x as usize),
+{
     if x < 0 {
         None
     } else {
@@ -19,7 +24,10 @@ pub fn dim(x: i32) -> Option<usize> {
     }
 }
 
-pub fn len(d: &Dims) -> Option<usize> {
+pub fn len(d: &Dims) -> (r: Option<usize>)
+    ensures
+        r == spec_len(*d),
+{
     let x = dim(d.x)?;
     let y = dim(d.y)?;
     let z = dim(d.z)?;
@@ -27,11 +35,17 @@ pub fn len(d: &Dims) -> Option<usize> {
     xy.checked_mul(z)
 }
 
-pub fn is_unit(d: &Dims) -> bool {
+pub fn is_unit(d: &Dims) -> (r: bool)
+    ensures
+        r == spec_is_unit(*d),
+{
     d.x == 1 && d.y == 1 && d.z == 1
 }
 
-pub fn flat(c: &I32x3, d: &Dims) -> Option<usize> {
+pub fn flat(c: &I32x3, d: &Dims) -> (r: Option<usize>)
+    ensures
+        r == spec_flat(*c, *d),
+{
     if c.x < 0 || c.y < 0 || c.z < 0 || c.x >= d.x || c.y >= d.y || c.z >= d.z {
         return None;
     }
@@ -48,7 +62,11 @@ pub fn flat(c: &I32x3, d: &Dims) -> Option<usize> {
 }
 
 /// A non-negative `usize` below `bound` (itself an `i32`) as `i32`.
-fn to_i32(v: usize, bound: i32) -> Option<i32> {
+fn to_i32(v: usize, bound: i32) -> (r: Option<i32>)
+    ensures
+        bound < 0 || v >= bound as int ==> r is None,
+        bound >= 0 && v < bound as int ==> r == Some(v as i32),
+{
     if bound < 0 || v >= bound as usize {
         None
     } else {
@@ -56,7 +74,11 @@ fn to_i32(v: usize, bound: i32) -> Option<i32> {
     }
 }
 
-pub fn decode(k: usize, d: &Dims) -> Option<I32x3> {
+pub fn decode(k: usize, d: &Dims) -> (r: Option<I32x3>)
+    ensures
+        r == spec_decode(k, *d),
+{
+    reveal(spec_decode);
     let dx = dim(d.x)?;
     let dy = dim(d.y)?;
     if dx == 0 || dy == 0 {

@@ -8,7 +8,13 @@ use vstd::prelude::*;
 use crate::check::acyclic::Ranks;
 use crate::check::error::*;
 use crate::ir::*;
+use crate::proofs::typing::*;
+use crate::spec::eval::*;
+use crate::spec::ops::*;
+use crate::spec::typing::*;
+use crate::spec::value::*;
 use crate::util::*;
+use crate::wf as swf;
 
 verus! {
 
@@ -23,21 +29,48 @@ pub struct TCx<'a> {
     pub const_types: &'a Vec<Option<Type>>,
 }
 
-pub fn is_numeric(t: &Type) -> bool {
+pub open spec fn cx_type_of(cx: TCx, e: Expr) -> Option<Type> {
+    spec_type_of(*cx.p, cx.locals@, cx.const_types@, e)
+}
+
+/// What the checker needs for "no error" to mean "well typed": ids are in range, and every const
+/// the expression reads has a known type.
+pub open spec fn cx_hyp(cx: TCx, e: Expr) -> bool {
+    &&& swf::wf_program(cx.p)
+    &&& swf::wf_expr(cx.p, cx.locals@.len() as nat, &e)
+    &&& spec_reads_known(cx.const_types@, e)
+}
+
+pub open spec fn cx_stmt_hyp(cx: TCx, s: Stmt) -> bool {
+    &&& swf::wf_program(cx.p)
+    &&& swf::wf_stmt(cx.p, cx.locals@.len() as nat, &s)
+    &&& spec_stmt_reads_known(cx.const_types@, s)
+}
+
+pub fn is_numeric(t: &Type) -> (r: bool)
+    ensures
+        r == spec_is_numeric(*t),
+{
     match t {
         Type::I8 | Type::I32 | Type::I64 | Type::F32 | Type::F64 => true,
         _ => false,
     }
 }
 
-pub fn is_integer(t: &Type) -> bool {
+pub fn is_integer(t: &Type) -> (r: bool)
+    ensures
+        r == spec_is_integer(*t),
+{
     match t {
         Type::I8 | Type::I32 | Type::I64 => true,
         _ => false,
     }
 }
 
-pub fn lit_type(l: &Lit) -> Type {
+pub fn lit_type(l: &Lit) -> (r: Type)
+    ensures
+        r == spec_lit_type(*l),
+{
     match l {
         Lit::Bool(_) => Type::Bool,
         Lit::I8(_) => Type::I8,
@@ -49,7 +82,10 @@ pub fn lit_type(l: &Lit) -> Type {
 }
 
 /// The result type of `l op r`, or `None` if the operands don't fit the operator.
-pub fn binary_type(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
+pub fn binary_type(op: &BinOp, l: &Type, r: &Type) -> (out: Option<Type>)
+    ensures
+        out == spec_binary_type(*op, *l, *r),
+{
     match op {
         BinOp::Add | BinOp::Subtract | BinOp::Multiply | BinOp::Divide => {
             if is_numeric(l) && type_eq(l, r) {
@@ -111,7 +147,10 @@ pub fn binary_type(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
     }
 }
 
-pub fn unary_type(op: &UnOp, t: &Type) -> Option<Type> {
+pub fn unary_type(op: &UnOp, t: &Type) -> (r: Option<Type>)
+    ensures
+        r == spec_unary_type(*op, *t),
+{
     match op {
         UnOp::Not => match t {
             Type::Bool => Some(Type::Bool),
@@ -126,7 +165,10 @@ pub fn unary_type(op: &UnOp, t: &Type) -> Option<Type> {
 }
 
 /// Numeric → numeric (identity included), `Bool` → integer, `Pos3` → `Vec3`.
-pub fn cast_ok(from: &Type, to: &Type) -> bool {
+pub fn cast_ok(from: &Type, to: &Type) -> (r: bool)
+    ensures
+        r == spec_cast_ok(*from, *to),
+{
     if is_numeric(from) && is_numeric(to) {
         return true;
     }
@@ -137,12 +179,19 @@ pub fn cast_ok(from: &Type, to: &Type) -> bool {
     }
 }
 
-fn mismatch(cx: &TCx, expected: &Type, found: &Type, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>) {
+fn mismatch(cx: &TCx, expected: &Type, found: &Type, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() == old(errs)@.len() + 1,
+{
     report(errs, CheckErrorKind::TypeMismatch { expected: clone_type(expected), found: clone_type(found) }, cx.item, path);
 }
 
 /// Reports a mismatch if `found` is known and differs from `expected`.
-fn expect(cx: &TCx, expected: &Type, found: &Option<Type>, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>) {
+fn expect(cx: &TCx, expected: &Type, found: &Option<Type>, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && *found is Some ==> *found == Some(*expected),
+{
     match found {
         Some(t) => {
             if !type_eq(expected, t) {
@@ -153,7 +202,11 @@ fn expect(cx: &TCx, expected: &Type, found: &Option<Type>, path: &Vec<CoreStep>,
     }
 }
 
-fn forbidden(cx: &TCx, what: Forbidden, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>) -> bool {
+fn forbidden(cx: &TCx, what: Forbidden, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: bool)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() ==> !r,
+{
     if cx.in_const {
         report(errs, CheckErrorKind::ConstForbidden { what }, cx.item, path);
         true
@@ -163,14 +216,20 @@ fn forbidden(cx: &TCx, what: Forbidden, path: &Vec<CoreStep>, errs: &mut Vec<Che
 }
 
 /// The return type of the unit that input `i` reads.
-fn density_type(p: &Program, i: InputId) -> Option<Type> {
+fn density_type(p: &Program, i: InputId) -> (r: Option<Type>)
+    ensures
+        r == spec_density_type(*p, i),
+{
     let d = get(&p.inputs, i.0)?;
     let u = get(&p.units, d.source.0)?;
     let f = get(&p.functions, u.main.0)?;
     Some(clone_type(&f.ret))
 }
 
-fn field_type(p: &Program, sel: &FieldSel, base: &Type) -> Option<Type> {
+fn field_type(p: &Program, sel: &FieldSel, base: &Type) -> (out: Option<Type>)
+    ensures
+        out == spec_field_type(*p, *sel, *base),
+{
     match (sel, base) {
         (FieldSel::Vec3(_), Type::Vec3) => Some(Type::F64),
         (FieldSel::Pos3(_), Type::Pos3) => Some(Type::I32),
@@ -186,9 +245,277 @@ fn field_type(p: &Program, sel: &FieldSel, base: &Type) -> Option<Type> {
     }
 }
 
+/// One arm of `type_expr`, in a function of its own so that its proof is a query of its own.
 #[verifier::loop_isolation(false)]
-pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> Option<Type>
-    decreases e,
+fn type_call(cx: &TCx, func: FnId, args: &Vec<Expr>, e: Ghost<Expr>, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: Option<Type>)
+    requires
+        e@ == (Expr::Call { func, args: *args }),
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_hyp(*cx, e@) ==> r is Some && r == cx_type_of(*cx, e@),
+    decreases e@, 0int,
+{
+    let p = cx.p;
+    if forbidden(cx, Forbidden::Call, path, errs) {
+        return None;
+    }
+    let f = match get(&p.functions, func.0) {
+        Some(f) => f,
+        None => { return None; },
+    };
+    if args.len() != f.params {
+        report(errs, CheckErrorKind::Arity { expected: f.params, found: args.len() }, cx.item, path);
+    }
+    let ghost e1 = old(errs)@.len();
+    let mut i: usize = 0;
+    while i < args.len()
+        invariant
+            i <= args.len(),
+            *f == cx.p.functions@[func.0 as int],
+            func.0 < cx.p.functions@.len(),
+            args.len() != f.params ==> errs@.len() > e1,
+            errs@.len() >= e1,
+            errs@.len() == e1 && cx_hyp(*cx, e@) ==> forall|k: int| #![trigger args@[k]] 0 <= k < i
+                ==> cx_type_of(*cx, args@[k]) == Some(f.locals@[k]),
+        decreases args.len() - i,
+    {
+        proof {
+            if cx_hyp(*cx, e@) {
+                assert(swf::wf_expr(cx.p, cx.locals@.len() as nat, &args[i as int]));
+                assert(spec_reads_known(cx.const_types@, args@[i as int]));
+                assert(swf::wf_function(cx.p, &cx.p.functions[func.0 as int]));
+            }
+        }
+        path.push(CoreStep::Arg(i));
+        let t = type_expr(cx, &args[i], path, errs);
+        if args.len() == f.params {
+            match get(&f.locals, i) {
+                Some(want) => expect(cx, want, &t, path, errs),
+                None => {},
+            }
+        }
+        let _ = path.pop();
+        i = i + 1;
+    }
+    Some(clone_type(&f.ret))
+}
+
+/// One arm of `type_expr`, in a function of its own so that its proof is a query of its own.
+#[verifier::loop_isolation(false)]
+fn type_extern_call(cx: &TCx, ext: ExternId, params: &Vec<Type>, ret: &Type, args: &Vec<Expr>, e: Ghost<Expr>, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: Option<Type>)
+    requires
+        e@ == (Expr::ExternCall { ext, params: *params, ret: *ret, args: *args }),
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_hyp(*cx, e@) ==> r is Some && r == cx_type_of(*cx, e@),
+    decreases e@, 0int,
+{
+    let p = cx.p;
+    if forbidden(cx, Forbidden::ExternCall, path, errs) {
+        return None;
+    }
+    let d = match get(&p.externs, ext.0) {
+        Some(d) => d,
+        None => { return None; },
+    };
+    if !types_eq(params, &d.params) || !type_eq(ret, &d.ret) {
+        report(errs, CheckErrorKind::ExternSignature { ext: ext }, cx.item, path);
+    }
+    if args.len() != d.params.len() {
+        report(errs, CheckErrorKind::Arity { expected: d.params.len(), found: args.len() }, cx.item, path);
+    }
+    let ghost e1 = old(errs)@.len();
+    let mut i: usize = 0;
+    while i < args.len()
+        invariant
+            i <= args.len(),
+            *d == cx.p.externs@[ext.0 as int],
+            args.len() != d.params.len() ==> errs@.len() > e1,
+            errs@.len() >= e1,
+            errs@.len() == e1 && cx_hyp(*cx, e@) ==> forall|k: int| #![trigger args@[k]] 0 <= k < i
+                ==> cx_type_of(*cx, args@[k]) == Some(d.params@[k]),
+        decreases args.len() - i,
+    {
+        proof {
+            if cx_hyp(*cx, e@) {
+                assert(swf::wf_expr(cx.p, cx.locals@.len() as nat, &args[i as int]));
+                assert(spec_reads_known(cx.const_types@, args@[i as int]));
+            }
+        }
+        path.push(CoreStep::Arg(i));
+        let t = type_expr(cx, &args[i], path, errs);
+        if args.len() == d.params.len() {
+            match get(&d.params, i) {
+                Some(want) => expect(cx, want, &t, path, errs),
+                None => {},
+            }
+        }
+        let _ = path.pop();
+        i = i + 1;
+    }
+    Some(clone_type(&d.ret))
+}
+
+/// One arm of `type_expr`, in a function of its own so that its proof is a query of its own.
+#[verifier::loop_isolation(false)]
+fn type_make_record(cx: &TCx, record: RecordId, fields: &Vec<FieldInit>, e: Ghost<Expr>, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: Option<Type>)
+    requires
+        e@ == (Expr::MakeRecord { record, fields: *fields }),
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_hyp(*cx, e@) ==> r is Some && r == cx_type_of(*cx, e@),
+    decreases e@, 0int,
+{
+    let p = cx.p;
+    let d = match get(&p.records, record.0) {
+        Some(d) => d,
+        None => { return None; },
+    };
+    let mut seen = bools(d.fields.len(), false);
+    let ghost e1 = old(errs)@.len();
+    let ghost n = d.fields@.len();
+    let mut i: usize = 0;
+    while i < fields.len()
+        invariant
+            i <= fields.len(),
+            n == d.fields@.len(),
+            *d == cx.p.records@[record.0 as int],
+            seen@.len() == n,
+            errs@.len() >= e1,
+            errs@.len() == e1 && cx_hyp(*cx, e@) ==> {
+                &&& forall|k: int| #![trigger fields@[k]] 0 <= k < i ==> {
+                    &&& fields@[k].field < n
+                    &&& cx_type_of(*cx, fields@[k].value) == Some(d.fields@[fields@[k].field as int])
+                }
+                &&& forall|a: int, b: int| #![trigger fields@[a], fields@[b]] 0 <= a < b < i ==> fields@[a].field != fields@[b].field
+                &&& forall|a: int| 0 <= a < i ==> seen@[#[trigger] fields@[a].field as int]
+                &&& forall|j: int| 0 <= j < n && seen@[j] ==> spec_field_given(fields@.subrange(0, i as int), j)
+            },
+        decreases fields.len() - i,
+    {
+        let k = fields[i].field;
+        let ghost seen0 = seen@;
+        path.push(CoreStep::Field(record, fields[i].field));
+        if get_bool(&seen, k) {
+            report(errs, CheckErrorKind::RecordFieldRepeated { record: record, field: k }, cx.item, path);
+        }
+        set(&mut seen, k, true);
+        proof {
+            if cx_hyp(*cx, e@) {
+                assert(swf::wf_expr(cx.p, cx.locals@.len() as nat, &fields[i as int].value));
+                assert(spec_reads_known(cx.const_types@, fields@[i as int].value));
+            }
+        }
+        let t = type_expr(cx, &fields[i].value, path, errs);
+        match get(&d.fields, k) {
+            Some(want) => expect(cx, want, &t, path, errs),
+            None => {},
+        }
+        let _ = path.pop();
+        proof {
+            if errs@.len() == e1 && cx_hyp(*cx, e@) {
+                let sub = fields@.subrange(0, i as int + 1);
+                assert forall|j: int| 0 <= j < n && seen@[j] implies spec_field_given(sub, j) by {
+                    if j == k as int {
+                        assert(sub[i as int].field == j);
+                    } else {
+                        assert(seen0[j]);
+                        let prev = fields@.subrange(0, i as int);
+                        assert(spec_field_given(prev, j));
+                        let a = choose|a: int| 0 <= a < prev.len() && #[trigger] prev[a].field == j;
+                        assert(sub[a] == prev[a]);
+                    }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    let ghost e2 = errs@.len();
+    let mut k: usize = 0;
+    while k < d.fields.len()
+        invariant
+            k <= d.fields.len(),
+            seen@.len() == d.fields@.len(),
+            errs@.len() >= e2,
+            errs@.len() == e2 ==> forall|j: int| 0 <= j < k ==> seen@[j],
+        decreases d.fields.len() - k,
+    {
+        if !get_bool(&seen, k) {
+            report(errs, CheckErrorKind::RecordFieldMissing { record: record, field: k }, cx.item, path);
+        }
+        k = k + 1;
+    }
+    proof {
+        if errs@.len() == old(errs)@.len() && cx_hyp(*cx, e@) {
+            assert(fields@.subrange(0, fields@.len() as int) =~= fields@);
+            assert forall|j: int| #![trigger spec_field_given(fields@, j)] 0 <= j < d.fields@.len() implies spec_field_given(fields@, j) by {
+                assert(seen@[j]);
+            }
+        }
+    }
+    Some(Type::Record(record))
+}
+
+/// One arm of `type_expr`, in a function of its own so that its proof is a query of its own.
+#[verifier::loop_isolation(false)]
+fn type_array_lit(cx: &TCx, es: &Vec<Expr>, e: Ghost<Expr>, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: Option<Type>)
+    requires
+        e@ == Expr::ArrayLit(*es),
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_hyp(*cx, e@) ==> r is Some && r == cx_type_of(*cx, e@),
+    decreases e@, 0int,
+{
+    if es.len() == 0 {
+        report(errs, CheckErrorKind::EmptyArray, cx.item, path);
+        return None;
+    }
+    proof {
+        if cx_hyp(*cx, e@) {
+            assert(swf::wf_expr(cx.p, cx.locals@.len() as nat, &es[0]));
+            assert(spec_reads_known(cx.const_types@, es@[0]));
+        }
+    }
+    path.push(CoreStep::Element(0));
+    let first = type_expr(cx, &es[0], path, errs);
+    let _ = path.pop();
+    let ghost e1 = old(errs)@.len();
+    let mut i: usize = 1;
+    while i < es.len()
+        invariant
+            1 <= i <= es.len(),
+            errs@.len() >= e1,
+            errs@.len() == e1 && cx_hyp(*cx, e@) ==> first is Some && first == cx_type_of(*cx, es@[0])
+                && forall|k: int| #![trigger es@[k]] 0 <= k < i ==> cx_type_of(*cx, es@[k]) == first,
+        decreases es.len() - i,
+    {
+        proof {
+            if cx_hyp(*cx, e@) {
+                assert(swf::wf_expr(cx.p, cx.locals@.len() as nat, &es[i as int]));
+                assert(spec_reads_known(cx.const_types@, es@[i as int]));
+            }
+        }
+        path.push(CoreStep::Element(i));
+        let t = type_expr(cx, &es[i], path, errs);
+        match &first {
+            Some(f) => expect(cx, f, &t, path, errs),
+            None => {},
+        }
+        let _ = path.pop();
+        i = i + 1;
+    }
+    match first {
+        Some(f) => Some(Type::Array(Box::new(f), es.len())),
+        None => None,
+    }
+}
+
+#[verifier::loop_isolation(false)]
+pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>) -> (r: Option<Type>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_hyp(*cx, *e) ==> r is Some && r == cx_type_of(*cx, *e),
+    decreases e, 1int,
 {
     let p = cx.p;
     match e {
@@ -246,69 +573,8 @@ pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<Ch
             }
             density_type(p, *input)
         },
-        Expr::Call { func, args } => {
-            if forbidden(cx, Forbidden::Call, path, errs) {
-                return None;
-            }
-            let f = match get(&p.functions, func.0) {
-                Some(f) => f,
-                None => { return None; },
-            };
-            if args.len() != f.params {
-                report(errs, CheckErrorKind::Arity { expected: f.params, found: args.len() }, cx.item, path);
-            }
-            let mut i: usize = 0;
-            while i < args.len()
-                invariant
-                    i <= args.len(),
-                decreases args.len() - i,
-            {
-                path.push(CoreStep::Arg(i));
-                let t = type_expr(cx, &args[i], path, errs);
-                if args.len() == f.params {
-                    match get(&f.locals, i) {
-                        Some(want) => expect(cx, want, &t, path, errs),
-                        None => {},
-                    }
-                }
-                let _ = path.pop();
-                i = i + 1;
-            }
-            Some(clone_type(&f.ret))
-        },
-        Expr::ExternCall { ext, params, ret, args } => {
-            if forbidden(cx, Forbidden::ExternCall, path, errs) {
-                return None;
-            }
-            let d = match get(&p.externs, ext.0) {
-                Some(d) => d,
-                None => { return None; },
-            };
-            if !types_eq(params, &d.params) || !type_eq(ret, &d.ret) {
-                report(errs, CheckErrorKind::ExternSignature { ext: *ext }, cx.item, path);
-            }
-            if args.len() != d.params.len() {
-                report(errs, CheckErrorKind::Arity { expected: d.params.len(), found: args.len() }, cx.item, path);
-            }
-            let mut i: usize = 0;
-            while i < args.len()
-                invariant
-                    i <= args.len(),
-                decreases args.len() - i,
-            {
-                path.push(CoreStep::Arg(i));
-                let t = type_expr(cx, &args[i], path, errs);
-                if args.len() == d.params.len() {
-                    match get(&d.params, i) {
-                        Some(want) => expect(cx, want, &t, path, errs),
-                        None => {},
-                    }
-                }
-                let _ = path.pop();
-                i = i + 1;
-            }
-            Some(clone_type(&d.ret))
-        },
+        Expr::Call { func, args } => type_call(cx, *func, args, Ghost(*e), path, errs),
+        Expr::ExternCall { ext, params, ret, args } => type_extern_call(cx, *ext, params, ret, args, Ghost(*e), path, errs),
         Expr::Binary { op, left, right } => {
             path.push(CoreStep::Left);
             let l = type_expr(cx, left, path, errs);
@@ -410,73 +676,8 @@ pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<Ch
             let _ = path.pop();
             Some(Type::Pos3)
         },
-        Expr::MakeRecord { record, fields } => {
-            let d = match get(&p.records, record.0) {
-                Some(d) => d,
-                None => { return None; },
-            };
-            let mut seen = bools(d.fields.len(), false);
-            let mut i: usize = 0;
-            while i < fields.len()
-                invariant
-                    i <= fields.len(),
-                decreases fields.len() - i,
-            {
-                let k = fields[i].field;
-                path.push(CoreStep::Field(*record, fields[i].field));
-                if get_bool(&seen, k) {
-                    report(errs, CheckErrorKind::RecordFieldRepeated { record: *record, field: k }, cx.item, path);
-                }
-                set(&mut seen, k, true);
-                let t = type_expr(cx, &fields[i].value, path, errs);
-                match get(&d.fields, k) {
-                    Some(want) => expect(cx, want, &t, path, errs),
-                    None => {},
-                }
-                let _ = path.pop();
-                i = i + 1;
-            }
-            let mut k: usize = 0;
-            while k < d.fields.len()
-                invariant
-                    k <= d.fields.len(),
-                decreases d.fields.len() - k,
-            {
-                if !get_bool(&seen, k) {
-                    report(errs, CheckErrorKind::RecordFieldMissing { record: *record, field: k }, cx.item, path);
-                }
-                k = k + 1;
-            }
-            Some(Type::Record(*record))
-        },
-        Expr::ArrayLit(es) => {
-            if es.len() == 0 {
-                report(errs, CheckErrorKind::EmptyArray, cx.item, path);
-                return None;
-            }
-            path.push(CoreStep::Element(0));
-            let first = type_expr(cx, &es[0], path, errs);
-            let _ = path.pop();
-            let mut i: usize = 1;
-            while i < es.len()
-                invariant
-                    1 <= i <= es.len(),
-                decreases es.len() - i,
-            {
-                path.push(CoreStep::Element(i));
-                let t = type_expr(cx, &es[i], path, errs);
-                match &first {
-                    Some(f) => expect(cx, f, &t, path, errs),
-                    None => {},
-                }
-                let _ = path.pop();
-                i = i + 1;
-            }
-            match first {
-                Some(f) => Some(Type::Array(Box::new(f), es.len())),
-                None => None,
-            }
-        },
+        Expr::MakeRecord { record, fields } => type_make_record(cx, *record, fields, Ghost(*e), path, errs),
+        Expr::ArrayLit(es) => type_array_lit(cx, es, Ghost(*e), path, errs),
         Expr::Cast { to, operand } => {
             path.push(CoreStep::Operand);
             let t = type_expr(cx, operand, path, errs);
@@ -498,12 +699,20 @@ pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<Ch
 
 #[verifier::loop_isolation(false)]
 pub fn type_stmts(cx: &TCx, ret: &Type, ss: &Vec<Stmt>, kind: StepKind, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() ==> forall|k: int| #![trigger ss@[k]] 0 <= k < ss@.len() && cx_stmt_hyp(*cx, ss@[k])
+            ==> spec_stmt_typed(*cx.p, cx.locals@, cx.const_types@, *ret, ss@[k]),
     decreases ss,
 {
+    let ghost e0 = errs@.len();
     let mut i: usize = 0;
     while i < ss.len()
         invariant
             i <= ss.len(),
+            errs@.len() >= e0,
+            errs@.len() == e0 ==> forall|k: int| #![trigger ss@[k]] 0 <= k < i && cx_stmt_hyp(*cx, ss@[k])
+                ==> spec_stmt_typed(*cx.p, cx.locals@, cx.const_types@, *ret, ss@[k]),
         decreases ss.len() - i,
     {
         path.push(mk_step(kind, i));
@@ -514,6 +723,10 @@ pub fn type_stmts(cx: &TCx, ret: &Type, ss: &Vec<Stmt>, kind: StepKind, path: &m
 }
 
 pub fn type_stmt(cx: &TCx, ret: &Type, s: &Stmt, path: &mut Vec<CoreStep>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && cx_stmt_hyp(*cx, *s)
+            ==> spec_stmt_typed(*cx.p, cx.locals@, cx.const_types@, *ret, *s),
     decreases s,
 {
     match s {
@@ -554,7 +767,10 @@ pub fn type_stmt(cx: &TCx, ret: &Type, s: &Stmt, path: &mut Vec<CoreStep>, errs:
     }
 }
 
-fn is_rank(x: Option<usize>, r: usize) -> bool {
+fn is_rank(x: Option<usize>, r: usize) -> (out: bool)
+    ensures
+        out == (x == Some(r)),
+{
     match x {
         Some(y) => y == r,
         None => false,
@@ -563,13 +779,25 @@ fn is_rank(x: Option<usize>, r: usize) -> bool {
 
 /// Derives every const's type, in rank order so a const's dependencies are typed first. A const
 /// with no rank (on or reaching a cycle) has type `None`; its init is still checked.
-pub fn const_types(p: &Program, ranks: &Ranks, errs: &mut Vec<CheckError>) -> Vec<Option<Type>> {
+#[verifier::loop_isolation(false)]
+pub fn const_types(p: &Program, ranks: &Ranks, errs: &mut Vec<CheckError>) -> (tys: Vec<Option<Type>>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && swf::wf_program(p) && spec_ranks_valid(*p, view_ranks(*ranks))
+            ==> spec_consts_typed(*p, tys@),
+{
+    let ghost e0 = errs@.len();
+    let ghost vr = view_ranks(*ranks);
+    let ghost hyp = swf::wf_program(p) && spec_ranks_valid(*p, vr);
     let n = p.consts.len();
     let mut tys: Vec<Option<Type>> = Vec::new();
     let mut k: usize = 0;
     while k < n
         invariant
             k <= n,
+            n == p.consts@.len(),
+            tys@.len() == k,
+            forall|j: int| 0 <= j < k ==> (#[trigger] tys@[j]) is None,
         decreases n - k,
     {
         tys.push(None);
@@ -580,6 +808,8 @@ pub fn const_types(p: &Program, ranks: &Ranks, errs: &mut Vec<CheckError>) -> Ve
     while k < n
         invariant
             k <= n,
+            n == p.consts@.len(),
+            hyp ==> forall|j: int| 0 <= j < k ==> (#[trigger] ranks.consts@[j])->0 <= max,
         decreases n - k,
     {
         match get_rank(&ranks.consts, k) {
@@ -593,39 +823,94 @@ pub fn const_types(p: &Program, ranks: &Ranks, errs: &mut Vec<CheckError>) -> Ve
         k = k + 1;
     }
     let no_locals: Vec<Type> = Vec::new();
+    proof {
+        assert(no_locals@ =~= Seq::<Type>::empty());
+    }
     let rounds = add_or_max(max, 1);
+    proof {
+        if errs@.len() == e0 && hyp {
+            lemma_stage_start(*p, vr, tys@);
+        }
+    }
     let mut r: usize = 0;
     while r < rounds
         invariant
             r <= rounds,
             n == p.consts.len(),
+            tys@.len() == n,
+            errs@.len() >= e0,
+            errs@.len() == e0 && hyp ==> const_stage(*p, vr, tys@, r as int, 0),
         decreases rounds - r,
     {
         let mut c: usize = 0;
         while c < n
             invariant
                 c <= n,
+                r < rounds,
                 n == p.consts.len(),
+                tys@.len() == n,
+                errs@.len() >= e0,
+                errs@.len() == e0 && hyp ==> const_stage(*p, vr, tys@, r as int, c as int),
             decreases n - c,
         {
             if is_rank(get_rank(&ranks.consts, c), r) {
+                let ghost tys0 = tys@;
                 let t = {
                     let cx = TCx { p, item: CoreItem::Const(ConstId(c)), locals: &no_locals, in_const: true, const_types: &tys };
                     let mut path: Vec<CoreStep> = Vec::new();
                     path.push(CoreStep::Value);
+                    proof {
+                        if errs@.len() == e0 && hyp {
+                            assert(vr.consts[c as int] == Some(r));
+                            lemma_stage_known(*p, vr, tys0, r as int, c as int);
+                            assert(swf::wf_expr(p, 0, &p.consts[c as int].init));
+                        }
+                    }
                     type_expr(&cx, &p.consts[c].init, &mut path, errs)
                 };
                 set(&mut tys, c, t);
+                proof {
+                    if errs@.len() == e0 && hyp {
+                        lemma_stage_set(*p, vr, tys0, r as int, c as int, t->0);
+                    }
+                }
+            } else {
+                proof {
+                    if errs@.len() == e0 && hyp {
+                        assert(vr.consts[c as int]->0 as int != r);
+                        lemma_stage_skip(*p, vr, tys@, r as int, c as int);
+                    }
+                }
             }
             c = c + 1;
         }
+        proof {
+            if errs@.len() == e0 && hyp {
+                lemma_stage_next(*p, vr, tys@, r as int);
+            }
+        }
         r = r + 1;
+    }
+    let ghost final_tys = tys@;
+    let ghost e_mid = errs@.len();
+    proof {
+        if errs@.len() == e0 && hyp {
+            assert forall|d: int| 0 <= d < tys@.len() implies ((#[trigger] vr.consts[d])->0 as int) < rounds by {
+                assert(ranks.consts@[d]->0 <= max);
+                assert(vr.consts[d]->0 < usize::MAX);
+            }
+            lemma_stage_end(*p, vr, tys@, rounds as int);
+        }
     }
     let mut c: usize = 0;
     while c < n
         invariant
             c <= n,
             n == p.consts.len(),
+            tys@ == final_tys,
+            e_mid >= e0,
+            errs@.len() >= e_mid,
+            e_mid == e0 && hyp ==> spec_consts_typed(*p, final_tys),
         decreases n - c,
     {
         if get_rank(&ranks.consts, c).is_none() {
@@ -640,23 +925,47 @@ pub fn const_types(p: &Program, ranks: &Ranks, errs: &mut Vec<CheckError>) -> Ve
 }
 
 /// Types every function body and checks unit mains have no params.
-pub fn check_types(p: &Program, const_types: &Vec<Option<Type>>, errs: &mut Vec<CheckError>) {
+#[verifier::loop_isolation(false)]
+pub fn check_types(p: &Program, const_types: &Vec<Option<Type>>, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() && swf::wf_program(p) && (forall|c: int| 0 <= c < const_types@.len() ==> #[trigger] const_types@[c] is Some) && const_types@.len() == p.consts@.len() ==> {
+            &&& forall|k: int| 0 <= k < p.functions@.len() ==> spec_function_typed(*p, const_types@, #[trigger] p.functions@[k])
+            &&& forall|u: int| 0 <= u < p.units@.len() ==> p.functions@[(#[trigger] p.units@[u]).main.0 as int].params == 0
+        },
+{
+    let ghost e0 = errs@.len();
+    let ghost hyp = swf::wf_program(p) && (forall|c: int| 0 <= c < const_types@.len() ==> #[trigger] const_types@[c] is Some) && const_types@.len() == p.consts@.len();
     let mut k: usize = 0;
     while k < p.functions.len()
         invariant
             k <= p.functions.len(),
+            errs@.len() >= e0,
+            errs@.len() == e0 && hyp ==> forall|j: int| 0 <= j < k ==> spec_function_typed(*p, const_types@, #[trigger] p.functions@[j]),
         decreases p.functions.len() - k,
     {
         let f = &p.functions[k];
         let cx = TCx { p, item: CoreItem::Function(FnId(k)), locals: &f.locals, in_const: false, const_types };
         let mut path: Vec<CoreStep> = Vec::new();
         type_stmts(&cx, &f.ret, &f.body, StepKind::Stmt, &mut path, errs);
+        proof {
+            if errs@.len() == e0 && hyp {
+                assert(swf::wf_function(p, &p.functions[k as int]));
+                assert forall|j: int| #![trigger f.body@[j]] 0 <= j < f.body@.len() implies spec_stmt_typed(*p, f.locals@, const_types@, f.ret, f.body@[j]) by {
+                    assert(swf::wf_stmt(p, f.locals@.len() as nat, &f.body[j]));
+                    lemma_stmt_known_all(p, f.locals@.len() as nat, const_types@, f.body@[j]);
+                }
+            }
+        }
         k = k + 1;
     }
+    let ghost e1 = errs@.len();
     let mut u: usize = 0;
     while u < p.units.len()
         invariant
             u <= p.units.len(),
+            errs@.len() >= e1,
+            errs@.len() == e1 && hyp ==> forall|j: int| 0 <= j < u ==> p.functions@[(#[trigger] p.units@[j]).main.0 as int].params == 0,
         decreases p.units.len() - u,
     {
         match get(&p.functions, p.units[u].main.0) {
@@ -668,6 +977,11 @@ pub fn check_types(p: &Program, const_types: &Vec<Option<Type>>, errs: &mut Vec<
                 }
             },
             None => {},
+        }
+        proof {
+            if errs@.len() == e1 && hyp {
+                assert(swf::wf_unit(p, &p.units[u as int]));
+            }
         }
         u = u + 1;
     }

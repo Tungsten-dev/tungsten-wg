@@ -6,6 +6,11 @@
 use vstd::prelude::*;
 
 use crate::ir::*;
+use crate::proofs::ranks::*;
+use crate::spec::ops::*;
+use crate::spec::ranks::*;
+use crate::spec::typing::*;
+use crate::spec::value::*;
 use crate::util::*;
 use crate::value::*;
 
@@ -123,7 +128,10 @@ fn before(a: &CorePath, b: &CorePath) -> bool {
 }
 
 /// A stable sort into walk order (selection by removal: the first minimal error goes next).
-pub fn sort_errors(errs: Vec<CheckError>) -> Vec<CheckError> {
+pub fn sort_errors(errs: Vec<CheckError>) -> (sorted: Vec<CheckError>)
+    ensures
+        sorted@.len() == errs@.len(),
+{
     let mut rest = errs;
     let mut out: Vec<CheckError> = Vec::new();
     let n = rest.len();
@@ -131,6 +139,9 @@ pub fn sort_errors(errs: Vec<CheckError>) -> Vec<CheckError> {
     while round < n && rest.len() > 0
         invariant
             round <= n,
+            n == errs@.len(),
+            rest@.len() + out@.len() == n,
+            out@.len() == round,
         decreases n - round,
     {
         let mut best: usize = 0;
@@ -158,7 +169,11 @@ pub fn sort_errors(errs: Vec<CheckError>) -> Vec<CheckError> {
 // ---------------------------------------------------------------------------------------------
 
 /// Every component ≥ 1 (`DimsTooSmall`), and `x*y*z ≤ i32::MAX` in checked `i64` (`GridTooLarge`).
-pub fn check_dims(d: &Dims, item: CoreItem, errs: &mut Vec<CheckError>) {
+pub fn check_dims(d: &Dims, item: CoreItem, errs: &mut Vec<CheckError>)
+    ensures
+        final(errs)@.len() >= old(errs)@.len(),
+        final(errs)@.len() == old(errs)@.len() ==> spec_dims_ok(*d),
+{
     let mut path: Vec<CoreStep> = Vec::new();
     path.push(CoreStep::Dims);
     if d.x < 1 || d.y < 1 || d.z < 1 {
@@ -181,7 +196,13 @@ pub fn check_dims(d: &Dims, item: CoreItem, errs: &mut Vec<CheckError>) {
 // Entry points
 // ---------------------------------------------------------------------------------------------
 
-pub fn check(p: &Program) -> Result<(), CheckErrors> {
+/// **The checker's half of T4**: a program it accepts is well typed. (`program_fits` always holds:
+/// see its definition.)
+#[verifier::loop_isolation(false)]
+pub fn check(p: &Program) -> (r: Result<(), CheckErrors>)
+    ensures
+        r is Ok && spec_program_fits(*p) ==> spec_well_typed(*p),
+{
     let wf = wf::check_wf(p);
     if wf.len() > 0 {
         return Err(CheckErrors { errors: wf });
@@ -189,33 +210,48 @@ pub fn check(p: &Program) -> Result<(), CheckErrors> {
     let ranks = acyclic::ranks(p);
     let mut errs: Vec<CheckError> = Vec::new();
     let ctys = types::const_types(p, &ranks, &mut errs);
+    let ghost e1 = errs@.len();
     types::check_types(p, &ctys, &mut errs);
+    let ghost e2 = errs@.len();
     flow::check_flow(p, &mut errs);
-    scope::check_scope(p, &mut errs);
+    let ghost e3 = errs@.len();
+    // Into a list of its own, so that scoping (which no theorem depends on) needs no contract: it
+    // can't take an error away from the others.
+    let mut scope_errs: Vec<CheckError> = Vec::new();
+    scope::check_scope(p, &mut scope_errs);
+    append_errors(&mut errs, scope_errs);
+    let ghost e4 = errs@.len();
     let mut k: usize = 0;
     while k < p.inputs.len()
         invariant
             k <= p.inputs.len(),
+            errs@.len() >= e4,
+            errs@.len() == e4 ==> forall|j: int| 0 <= j < k ==> spec_dims_ok((#[trigger] p.inputs@[j]).dims),
         decreases p.inputs.len() - k,
     {
         check_dims(&p.inputs[k].dims, CoreItem::Input(InputId(k)), &mut errs);
         k = k + 1;
     }
+    let ghost e5 = errs@.len();
     let mut k: usize = 0;
     while k < p.entries.len()
         invariant
             k <= p.entries.len(),
+            errs@.len() >= e5,
+            errs@.len() == e5 ==> forall|j: int| 0 <= j < k ==> spec_dims_ok((#[trigger] p.entries@[j]).dims),
         decreases p.entries.len() - k,
     {
         check_dims(&p.entries[k].dims, CoreItem::Entry(k), &mut errs);
         k = k + 1;
     }
+    let ghost e6 = errs@.len();
     let mut errs = sort_errors(errs);
     let cycles = acyclic::cycles(p);
     let mut c: usize = 0;
     while c < cycles.len()
         invariant
             c <= cycles.len(),
+            errs@.len() >= e6 + c,
         decreases cycles.len() - c,
     {
         let mut members: Vec<CycleMember> = Vec::new();
@@ -233,6 +269,13 @@ pub fn check(p: &Program) -> Result<(), CheckErrors> {
         report(&mut errs, CheckErrorKind::Cycle { members }, CoreItem::Program, &path);
         c = c + 1;
     }
+    proof {
+        if errs@.len() == 0 && spec_program_fits(*p) {
+            lemma_ranks_valid(*p);
+            assert(spec_consts_typed(*p, ctys@));
+            assert(spec_well_typed_with(*p, ctys@));
+        }
+    }
     if errs.len() > 0 {
         Err(CheckErrors { errors: errs })
     } else {
@@ -241,7 +284,10 @@ pub fn check(p: &Program) -> Result<(), CheckErrors> {
 }
 
 /// `case.hosts` has one value per host, each of the host's declared type.
-pub fn check_case(p: &Program, case: &Case) -> Result<(), CaseErrors> {
+pub fn check_case(p: &Program, case: &Case) -> (r: Result<(), CaseErrors>)
+    ensures
+        r is Ok ==> spec_case_fits(*p, view_values(case.hosts@)),
+{
     if case.hosts.len() != p.hosts.len() {
         let mut errors: Vec<CaseError> = Vec::new();
         errors.push(CaseError::HostCount { expected: p.hosts.len(), found: case.hosts.len() });
@@ -253,10 +299,14 @@ pub fn check_case(p: &Program, case: &Case) -> Result<(), CaseErrors> {
         invariant
             h <= p.hosts.len(),
             case.hosts.len() == p.hosts.len(),
+            errors@.len() == 0 ==> forall|j: int| 0 <= j < h ==> spec_value_has_type(*p, #[trigger] view_values(case.hosts@)[j], p.hosts@[j].ty),
         decreases p.hosts.len() - h,
     {
         if !value_has_type(p, &case.hosts[h], &p.hosts[h].ty) {
             errors.push(CaseError::HostValue { host: HostId(h) });
+        }
+        proof {
+            assert(view_values(case.hosts@)[h as int] == view_value(case.hosts@[h as int]));
         }
         h = h + 1;
     }

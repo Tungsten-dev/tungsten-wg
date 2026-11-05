@@ -3,7 +3,10 @@
 use vstd::prelude::*;
 
 use crate::ir::*;
+use crate::proofs::value::*;
 use crate::registry::*;
+use crate::spec::ops::*;
+use crate::spec::value::*;
 use crate::util::*;
 
 verus! {
@@ -36,7 +39,7 @@ pub enum Value {
 }
 
 /// Why evaluation got stuck. Unreachable for programs and cases that pass `check` and
-/// `check_case` (tested in this phase, proven later).
+/// `check_case` (T4), other than the two an extern breaking its declaration can cause.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StuckReason {
     /// A `util::get` miss.
@@ -85,16 +88,29 @@ pub enum ExternFail {
 
 /// The extern hook. Arguments are passed as evaluated; `check` guarantees they match
 /// `ExternDecl.params`. The interpreter checks the result against `decl.ret`.
+///
+/// **Contract, not checked by Verus:** an implementation is a pure function of `ext` and `args`,
+/// including the bits of any NaN it returns. The theorems trust this.
 pub trait Externs {
-    fn call(&self, ext: ExternId, args: &[Value]) -> Result<Value, ExternFail>;
+    spec fn spec_call(&self, ext: ExternId, args: Seq<SValue>) -> Result<SValue, ExternFail>;
+
+    fn call(&self, ext: ExternId, args: &[Value]) -> (r: Result<Value, ExternFail>)
+        ensures
+            view_extern_result(r) == self.spec_call(ext, view_values(args@)),
+    ;
 }
 
-pub fn copy_i32x3(v: &I32x3) -> I32x3 {
+pub fn copy_i32x3(v: &I32x3) -> (r: I32x3)
+    ensures
+        r == *v,
+{
     I32x3 { x: v.x, y: v.y, z: v.z }
 }
 
 #[verifier::loop_isolation(false)]
-pub fn clone_value(v: &Value) -> Value
+pub fn clone_value(v: &Value) -> (r: Value)
+    ensures
+        view_value(r) == view_value(*v),
     decreases v,
 {
     match v {
@@ -112,10 +128,17 @@ pub fn clone_value(v: &Value) -> Value
             while i < vs.len()
                 invariant
                     i <= vs.len(),
+                    out@.len() == i,
+                    forall|j: int| 0 <= j < i ==> #[trigger] view_value(out@[j]) == view_value(vs@[j]),
                 decreases vs.len() - i,
             {
                 out.push(clone_value(&vs[i]));
                 i = i + 1;
+            }
+            proof {
+                lemma_view_array(out);
+                lemma_view_array(*vs);
+                assert(view_values(out@) =~= view_values(vs@));
             }
             Value::Array(out)
         },
@@ -125,10 +148,17 @@ pub fn clone_value(v: &Value) -> Value
             while i < vs.len()
                 invariant
                     i <= vs.len(),
+                    out@.len() == i,
+                    forall|j: int| 0 <= j < i ==> #[trigger] view_value(out@[j]) == view_value(vs@[j]),
                 decreases vs.len() - i,
             {
                 out.push(clone_value(&vs[i]));
                 i = i + 1;
+            }
+            proof {
+                lemma_view_record(*r, out);
+                lemma_view_record(*r, *vs);
+                assert(view_values(out@) =~= view_values(vs@));
             }
             Value::Record(*r, out)
         },
@@ -151,7 +181,10 @@ pub fn clone_values(vs: &Vec<Value>) -> Vec<Value> {
     out
 }
 
-pub fn clone_result(r: &Result<Value, EvalError>) -> Result<Value, EvalError> {
+pub fn clone_result(r: &Result<Value, EvalError>) -> (out: Result<Value, EvalError>)
+    ensures
+        view_result(out) == view_result(*r),
+{
     match r {
         Ok(v) => Ok(clone_value(v)),
         Err(e) => Err(*e),
@@ -165,7 +198,9 @@ pub fn clone_case(c: &Case) -> Case {
 /// The shapes match, array lengths match, a record has its decl's field count and each field
 /// its type, and a table handle is in range with the matching kind.
 #[verifier::loop_isolation(false)]
-pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> bool
+pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> (r: bool)
+    ensures
+        r == spec_value_has_type(*p, view_value(*v), *t),
     decreases v,
 {
     match (v, t) {
@@ -178,6 +213,9 @@ pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> bool
         (Value::Vec3(_), Type::Vec3) => true,
         (Value::Pos3(_), Type::Pos3) => true,
         (Value::Array(vs), Type::Array(inner, n)) => {
+            proof {
+                lemma_view_array(*vs);
+            }
             if vs.len() != *n {
                 return false;
             }
@@ -185,16 +223,27 @@ pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> bool
             while i < vs.len()
                 invariant
                     i <= vs.len(),
+                    view_value(*v) == SValue::Array(view_values(vs@)),
+                    forall|j: int| 0 <= j < i ==> spec_value_has_type(*p, #[trigger] view_values(vs@)[j], **inner),
                 decreases vs.len() - i,
             {
                 if !value_has_type(p, &vs[i], inner) {
+                    proof {
+                        assert(view_values(vs@)[i as int] == view_value(vs@[i as int]));
+                    }
                     return false;
+                }
+                proof {
+                    assert(view_values(vs@)[i as int] == view_value(vs@[i as int]));
                 }
                 i = i + 1;
             }
             true
         },
         (Value::Record(r, vs), Type::Record(s)) => {
+            proof {
+                lemma_view_record(*r, *vs);
+            }
             if r.0 != s.0 {
                 return false;
             }
@@ -210,10 +259,20 @@ pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> bool
                 invariant
                     i <= vs.len(),
                     vs.len() == decl.fields.len(),
+                    view_value(*v) == SValue::Record(*r, view_values(vs@)),
+                    r.0 < p.records@.len(),
+                    *decl == p.records@[r.0 as int],
+                    forall|j: int| 0 <= j < i ==> spec_value_has_type(*p, #[trigger] view_values(vs@)[j], decl.fields@[j]),
                 decreases vs.len() - i,
             {
                 if !value_has_type(p, &vs[i], &decl.fields[i]) {
+                    proof {
+                        assert(view_values(vs@)[i as int] == view_value(vs@[i as int]));
+                    }
                     return false;
+                }
+                proof {
+                    assert(view_values(vs@)[i as int] == view_value(vs@[i as int]));
                 }
                 i = i + 1;
             }

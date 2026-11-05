@@ -9,8 +9,7 @@
 //! Nothing type-related is checked here: types, exactly-once fields, scoping, acyclicity, dims,
 //! definite assignment and density-read legality are checker rules.
 //!
-//! `check/wf.rs` is the exec twin (`check_wf`), and `tungsten-check`'s tests also mirror these
-//! predicates in plain Rust (`src/tests/wf_mirror.rs`). Keep all three in sync.
+//! `check/wf.rs` is the exec twin, proven to agree: `check_wf(p).is_empty() == wf_program(p)` (T5).
 
 use vstd::prelude::*;
 

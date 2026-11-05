@@ -1,17 +1,19 @@
-//! Trusted primitives: every program-level integer op, float op, float comparison and cast,
-//! as small functions on bits. Semantics are Java's (TESTING.md §5.4).
+//! Integer primitives and the float operations that need no trust. Semantics are Java's
+//! (TESTING.md §5.4).
 //!
-//! This is the only file with `external_body`, and `scripts/verify.sh` exempts it. In this phase
-//! the functions have no `ensures`. The proof phase adds `ensures` equating each one to an
-//! uninterpreted `spec fn`.
+//! Every function here is verified against its definition in `crate::spec::prim`. The float
+//! arithmetic, comparisons and float conversions Verus can't reason about are in
+//! `crate::prim_float`, re-exported below so that callers see one module.
 //!
 //! Integers: `+ - *` wrap, `/` truncates toward zero with `MIN / -1 == MIN` (the caller handles
 //! division by zero), shift amounts are masked to `width - 1`, and `i8` ops promote to `i32`,
-//! apply the `i32` rule and truncate. Floats are IEEE-754 with each op rounded to its own type.
-//! Float → int rounds toward zero, saturates and maps NaN to 0. Float → `i8` goes through
-//! `i32` and then truncates, as Java's `(byte)` cast does.
+//! apply the `i32` rule and truncate. Float → `i8` goes through `i32` and then truncates, as
+//! Java's `(byte)` cast does.
 
 use vstd::prelude::*;
+
+pub use crate::prim_float::*;
+use crate::spec::prim::*;
 
 verus! {
 
@@ -19,227 +21,133 @@ verus! {
 // i32
 // ---------------------------------------------------------------------------------------------
 
-#[verifier::external_body]
-pub fn i32_add(a: i32, b: i32) -> i32 { a.wrapping_add(b) }
+pub fn i32_add(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_add(a, b) { a.wrapping_add(b) }
 
-#[verifier::external_body]
-pub fn i32_sub(a: i32, b: i32) -> i32 { a.wrapping_sub(b) }
+pub fn i32_sub(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_sub(a, b) { a.wrapping_sub(b) }
 
-#[verifier::external_body]
-pub fn i32_mul(a: i32, b: i32) -> i32 { a.wrapping_mul(b) }
+pub fn i32_mul(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_mul(a, b) { a.wrapping_mul(b) }
 
 /// `b != 0` is the caller's job; `MIN / -1 == MIN`.
-#[verifier::external_body]
-pub fn i32_div(a: i32, b: i32) -> i32 { if b == 0 { 0 } else { a.wrapping_div(b) } }
+pub fn i32_div(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_div(a, b) {
+    match a.checked_div(b) {
+        Some(q) => q,
+        None => if b == 0 { 0 } else { a },
+    }
+}
 
-#[verifier::external_body]
-pub fn i32_neg(a: i32) -> i32 { a.wrapping_neg() }
+pub fn i32_neg(a: i32) -> (r: i32) ensures r == spec_i32_neg(a) { 0i32.wrapping_sub(a) }
 
-#[verifier::external_body]
-pub fn i32_not(a: i32) -> i32 { !a }
+pub fn i32_not(a: i32) -> (r: i32) ensures r == spec_i32_not(a) { !a }
 
-#[verifier::external_body]
-pub fn i32_and(a: i32, b: i32) -> i32 { a & b }
+pub fn i32_and(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_and(a, b) { a & b }
 
-#[verifier::external_body]
-pub fn i32_or(a: i32, b: i32) -> i32 { a | b }
+pub fn i32_or(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_or(a, b) { a | b }
 
-#[verifier::external_body]
-pub fn i32_xor(a: i32, b: i32) -> i32 { a ^ b }
+pub fn i32_xor(a: i32, b: i32) -> (r: i32) ensures r == spec_i32_xor(a, b) { a ^ b }
 
-#[verifier::external_body]
-pub fn i32_shl(a: i32, s: i32) -> i32 { a.wrapping_shl((s & 31) as u32) }
+pub fn i32_shl(a: i32, s: i32) -> (r: i32) ensures r == spec_i32_shl(a, s) { a.wrapping_shl((s & 31) as u32) }
 
-#[verifier::external_body]
-pub fn i32_shr(a: i32, s: i32) -> i32 { a.wrapping_shr((s & 31) as u32) }
+pub fn i32_shr(a: i32, s: i32) -> (r: i32) ensures r == spec_i32_shr(a, s) { a.wrapping_shr((s & 31) as u32) }
 
-#[verifier::external_body]
-pub fn i32_ushr(a: i32, s: i32) -> i32 { ((a as u32) >> ((s & 31) as u32)) as i32 }
+pub fn i32_ushr(a: i32, s: i32) -> (r: i32) ensures r == spec_i32_ushr(a, s) {
+    assert(0 <= (s & 31) < 32) by (bit_vector);
+    ((a as u32) >> ((s & 31) as u32)) as i32
+}
 
 // ---------------------------------------------------------------------------------------------
 // i64
 // ---------------------------------------------------------------------------------------------
 
-#[verifier::external_body]
-pub fn i64_add(a: i64, b: i64) -> i64 { a.wrapping_add(b) }
+pub fn i64_add(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_add(a, b) { a.wrapping_add(b) }
 
-#[verifier::external_body]
-pub fn i64_sub(a: i64, b: i64) -> i64 { a.wrapping_sub(b) }
+pub fn i64_sub(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_sub(a, b) { a.wrapping_sub(b) }
 
-#[verifier::external_body]
-pub fn i64_mul(a: i64, b: i64) -> i64 { a.wrapping_mul(b) }
+pub fn i64_mul(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_mul(a, b) { a.wrapping_mul(b) }
 
-#[verifier::external_body]
-pub fn i64_div(a: i64, b: i64) -> i64 { if b == 0 { 0 } else { a.wrapping_div(b) } }
+/// `b != 0` is the caller's job; `MIN / -1 == MIN`.
+pub fn i64_div(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_div(a, b) {
+    match a.checked_div(b) {
+        Some(q) => q,
+        None => if b == 0 { 0 } else { a },
+    }
+}
 
-#[verifier::external_body]
-pub fn i64_neg(a: i64) -> i64 { a.wrapping_neg() }
+pub fn i64_neg(a: i64) -> (r: i64) ensures r == spec_i64_neg(a) { 0i64.wrapping_sub(a) }
 
-#[verifier::external_body]
-pub fn i64_not(a: i64) -> i64 { !a }
+pub fn i64_not(a: i64) -> (r: i64) ensures r == spec_i64_not(a) { !a }
 
-#[verifier::external_body]
-pub fn i64_and(a: i64, b: i64) -> i64 { a & b }
+pub fn i64_and(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_and(a, b) { a & b }
 
-#[verifier::external_body]
-pub fn i64_or(a: i64, b: i64) -> i64 { a | b }
+pub fn i64_or(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_or(a, b) { a | b }
 
-#[verifier::external_body]
-pub fn i64_xor(a: i64, b: i64) -> i64 { a ^ b }
+pub fn i64_xor(a: i64, b: i64) -> (r: i64) ensures r == spec_i64_xor(a, b) { a ^ b }
 
-#[verifier::external_body]
-pub fn i64_shl(a: i64, s: i32) -> i64 { a.wrapping_shl((s & 63) as u32) }
+pub fn i64_shl(a: i64, s: i32) -> (r: i64) ensures r == spec_i64_shl(a, s) { a.wrapping_shl((s & 63) as u32) }
 
-#[verifier::external_body]
-pub fn i64_shr(a: i64, s: i32) -> i64 { a.wrapping_shr((s & 63) as u32) }
+pub fn i64_shr(a: i64, s: i32) -> (r: i64) ensures r == spec_i64_shr(a, s) { a.wrapping_shr((s & 63) as u32) }
 
-#[verifier::external_body]
-pub fn i64_ushr(a: i64, s: i32) -> i64 { ((a as u64) >> ((s & 63) as u32)) as i64 }
+pub fn i64_ushr(a: i64, s: i32) -> (r: i64) ensures r == spec_i64_ushr(a, s) {
+    assert(0 <= (s & 63) < 64) by (bit_vector);
+    ((a as u64) >> ((s & 63) as u32)) as i64
+}
 
 // ---------------------------------------------------------------------------------------------
 // i8: promote to i32, apply the i32 rule, truncate
 // ---------------------------------------------------------------------------------------------
 
-#[verifier::external_body]
-pub fn i8_add(a: i8, b: i8) -> i8 { (a as i32).wrapping_add(b as i32) as i8 }
+pub fn i8_add(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_add(a, b) { i32_add(a as i32, b as i32) as i8 }
 
-#[verifier::external_body]
-pub fn i8_sub(a: i8, b: i8) -> i8 { (a as i32).wrapping_sub(b as i32) as i8 }
+pub fn i8_sub(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_sub(a, b) { i32_sub(a as i32, b as i32) as i8 }
 
-#[verifier::external_body]
-pub fn i8_mul(a: i8, b: i8) -> i8 { (a as i32).wrapping_mul(b as i32) as i8 }
+pub fn i8_mul(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_mul(a, b) { i32_mul(a as i32, b as i32) as i8 }
 
-#[verifier::external_body]
-pub fn i8_div(a: i8, b: i8) -> i8 { if b == 0 { 0 } else { (a as i32).wrapping_div(b as i32) as i8 } }
+pub fn i8_div(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_div(a, b) { i32_div(a as i32, b as i32) as i8 }
 
-#[verifier::external_body]
-pub fn i8_neg(a: i8) -> i8 { (a as i32).wrapping_neg() as i8 }
+pub fn i8_neg(a: i8) -> (r: i8) ensures r == spec_i8_neg(a) { i32_neg(a as i32) as i8 }
 
-#[verifier::external_body]
-pub fn i8_not(a: i8) -> i8 { !a }
+pub fn i8_not(a: i8) -> (r: i8) ensures r == spec_i8_not(a) { !a }
 
-#[verifier::external_body]
-pub fn i8_and(a: i8, b: i8) -> i8 { a & b }
+pub fn i8_and(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_and(a, b) { a & b }
 
-#[verifier::external_body]
-pub fn i8_or(a: i8, b: i8) -> i8 { a | b }
+pub fn i8_or(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_or(a, b) { a | b }
 
-#[verifier::external_body]
-pub fn i8_xor(a: i8, b: i8) -> i8 { a ^ b }
+pub fn i8_xor(a: i8, b: i8) -> (r: i8) ensures r == spec_i8_xor(a, b) { a ^ b }
 
-#[verifier::external_body]
-pub fn i8_shl(a: i8, s: i32) -> i8 { (a as i32).wrapping_shl((s & 31) as u32) as i8 }
+pub fn i8_shl(a: i8, s: i32) -> (r: i8) ensures r == spec_i8_shl(a, s) { i32_shl(a as i32, s) as i8 }
 
-#[verifier::external_body]
-pub fn i8_shr(a: i8, s: i32) -> i8 { (a as i32).wrapping_shr((s & 31) as u32) as i8 }
+pub fn i8_shr(a: i8, s: i32) -> (r: i8) ensures r == spec_i8_shr(a, s) { i32_shr(a as i32, s) as i8 }
 
 /// Java's `(byte)(b >>> s)`: the sign-extended `i32` is shifted logically.
-#[verifier::external_body]
-pub fn i8_ushr(a: i8, s: i32) -> i8 { (((a as i32) as u32) >> ((s & 31) as u32)) as i8 }
-
-// ---------------------------------------------------------------------------------------------
-// f32 / f64 (as bits)
-// ---------------------------------------------------------------------------------------------
-
-#[verifier::external_body]
-pub fn f32_add(a: u32, b: u32) -> u32 { (f32::from_bits(a) + f32::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f32_sub(a: u32, b: u32) -> u32 { (f32::from_bits(a) - f32::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f32_mul(a: u32, b: u32) -> u32 { (f32::from_bits(a) * f32::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f32_div(a: u32, b: u32) -> u32 { (f32::from_bits(a) / f32::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f32_neg(a: u32) -> u32 { (-f32::from_bits(a)).to_bits() }
-
-#[verifier::external_body]
-pub fn f32_eq(a: u32, b: u32) -> bool { f32::from_bits(a) == f32::from_bits(b) }
-
-#[verifier::external_body]
-pub fn f32_lt(a: u32, b: u32) -> bool { f32::from_bits(a) < f32::from_bits(b) }
-
-#[verifier::external_body]
-pub fn f32_le(a: u32, b: u32) -> bool { f32::from_bits(a) <= f32::from_bits(b) }
-
-#[verifier::external_body]
-pub fn f64_add(a: u64, b: u64) -> u64 { (f64::from_bits(a) + f64::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f64_sub(a: u64, b: u64) -> u64 { (f64::from_bits(a) - f64::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f64_mul(a: u64, b: u64) -> u64 { (f64::from_bits(a) * f64::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f64_div(a: u64, b: u64) -> u64 { (f64::from_bits(a) / f64::from_bits(b)).to_bits() }
-
-#[verifier::external_body]
-pub fn f64_neg(a: u64) -> u64 { (-f64::from_bits(a)).to_bits() }
-
-#[verifier::external_body]
-pub fn f64_eq(a: u64, b: u64) -> bool { f64::from_bits(a) == f64::from_bits(b) }
-
-#[verifier::external_body]
-pub fn f64_lt(a: u64, b: u64) -> bool { f64::from_bits(a) < f64::from_bits(b) }
-
-#[verifier::external_body]
-pub fn f64_le(a: u64, b: u64) -> bool { f64::from_bits(a) <= f64::from_bits(b) }
+pub fn i8_ushr(a: i8, s: i32) -> (r: i8) ensures r == spec_i8_ushr(a, s) { i32_ushr(a as i32, s) as i8 }
 
 // ---------------------------------------------------------------------------------------------
 // Casts. Integers travel as i64 (every i8/i32 fits exactly).
 // ---------------------------------------------------------------------------------------------
 
 /// Truncating narrowing.
-#[verifier::external_body]
-pub fn i64_to_i8(a: i64) -> i8 { a as i8 }
+pub fn i64_to_i8(a: i64) -> (r: i8) ensures r == spec_i64_to_i8(a) { a as i8 }
 
-#[verifier::external_body]
-pub fn i64_to_i32(a: i64) -> i32 { a as i32 }
+pub fn i64_to_i32(a: i64) -> (r: i32) ensures r == spec_i64_to_i32(a) { a as i32 }
 
-/// Round to nearest even.
-#[verifier::external_body]
-pub fn i64_to_f32(a: i64) -> u32 { (a as f32).to_bits() }
+pub fn i32_to_i8(a: i32) -> (r: i8) ensures r == spec_i32_to_i8(a) { a as i8 }
 
-#[verifier::external_body]
-pub fn i64_to_f64(a: i64) -> u64 { (a as f64).to_bits() }
+pub fn i8_to_i64(a: i8) -> (r: i64) ensures r == spec_i8_to_i64(a) { a as i64 }
 
-/// Round toward zero, saturate, NaN → 0.
-#[verifier::external_body]
-pub fn f32_to_i32(a: u32) -> i32 { f32::from_bits(a) as i32 }
+pub fn i32_to_i64(a: i32) -> (r: i64) ensures r == spec_i32_to_i64(a) { a as i64 }
 
-#[verifier::external_body]
-pub fn f32_to_i64(a: u32) -> i64 { f32::from_bits(a) as i64 }
+// ---------------------------------------------------------------------------------------------
+// Float operations that need no trust
+// ---------------------------------------------------------------------------------------------
 
-#[verifier::external_body]
-pub fn f64_to_i32(a: u64) -> i32 { f64::from_bits(a) as i32 }
+/// Flips the sign bit, which is exactly what Rust defines float negation to do, NaN included.
+pub fn f32_neg(a: u32) -> (r: u32) ensures r == spec_f32_neg(a) { a ^ 0x8000_0000u32 }
 
-#[verifier::external_body]
-pub fn f64_to_i64(a: u64) -> i64 { f64::from_bits(a) as i64 }
+pub fn f64_neg(a: u64) -> (r: u64) ensures r == spec_f64_neg(a) { a ^ 0x8000_0000_0000_0000u64 }
 
 /// Java's `(byte) f`: saturate to `i32`, then truncate.
-#[verifier::external_body]
-pub fn f32_to_i8(a: u32) -> i8 { (f32::from_bits(a) as i32) as i8 }
+pub fn f32_to_i8(a: u32) -> (r: i8) ensures r == spec_f32_to_i8(a) { i32_to_i8(f32_to_i32(a)) }
 
-#[verifier::external_body]
-pub fn f64_to_i8(a: u64) -> i8 { (f64::from_bits(a) as i32) as i8 }
-
-/// Exact.
-#[verifier::external_body]
-pub fn f32_to_f64(a: u32) -> u64 { (f32::from_bits(a) as f64).to_bits() }
-
-/// Round to nearest even.
-#[verifier::external_body]
-pub fn f64_to_f32(a: u64) -> u32 { (f64::from_bits(a) as f32).to_bits() }
-
-#[verifier::external_body]
-pub fn i8_to_i64(a: i8) -> i64 { a as i64 }
-
-#[verifier::external_body]
-pub fn i32_to_i64(a: i32) -> i64 { a as i64 }
+pub fn f64_to_i8(a: u64) -> (r: i8) ensures r == spec_f64_to_i8(a) { i32_to_i8(f64_to_i32(a)) }
 
 } // verus!
 
@@ -311,5 +219,50 @@ mod tests {
         assert_eq!(f64_add(f64b(-0.0), f64b(0.0)), f64b(0.0));
         assert_eq!(f64_div(f64b(1.0), f64b(0.0)), f64b(f64::INFINITY));
         assert_eq!(f32_mul(1.5f32.to_bits(), 2.0f32.to_bits()), 3.0f32.to_bits());
+    }
+
+    #[test]
+    fn computed_nans_are_canonical() {
+        const NAN64: u64 = 0x7ff8_0000_0000_0000;
+        const NAN32: u32 = 0x7fc0_0000;
+        let payload64 = 0xfff8_0000_0000_0123u64;
+        let payload32 = 0xffc0_0123u32;
+        assert_eq!(f64_add(payload64, f64b(1.0)), NAN64);
+        assert_eq!(f64_sub(f64b(f64::INFINITY), f64b(f64::INFINITY)), NAN64);
+        assert_eq!(f64_mul(f64b(0.0), f64b(f64::INFINITY)), NAN64);
+        assert_eq!(f64_div(f64b(0.0), f64b(0.0)), NAN64);
+        assert_eq!(f32_add(payload32, 1.0f32.to_bits()), NAN32);
+        assert_eq!(f32_div(0.0f32.to_bits(), 0.0f32.to_bits()), NAN32);
+        assert_eq!(f64_to_f32(payload64), NAN32);
+        assert_eq!(f32_to_f64(payload32), NAN64);
+        // Negation only flips the sign bit, so a payload survives it.
+        assert_eq!(f64_neg(payload64), payload64 ^ (1u64 << 63));
+        assert_eq!(f32_neg(payload32), payload32 ^ (1u32 << 31));
+        assert_eq!(f64_neg(f64b(-1.5)), f64b(1.5));
+    }
+
+    /// The verified integer bodies against the plain-Rust operations they replaced.
+    #[test]
+    fn verified_bodies_match_std() {
+        let xs = [i32::MIN, i32::MIN + 1, -7, -1, 0, 1, 2, 7, i32::MAX];
+        for a in xs {
+            assert_eq!(i32_neg(a), a.wrapping_neg());
+            for b in xs {
+                assert_eq!(i32_div(a, b), if b == 0 { 0 } else { a.wrapping_div(b) });
+            }
+        }
+        let ys = [i64::MIN, -7, -1, 0, 1, 7, i64::MAX];
+        for a in ys {
+            assert_eq!(i64_neg(a), a.wrapping_neg());
+            for b in ys {
+                assert_eq!(i64_div(a, b), if b == 0 { 0 } else { a.wrapping_div(b) });
+            }
+        }
+        for a in i8::MIN..=i8::MAX {
+            assert_eq!(i8_neg(a), (a as i32).wrapping_neg() as i8);
+            for b in [i8::MIN, -1, 0, 1, 3, i8::MAX] {
+                assert_eq!(i8_div(a, b), if b == 0 { 0 } else { (a as i32).wrapping_div(b as i32) as i8 });
+            }
+        }
     }
 }

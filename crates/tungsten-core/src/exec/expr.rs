@@ -2,6 +2,9 @@
 //! (`And` / `Or` short-circuit; everything else is eager, `BitAnd` / `BitOr` on `Bool` too),
 //! `Make*` and array-literal elements in written order, `MakeRecord` fields in written order.
 //! The first error ends the cell.
+//!
+//! Every function here is verified against its counterpart in `crate::spec::eval` or
+//! `crate::spec::ops`.
 
 use vstd::prelude::*;
 
@@ -11,6 +14,10 @@ use crate::exec::unit::*;
 use crate::ir::*;
 use crate::layout;
 use crate::prim;
+use crate::proofs::value::*;
+use crate::spec::eval::*;
+use crate::spec::ops::*;
+use crate::spec::value::*;
 use crate::util::*;
 use crate::value::*;
 
@@ -18,15 +25,24 @@ verus! {
 
 broadcast use vstd::std_specs::vec::group_vec_axioms;
 
-fn stuck(r: StuckReason) -> EvalError {
+fn stuck(r: StuckReason) -> (e: EvalError)
+    ensures
+        e == crate::spec::eval::stuck(r),
+{
     EvalError::Stuck(r)
 }
 
-fn shape() -> EvalError {
+fn shape() -> (e: EvalError)
+    ensures
+        e == crate::spec::ops::shape(),
+{
     EvalError::Stuck(StuckReason::Shape)
 }
 
-pub fn lit_value(l: &Lit) -> Value {
+pub fn lit_value(l: &Lit) -> (r: Value)
+    ensures
+        view_value(r) == spec_lit_value(*l),
+{
     match l {
         Lit::Bool(b) => Value::Bool(*b),
         Lit::I8(x) => Value::I8(*x),
@@ -38,24 +54,44 @@ pub fn lit_value(l: &Lit) -> Value {
 }
 
 #[verifier::loop_isolation(false)]
-pub fn eval_args<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut Frame, args: &Vec<Expr>, memo: &mut Memo) -> Result<Vec<Value>, EvalError>
+pub fn eval_args<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, args: &Vec<Expr>, memo: &mut Memo) -> (r: Result<Vec<Value>, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_list(r) == spec_args(senv(env), rank, *ctx, view_frame(*frame), *args, 0, Seq::empty()),
     decreases rank, 0int, args,
 {
     let mut out: Vec<Value> = Vec::new();
+    proof {
+        lemma_view_values_empty();
+        assert(out@ =~= Seq::<Value>::empty());
+    }
     let mut i: usize = 0;
     while i < args.len()
         invariant
             i <= args.len(),
+            env_inv(env),
+            memo_inv(senv(env), *memo),
+            spec_args(senv(env), rank, *ctx, view_frame(*frame), *args, 0, Seq::empty())
+                == spec_args(senv(env), rank, *ctx, view_frame(*frame), *args, i as int, view_values(out@)),
         decreases args.len() - i,
     {
         let v = eval_expr(env, rank, ctx, frame, &args[i], memo)?;
+        proof {
+            lemma_view_values_push(out@, v);
+        }
         out.push(v);
         i = i + 1;
     }
     Ok(out)
 }
 
-fn read_buf(buf: &Vec<Value>, k: usize) -> Result<Value, EvalError> {
+fn read_buf(buf: &Vec<Value>, k: usize) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_read_buf(view_values(buf@), k),
+{
     match get(buf, k) {
         Some(v) => Ok(clone_value(v)),
         None => Err(EvalError::OutOfBounds),
@@ -64,7 +100,13 @@ fn read_buf(buf: &Vec<Value>, k: usize) -> Result<Value, EvalError> {
 
 /// `Density(i, None)` reads `buf[0]` for a `(1,1,1)` input and `buf[ctx.k]` otherwise.
 /// `Density(i, Some(e))` reads `buf[e]`. The index is evaluated before the buffer is built.
-pub fn read_density<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut Frame, input: InputId, index: &Option<Box<Expr>>, memo: &mut Memo) -> Result<Value, EvalError>
+pub fn read_density<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, input: InputId, index: &Option<Box<Expr>>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_read_density(senv(env), rank, *ctx, view_frame(*frame), input, *index),
     decreases rank, 0int, index,
 {
     let explicit: Option<i32> = match index {
@@ -102,17 +144,265 @@ pub fn read_density<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mu
     }
 }
 
+/// `MakeRecord`'s empty slots, one per declared field.
+fn empty_slots(n: usize) -> (r: Vec<Option<Value>>)
+    ensures
+        view_slots(r@) == spec_empty_slots(n as nat),
+{
+    let mut slots: Vec<Option<Value>> = Vec::new();
+    let mut k: usize = 0;
+    while k < n
+        invariant
+            k <= n,
+            slots@.len() == k,
+            forall|j: int| 0 <= j < k ==> slots@[j] is None,
+        decreases n - k,
+    {
+        slots.push(None);
+        k = k + 1;
+    }
+    proof {
+        assert(view_slots(slots@) =~= spec_empty_slots(n as nat));
+    }
+    slots
+}
+
+/// Evaluates the field values in written order, dropping each into its declared slot.
 #[verifier::loop_isolation(false)]
-pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut Frame, e: &Expr, memo: &mut Memo) -> Result<Value, EvalError>
-    decreases rank, 0int, e,
+fn eval_fields<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, fields: &Vec<FieldInit>, slots: Vec<Option<Value>>, memo: &mut Memo) -> (r: Result<Vec<Option<Value>>, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_slots_result(r) == spec_fields(senv(env), rank, *ctx, view_frame(*frame), *fields, 0, view_slots(slots@)),
+    decreases rank, 0int, fields,
+{
+    let ghost start = view_slots(slots@);
+    let mut slots = slots;
+    let mut i: usize = 0;
+    while i < fields.len()
+        invariant
+            i <= fields.len(),
+            env_inv(env),
+            memo_inv(senv(env), *memo),
+            spec_fields(senv(env), rank, *ctx, view_frame(*frame), *fields, 0, start)
+                == spec_fields(senv(env), rank, *ctx, view_frame(*frame), *fields, i as int, view_slots(slots@)),
+        decreases fields.len() - i,
+    {
+        let v = eval_expr(env, rank, ctx, frame, &fields[i].value, memo)?;
+        let f = fields[i].field;
+        match get(&slots, f) {
+            Some(None) => {},
+            Some(Some(_)) => { return Err(shape()); },
+            None => { return Err(stuck(StuckReason::BadIndex)); },
+        }
+        proof {
+            lemma_view_slots_update(slots@, f as int, Some(v));
+        }
+        set(&mut slots, f, Some(v));
+        i = i + 1;
+    }
+    Ok(slots)
+}
+
+/// The record's values in declaration order, or `Stuck(Shape)` if a slot is still empty.
+fn collect_slots(slots: &Vec<Option<Value>>) -> (r: Result<Vec<Value>, EvalError>)
+    ensures
+        view_list(r) == spec_collect_slots(view_slots(slots@), 0, Seq::empty()),
+{
+    let mut vals: Vec<Value> = Vec::new();
+    proof {
+        lemma_view_values_empty();
+        assert(vals@ =~= Seq::<Value>::empty());
+    }
+    let mut k: usize = 0;
+    while k < slots.len()
+        invariant
+            k <= slots.len(),
+            spec_collect_slots(view_slots(slots@), 0, Seq::empty())
+                == spec_collect_slots(view_slots(slots@), k as int, view_values(vals@)),
+        decreases slots.len() - k,
+    {
+        proof {
+            assert(view_slots(slots@)[k as int] == view_slot(slots@[k as int]));
+        }
+        match &slots[k] {
+            Some(v) => {
+                let c = clone_value(v);
+                proof {
+                    lemma_view_values_push(vals@, c);
+                }
+                vals.push(c);
+            },
+            None => { return Err(shape()); },
+        }
+        k = k + 1;
+    }
+    Ok(vals)
+}
+
+/// One arm of `eval_expr`, in a function of its own so that its proof is a query of its own.
+fn eval_extern_call<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, ext: ExternId, args: &Vec<Expr>, e: Ghost<Expr>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+        e@ == (Expr::ExternCall { ext, params: e@->ExternCall_params, ret: e@->ExternCall_ret, args: *args }),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), e@),
+    decreases rank, 0int, e@, 0int,
+{
+    let p = env.p;
+    let vals = eval_args(env, rank, ctx, frame, args, memo)?;
+    let decl = match get(&p.externs, ext.0) {
+        Some(d) => d,
+        None => { return Err(stuck(StuckReason::BadIndex)); },
+    };
+    match env.ext.call(ext, vals.as_slice()) {
+        Ok(v) => {
+            if value_has_type(p, &v, &decl.ret) {
+                Ok(v)
+            } else {
+                Err(stuck(StuckReason::ExternResult))
+            }
+        },
+        Err(ExternFail::Domain) => {
+            if decl.domain_error {
+                Err(EvalError::ExternDomain)
+            } else {
+                Err(stuck(StuckReason::ExternDomainUndeclared))
+            }
+        },
+    }
+}
+
+/// One arm of `eval_expr`, in a function of its own so that its proof is a query of its own.
+fn eval_binary<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, op: &BinOp, left: &Box<Expr>, right: &Box<Expr>, e: Ghost<Expr>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+        e@ == (Expr::Binary { op: *op, left: *left, right: *right }),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), e@),
+    decreases rank, 0int, e@, 0int,
+{
+    match op {
+        BinOp::And => {
+            let l = cond(eval_expr(env, rank, ctx, frame, left, memo)?)?;
+            if !l {
+                return Ok(Value::Bool(false));
+            }
+            let r = cond(eval_expr(env, rank, ctx, frame, right, memo)?)?;
+            return Ok(Value::Bool(r));
+        },
+        BinOp::Or => {
+            let l = cond(eval_expr(env, rank, ctx, frame, left, memo)?)?;
+            if l {
+                return Ok(Value::Bool(true));
+            }
+            let r = cond(eval_expr(env, rank, ctx, frame, right, memo)?)?;
+            return Ok(Value::Bool(r));
+        },
+        _ => {},
+    }
+    let l = eval_expr(env, rank, ctx, frame, left, memo)?;
+    let r = eval_expr(env, rank, ctx, frame, right, memo)?;
+    binop(op, &l, &r)
+}
+
+/// One arm of `eval_expr`, in a function of its own so that its proof is a query of its own.
+fn eval_index<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, array: &Box<Expr>, index: &Box<Expr>, e: Ghost<Expr>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+        e@ == (Expr::Index { array: *array, index: *index }),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), e@),
+    decreases rank, 0int, e@, 0int,
+{
+    let a = eval_expr(env, rank, ctx, frame, array, memo)?;
+    let i = eval_expr(env, rank, ctx, frame, index, memo)?;
+    match (a, i) {
+        (Value::Array(vs), Value::I32(i)) => {
+            proof {
+                lemma_view_array(vs);
+            }
+            if i < 0 {
+                return Err(EvalError::OutOfBounds);
+            }
+            read_buf(&vs, i as usize)
+        },
+        _ => Err(shape()),
+    }
+}
+
+/// One arm of `eval_expr`, in a function of its own so that its proof is a query of its own.
+fn eval_make_vec3<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, x: &Box<Expr>, y: &Box<Expr>, z: &Box<Expr>, e: Ghost<Expr>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+        e@ == (Expr::MakeVec3 { x: *x, y: *y, z: *z }),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), e@),
+    decreases rank, 0int, e@, 0int,
+{
+    let a = eval_expr(env, rank, ctx, frame, x, memo)?;
+    let b = eval_expr(env, rank, ctx, frame, y, memo)?;
+    let c = eval_expr(env, rank, ctx, frame, z, memo)?;
+    match (a, b, c) {
+        (Value::F64(a), Value::F64(b), Value::F64(c)) => Ok(Value::Vec3(F64x3 { x: a, y: b, z: c })),
+        _ => Err(shape()),
+    }
+}
+
+/// One arm of `eval_expr`, in a function of its own so that its proof is a query of its own.
+fn eval_make_pos3<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, x: &Box<Expr>, y: &Box<Expr>, z: &Box<Expr>, e: Ghost<Expr>, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+        e@ == (Expr::MakePos3 { x: *x, y: *y, z: *z }),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), e@),
+    decreases rank, 0int, e@, 0int,
+{
+    let a = eval_expr(env, rank, ctx, frame, x, memo)?;
+    let b = eval_expr(env, rank, ctx, frame, y, memo)?;
+    let c = eval_expr(env, rank, ctx, frame, z, memo)?;
+    match (a, b, c) {
+        (Value::I32(a), Value::I32(b), Value::I32(c)) => Ok(Value::Pos3(I32x3 { x: a, y: b, z: c })),
+        _ => Err(shape()),
+    }
+}
+
+#[verifier::loop_isolation(false)]
+pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &Frame, e: &Expr, memo: &mut Memo) -> (r: Result<Value, EvalError>)
+    requires
+        env_inv(env),
+        memo_inv(senv(env), *old(memo)),
+    ensures
+        memo_inv(senv(env), *final(memo)),
+        view_result(r) == spec_eval_expr(senv(env), rank, *ctx, view_frame(*frame), *e),
+    decreases rank, 0int, e, 1int,
 {
     let p = env.p;
     match e {
         Expr::Lit(l) => Ok(lit_value(l)),
-        Expr::Local(l) => match get(&frame.locals, l.0) {
-            Some(Some(v)) => Ok(clone_value(v)),
-            Some(None) => Err(stuck(StuckReason::Unassigned)),
-            None => Err(stuck(StuckReason::BadIndex)),
+        Expr::Local(l) => {
+            proof {
+                if l.0 < frame.locals@.len() {
+                    assert(view_frame(*frame)[l.0 as int] == view_slot(frame.locals@[l.0 as int]));
+                }
+            }
+            match get(&frame.locals, l.0) {
+                Some(Some(v)) => Ok(clone_value(v)),
+                Some(None) => Err(stuck(StuckReason::Unassigned)),
+                None => Err(stuck(StuckReason::BadIndex)),
+            }
         },
         Expr::Const(c) => {
             let rc = rank_or(get_rank(&env.ranks.consts, c.0), rank);
@@ -122,9 +412,16 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
                 Err(stuck(StuckReason::Rank))
             }
         },
-        Expr::Host(h) => match get(&env.case.hosts, h.0) {
-            Some(v) => Ok(clone_value(v)),
-            None => Err(stuck(StuckReason::Case)),
+        Expr::Host(h) => {
+            proof {
+                if h.0 < env.case.hosts@.len() {
+                    assert(senv(env).hosts[h.0 as int] == view_value(env.case.hosts@[h.0 as int]));
+                }
+            }
+            match get(&env.case.hosts, h.0) {
+                Some(v) => Ok(clone_value(v)),
+                None => Err(stuck(StuckReason::Case)),
+            }
         },
         Expr::Table(t) => match get(&p.tables, t.0) {
             Some(d) => match d.kind {
@@ -149,53 +446,8 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
                 Err(stuck(StuckReason::Rank))
             }
         },
-        Expr::ExternCall { ext, args, .. } => {
-            let vals = eval_args(env, rank, ctx, frame, args, memo)?;
-            let decl = match get(&p.externs, ext.0) {
-                Some(d) => d,
-                None => { return Err(stuck(StuckReason::BadIndex)); },
-            };
-            match env.ext.call(*ext, vals.as_slice()) {
-                Ok(v) => {
-                    if value_has_type(p, &v, &decl.ret) {
-                        Ok(v)
-                    } else {
-                        Err(stuck(StuckReason::ExternResult))
-                    }
-                },
-                Err(ExternFail::Domain) => {
-                    if decl.domain_error {
-                        Err(EvalError::ExternDomain)
-                    } else {
-                        Err(stuck(StuckReason::ExternDomainUndeclared))
-                    }
-                },
-            }
-        },
-        Expr::Binary { op, left, right } => {
-            match op {
-                BinOp::And => {
-                    let l = cond(eval_expr(env, rank, ctx, frame, left, memo)?)?;
-                    if !l {
-                        return Ok(Value::Bool(false));
-                    }
-                    let r = cond(eval_expr(env, rank, ctx, frame, right, memo)?)?;
-                    return Ok(Value::Bool(r));
-                },
-                BinOp::Or => {
-                    let l = cond(eval_expr(env, rank, ctx, frame, left, memo)?)?;
-                    if l {
-                        return Ok(Value::Bool(true));
-                    }
-                    let r = cond(eval_expr(env, rank, ctx, frame, right, memo)?)?;
-                    return Ok(Value::Bool(r));
-                },
-                _ => {},
-            }
-            let l = eval_expr(env, rank, ctx, frame, left, memo)?;
-            let r = eval_expr(env, rank, ctx, frame, right, memo)?;
-            binop(op, &l, &r)
-        },
+        Expr::ExternCall { ext, args, .. } => eval_extern_call(env, rank, ctx, frame, *ext, args, Ghost(*e), memo),
+        Expr::Binary { op, left, right } => eval_binary(env, rank, ctx, frame, op, left, right, Ghost(*e), memo),
         Expr::Unary { op, operand } => {
             let v = eval_expr(env, rank, ctx, frame, operand, memo)?;
             unop(op, &v)
@@ -204,95 +456,25 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
             let b = eval_expr(env, rank, ctx, frame, base, memo)?;
             field(sel, &b)
         },
-        Expr::Index { array, index } => {
-            let a = eval_expr(env, rank, ctx, frame, array, memo)?;
-            let i = eval_expr(env, rank, ctx, frame, index, memo)?;
-            match (a, i) {
-                (Value::Array(vs), Value::I32(i)) => {
-                    if i < 0 {
-                        return Err(EvalError::OutOfBounds);
-                    }
-                    read_buf(&vs, i as usize)
-                },
-                _ => Err(shape()),
-            }
-        },
-        Expr::MakeVec3 { x, y, z } => {
-            let a = eval_expr(env, rank, ctx, frame, x, memo)?;
-            let b = eval_expr(env, rank, ctx, frame, y, memo)?;
-            let c = eval_expr(env, rank, ctx, frame, z, memo)?;
-            match (a, b, c) {
-                (Value::F64(a), Value::F64(b), Value::F64(c)) => Ok(Value::Vec3(F64x3 { x: a, y: b, z: c })),
-                _ => Err(shape()),
-            }
-        },
-        Expr::MakePos3 { x, y, z } => {
-            let a = eval_expr(env, rank, ctx, frame, x, memo)?;
-            let b = eval_expr(env, rank, ctx, frame, y, memo)?;
-            let c = eval_expr(env, rank, ctx, frame, z, memo)?;
-            match (a, b, c) {
-                (Value::I32(a), Value::I32(b), Value::I32(c)) => Ok(Value::Pos3(I32x3 { x: a, y: b, z: c })),
-                _ => Err(shape()),
-            }
-        },
+        Expr::Index { array, index } => eval_index(env, rank, ctx, frame, array, index, Ghost(*e), memo),
+        Expr::MakeVec3 { x, y, z } => eval_make_vec3(env, rank, ctx, frame, x, y, z, Ghost(*e), memo),
+        Expr::MakePos3 { x, y, z } => eval_make_pos3(env, rank, ctx, frame, x, y, z, Ghost(*e), memo),
         Expr::MakeRecord { record, fields } => {
             let decl = match get(&p.records, record.0) {
                 Some(d) => d,
                 None => { return Err(stuck(StuckReason::BadIndex)); },
             };
-            let n = decl.fields.len();
-            let mut slots: Vec<Option<Value>> = Vec::new();
-            let mut k: usize = 0;
-            while k < n
-                invariant
-                    k <= n,
-                decreases n - k,
-            {
-                slots.push(None);
-                k = k + 1;
-            }
-            let mut i: usize = 0;
-            while i < fields.len()
-                invariant
-                    i <= fields.len(),
-                decreases fields.len() - i,
-            {
-                let v = eval_expr(env, rank, ctx, frame, &fields[i].value, memo)?;
-                let f = fields[i].field;
-                match get(&slots, f) {
-                    Some(None) => {},
-                    Some(Some(_)) => { return Err(shape()); },
-                    None => { return Err(stuck(StuckReason::BadIndex)); },
-                }
-                set(&mut slots, f, Some(v));
-                i = i + 1;
-            }
-            let mut vals: Vec<Value> = Vec::new();
-            let mut k: usize = 0;
-            while k < slots.len()
-                invariant
-                    k <= slots.len(),
-                decreases slots.len() - k,
-            {
-                match &slots[k] {
-                    Some(v) => vals.push(clone_value(v)),
-                    None => { return Err(shape()); },
-                }
-                k = k + 1;
+            let slots = eval_fields(env, rank, ctx, frame, fields, empty_slots(decl.fields.len()), memo)?;
+            let vals = collect_slots(&slots)?;
+            proof {
+                lemma_view_record(*record, vals);
             }
             Ok(Value::Record(*record, vals))
         },
         Expr::ArrayLit(es) => {
-            let mut vals: Vec<Value> = Vec::new();
-            let mut i: usize = 0;
-            while i < es.len()
-                invariant
-                    i <= es.len(),
-                decreases es.len() - i,
-            {
-                let v = eval_expr(env, rank, ctx, frame, &es[i], memo)?;
-                vals.push(v);
-                i = i + 1;
+            let vals = eval_args(env, rank, ctx, frame, es, memo)?;
+            proof {
+                lemma_view_array(vals);
             }
             Ok(Value::Array(vals))
         },
@@ -303,14 +485,20 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
     }
 }
 
-fn cond(v: Value) -> Result<bool, EvalError> {
+fn cond(v: Value) -> (r: Result<bool, EvalError>)
+    ensures
+        r == spec_cond(view_value(v)),
+{
     match v {
         Value::Bool(b) => Ok(b),
         _ => Err(shape()),
     }
 }
 
-fn axis_f64(a: &Axis, v: &F64x3) -> u64 {
+fn axis_f64(a: &Axis, v: &F64x3) -> (r: u64)
+    ensures
+        r == spec_axis_f64(*a, *v),
+{
     match a {
         Axis::X => v.x,
         Axis::Y => v.y,
@@ -318,7 +506,10 @@ fn axis_f64(a: &Axis, v: &F64x3) -> u64 {
     }
 }
 
-fn axis_i32(a: &Axis, v: &I32x3) -> i32 {
+fn axis_i32(a: &Axis, v: &I32x3) -> (r: i32)
+    ensures
+        r == spec_axis_i32(*a, *v),
+{
     match a {
         Axis::X => v.x,
         Axis::Y => v.y,
@@ -326,16 +517,27 @@ fn axis_i32(a: &Axis, v: &I32x3) -> i32 {
     }
 }
 
-pub fn field(sel: &FieldSel, b: &Value) -> Result<Value, EvalError> {
+pub fn field(sel: &FieldSel, b: &Value) -> (out: Result<Value, EvalError>)
+    ensures
+        view_result(out) == spec_field(*sel, view_value(*b)),
+{
     match (sel, b) {
         (FieldSel::Vec3(a), Value::Vec3(v)) => Ok(Value::F64(axis_f64(a, v))),
         (FieldSel::Pos3(a), Value::Pos3(v)) => Ok(Value::I32(axis_i32(a, v))),
         (FieldSel::Record(r, i), Value::Record(s, vs)) => {
+            proof {
+                lemma_view_record(*s, *vs);
+            }
             if r.0 != s.0 {
                 return Err(shape());
             }
             match get(vs, *i) {
-                Some(v) => Ok(clone_value(v)),
+                Some(v) => {
+                    proof {
+                        assert(view_values(vs@)[*i as int] == view_value(vs@[*i as int]));
+                    }
+                    Ok(clone_value(v))
+                },
                 None => Err(stuck(StuckReason::BadIndex)),
             }
         },
@@ -347,7 +549,10 @@ pub fn field(sel: &FieldSel, b: &Value) -> Result<Value, EvalError> {
 // Operators
 // ---------------------------------------------------------------------------------------------
 
-fn i32_op(op: &BinOp, a: i32, b: i32) -> Result<Value, EvalError> {
+fn i32_op(op: &BinOp, a: i32, b: i32) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_i32_op(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(Value::I32(prim::i32_add(a, b))),
         BinOp::Subtract => Ok(Value::I32(prim::i32_sub(a, b))),
@@ -362,14 +567,15 @@ fn i32_op(op: &BinOp, a: i32, b: i32) -> Result<Value, EvalError> {
         BinOp::BitAnd => Ok(Value::I32(prim::i32_and(a, b))),
         BinOp::BitOr => Ok(Value::I32(prim::i32_or(a, b))),
         BinOp::BitXor => Ok(Value::I32(prim::i32_xor(a, b))),
-        BinOp::ShiftLeft => Ok(Value::I32(prim::i32_shl(a, b))),
-        BinOp::ShiftRight => Ok(Value::I32(prim::i32_shr(a, b))),
-        BinOp::LogicalShiftRight => Ok(Value::I32(prim::i32_ushr(a, b))),
-        BinOp::And | BinOp::Or => Err(shape()),
+        // Shifts take an `I32` right operand; see `shift`.
+        _ => Err(shape()),
     }
 }
 
-fn i64_op(op: &BinOp, a: i64, b: i64) -> Result<Value, EvalError> {
+fn i64_op(op: &BinOp, a: i64, b: i64) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_i64_op(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(Value::I64(prim::i64_add(a, b))),
         BinOp::Subtract => Ok(Value::I64(prim::i64_sub(a, b))),
@@ -389,7 +595,10 @@ fn i64_op(op: &BinOp, a: i64, b: i64) -> Result<Value, EvalError> {
     }
 }
 
-fn i8_op(op: &BinOp, a: i8, b: i8) -> Result<Value, EvalError> {
+fn i8_op(op: &BinOp, a: i8, b: i8) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_i8_op(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(Value::I8(prim::i8_add(a, b))),
         BinOp::Subtract => Ok(Value::I8(prim::i8_sub(a, b))),
@@ -408,7 +617,10 @@ fn i8_op(op: &BinOp, a: i8, b: i8) -> Result<Value, EvalError> {
     }
 }
 
-fn is_shift(op: &BinOp) -> bool {
+fn is_shift(op: &BinOp) -> (r: bool)
+    ensures
+        r == spec_is_shift(*op),
+{
     match op {
         BinOp::ShiftLeft | BinOp::ShiftRight | BinOp::LogicalShiftRight => true,
         _ => false,
@@ -416,7 +628,10 @@ fn is_shift(op: &BinOp) -> bool {
 }
 
 /// An integer left operand shifted by an `I32`.
-fn shift(op: &BinOp, l: &Value, s: i32) -> Result<Value, EvalError> {
+fn shift(op: &BinOp, l: &Value, s: i32) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_shift(*op, view_value(*l), s),
+{
     match (op, l) {
         (BinOp::ShiftLeft, Value::I8(a)) => Ok(Value::I8(prim::i8_shl(*a, s))),
         (BinOp::ShiftRight, Value::I8(a)) => Ok(Value::I8(prim::i8_shr(*a, s))),
@@ -431,7 +646,10 @@ fn shift(op: &BinOp, l: &Value, s: i32) -> Result<Value, EvalError> {
     }
 }
 
-fn f32_op(op: &BinOp, a: u32, b: u32) -> Result<Value, EvalError> {
+fn f32_op(op: &BinOp, a: u32, b: u32) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_f32_op(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(Value::F32(prim::f32_add(a, b))),
         BinOp::Subtract => Ok(Value::F32(prim::f32_sub(a, b))),
@@ -447,7 +665,10 @@ fn f32_op(op: &BinOp, a: u32, b: u32) -> Result<Value, EvalError> {
     }
 }
 
-fn f64_op(op: &BinOp, a: u64, b: u64) -> Result<Value, EvalError> {
+fn f64_op(op: &BinOp, a: u64, b: u64) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_f64_op(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(Value::F64(prim::f64_add(a, b))),
         BinOp::Subtract => Ok(Value::F64(prim::f64_sub(a, b))),
@@ -463,7 +684,10 @@ fn f64_op(op: &BinOp, a: u64, b: u64) -> Result<Value, EvalError> {
     }
 }
 
-fn bool_op(op: &BinOp, a: bool, b: bool) -> Result<Value, EvalError> {
+fn bool_op(op: &BinOp, a: bool, b: bool) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_bool_op(*op, a, b),
+{
     match op {
         BinOp::Equal => Ok(Value::Bool(a == b)),
         BinOp::NotEqual => Ok(Value::Bool(a != b)),
@@ -475,7 +699,10 @@ fn bool_op(op: &BinOp, a: bool, b: bool) -> Result<Value, EvalError> {
 }
 
 /// `+ - * /` on one f64 component (vector ops).
-fn f64_arith(op: &BinOp, a: u64, b: u64) -> Result<u64, EvalError> {
+fn f64_arith(op: &BinOp, a: u64, b: u64) -> (r: Result<u64, EvalError>)
+    ensures
+        r == spec_f64_arith(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(prim::f64_add(a, b)),
         BinOp::Subtract => Ok(prim::f64_sub(a, b)),
@@ -485,7 +712,10 @@ fn f64_arith(op: &BinOp, a: u64, b: u64) -> Result<u64, EvalError> {
     }
 }
 
-fn i32_arith(op: &BinOp, a: i32, b: i32) -> Result<i32, EvalError> {
+fn i32_arith(op: &BinOp, a: i32, b: i32) -> (r: Result<i32, EvalError>)
+    ensures
+        r == spec_i32_arith(*op, a, b),
+{
     match op {
         BinOp::Add => Ok(prim::i32_add(a, b)),
         BinOp::Subtract => Ok(prim::i32_sub(a, b)),
@@ -496,22 +726,34 @@ fn i32_arith(op: &BinOp, a: i32, b: i32) -> Result<i32, EvalError> {
 }
 
 /// An `i32` component converted to f64 exactly.
-fn i2d(x: i32) -> u64 {
+fn i2d(x: i32) -> (r: u64)
+    ensures
+        r == spec_i2d(x),
+{
     prim::i64_to_f64(prim::i32_to_i64(x))
 }
 
-fn vec3_op(op: &BinOp, a: &F64x3, b: &F64x3) -> Result<Value, EvalError> {
+fn vec3_op(op: &BinOp, a: &F64x3, b: &F64x3) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_vec3_op(*op, *a, *b),
+{
     let x = f64_arith(op, a.x, b.x)?;
     let y = f64_arith(op, a.y, b.y)?;
     let z = f64_arith(op, a.z, b.z)?;
     Ok(Value::Vec3(F64x3 { x, y, z }))
 }
 
-fn pos_to_vec(a: &I32x3) -> F64x3 {
+fn pos_to_vec(a: &I32x3) -> (r: F64x3)
+    ensures
+        r == spec_pos_to_vec(*a),
+{
     F64x3 { x: i2d(a.x), y: i2d(a.y), z: i2d(a.z) }
 }
 
-pub fn binop(op: &BinOp, l: &Value, r: &Value) -> Result<Value, EvalError> {
+pub fn binop(op: &BinOp, l: &Value, r: &Value) -> (out: Result<Value, EvalError>)
+    ensures
+        view_result(out) == spec_binop(*op, view_value(*l), view_value(*r)),
+{
     if is_shift(op) {
         return match r {
             Value::I32(s) => shift(op, l, *s),
@@ -539,7 +781,10 @@ pub fn binop(op: &BinOp, l: &Value, r: &Value) -> Result<Value, EvalError> {
     }
 }
 
-pub fn unop(op: &UnOp, v: &Value) -> Result<Value, EvalError> {
+pub fn unop(op: &UnOp, v: &Value) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_unop(*op, view_value(*v)),
+{
     match (op, v) {
         (UnOp::Not, Value::Bool(b)) => Ok(Value::Bool(!*b)),
         (UnOp::Not, Value::I8(a)) => Ok(Value::I8(prim::i8_not(*a))),
@@ -557,7 +802,10 @@ pub fn unop(op: &UnOp, v: &Value) -> Result<Value, EvalError> {
 }
 
 /// An integer, carried as i64, to an integer or float type.
-fn from_int(to: &Type, x: i64) -> Result<Value, EvalError> {
+fn from_int(to: &Type, x: i64) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_from_int(*to, x),
+{
     match to {
         Type::I8 => Ok(Value::I8(prim::i64_to_i8(x))),
         Type::I32 => Ok(Value::I32(prim::i64_to_i32(x))),
@@ -568,7 +816,10 @@ fn from_int(to: &Type, x: i64) -> Result<Value, EvalError> {
     }
 }
 
-pub fn cast(to: &Type, v: &Value) -> Result<Value, EvalError> {
+pub fn cast(to: &Type, v: &Value) -> (r: Result<Value, EvalError>)
+    ensures
+        view_result(r) == spec_cast(*to, view_value(*v)),
+{
     match v {
         Value::I8(a) => from_int(to, prim::i8_to_i64(*a)),
         Value::I32(a) => from_int(to, prim::i32_to_i64(*a)),

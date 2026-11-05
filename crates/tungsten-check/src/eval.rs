@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use tungsten_core::check::{CaseErrors, check, check_case};
-use tungsten_core::exec::{CaseResult, Failure, eval_program, new_memo};
+use tungsten_core::exec::{CaseResult, Failure, eval_program};
 use tungsten_core::{Case, EvalError, ExternId, Externs, F64x3, HostId, Program, StuckReason, Value};
 use tungsten_ir::OptimizedProgram;
 
@@ -159,8 +159,7 @@ impl Prepared {
         opts: EvalOptions,
     ) -> Result<CaseResult, EvalFailure> {
         check_case(self.program(), case).map_err(EvalFailure::Case)?;
-        let mut memo = new_memo(self.program(), opts.memo);
-        let r = eval_program(self.program(), case, ext, opts.fuel, &mut memo);
+        let r = eval_program(self.program(), case, ext, opts.fuel, opts.memo);
         let mut reasons = vec![];
         for (e, cells) in r.entries.iter().enumerate() {
             for (k, c) in cells.iter().enumerate() {

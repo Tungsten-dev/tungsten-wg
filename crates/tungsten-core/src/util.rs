@@ -3,7 +3,7 @@
 //! Every id-based `Vec` read in `check/` and `exec/` goes through [`get`] (writes: [`set()`]). A miss
 //! is `Stuck(BadIndex)` in exec and an internal wf error in the checker. Loops over a node's own
 //! children index directly (`&v[i]` under `i < v.len()`), because the termination measure needs
-//! the element to be a known part of the node, which [`get`] (no `ensures`) can't tell Verus.
+//! the element to be a known part of the node, which going through [`get`] hides from Verus.
 //!
 //! The `clone_*` fns are what the `impl Clone` blocks at the bottom of `ir.rs` delegate to, so
 //! verified code never calls a fn Verus doesn't know.
@@ -16,7 +16,11 @@ verus! {
 
 broadcast use vstd::std_specs::vec::group_vec_axioms;
 
-pub fn get<T>(v: &Vec<T>, i: usize) -> Option<&T> {
+pub fn get<T>(v: &Vec<T>, i: usize) -> (r: Option<&T>)
+    ensures
+        i < v@.len() ==> r == Some(&v@[i as int]),
+        i >= v@.len() ==> r is None,
+{
     if i < v.len() {
         Some(&v[i])
     } else {
@@ -25,7 +29,12 @@ pub fn get<T>(v: &Vec<T>, i: usize) -> Option<&T> {
 }
 
 /// Replaces `v[i]` with `x`. Returns `false` (and drops `x`) if `i` is out of range.
-pub fn set<T>(v: &mut Vec<T>, i: usize, x: T) -> bool {
+pub fn set<T>(v: &mut Vec<T>, i: usize, x: T) -> (r: bool)
+    ensures
+        r == (i < old(v)@.len()),
+        r ==> final(v)@ == old(v)@.update(i as int, x),
+        !r ==> final(v)@ == old(v)@,
+{
     if i < v.len() {
         v.set(i, x);
         true
@@ -35,7 +44,10 @@ pub fn set<T>(v: &mut Vec<T>, i: usize, x: T) -> bool {
 }
 
 /// `v[i]` for a `Copy`-like `Option<usize>` table (ranks).
-pub fn get_rank(v: &Vec<Option<usize>>, i: usize) -> Option<usize> {
+pub fn get_rank(v: &Vec<Option<usize>>, i: usize) -> (r: Option<usize>)
+    ensures
+        r == crate::spec::eval::spec_rank(v@, i),
+{
     if i < v.len() {
         v[i]
     } else {
@@ -43,7 +55,11 @@ pub fn get_rank(v: &Vec<Option<usize>>, i: usize) -> Option<usize> {
     }
 }
 
-pub fn get_bool(v: &Vec<bool>, i: usize) -> bool {
+pub fn get_bool(v: &Vec<bool>, i: usize) -> (r: bool)
+    ensures
+        i < v@.len() ==> r == v@[i as int],
+        i >= v@.len() ==> !r,
+{
     if i < v.len() {
         v[i]
     } else {
@@ -127,11 +143,15 @@ pub fn contains_const(v: &Vec<ConstId>, x: ConstId) -> bool {
     false
 }
 
-pub fn contains_input(v: &Vec<InputId>, x: InputId) -> bool {
+pub fn contains_input(v: &Vec<InputId>, x: InputId) -> (r: bool)
+    ensures
+        r == v@.contains(x),
+{
     let mut i: usize = 0;
     while i < v.len()
         invariant
             i <= v.len(),
+            forall|j: int| 0 <= j < i ==> v@[j] != x,
         decreases v.len() - i,
     {
         if v[i].0 == x.0 {
@@ -143,12 +163,18 @@ pub fn contains_input(v: &Vec<InputId>, x: InputId) -> bool {
 }
 
 /// A `Vec<bool>` of length `n`, all `x`.
-pub fn bools(n: usize, x: bool) -> Vec<bool> {
+pub fn bools(n: usize, x: bool) -> (out: Vec<bool>)
+    ensures
+        out@.len() == n,
+        forall|j: int| 0 <= j < n ==> out@[j] == x,
+{
     let mut v: Vec<bool> = Vec::new();
     let mut i: usize = 0;
     while i < n
         invariant
             i <= n,
+            v@.len() == i,
+            forall|j: int| 0 <= j < i ==> v@[j] == x,
         decreases n - i,
     {
         v.push(x);
@@ -158,12 +184,18 @@ pub fn bools(n: usize, x: bool) -> Vec<bool> {
 }
 
 /// A `Vec<Option<usize>>` of length `n`, all `None`.
-pub fn nones(n: usize) -> Vec<Option<usize>> {
+pub fn nones(n: usize) -> (out: Vec<Option<usize>>)
+    ensures
+        out@.len() == n,
+        forall|j: int| 0 <= j < n ==> out@[j] is None,
+{
     let mut v: Vec<Option<usize>> = Vec::new();
     let mut i: usize = 0;
     while i < n
         invariant
             i <= n,
+            v@.len() == i,
+            forall|j: int| 0 <= j < i ==> v@[j] is None,
         decreases n - i,
     {
         v.push(None);
@@ -172,16 +204,24 @@ pub fn nones(n: usize) -> Vec<Option<usize>> {
     v
 }
 
-pub fn copy_bools(v: &Vec<bool>) -> Vec<bool> {
+pub fn copy_bools(v: &Vec<bool>) -> (out: Vec<bool>)
+    ensures
+        out@ == v@,
+{
     let mut out: Vec<bool> = Vec::new();
     let mut i: usize = 0;
     while i < v.len()
         invariant
             i <= v.len(),
+            out@.len() == i,
+            forall|j: int| 0 <= j < i ==> out@[j] == v@[j],
         decreases v.len() - i,
     {
         out.push(v[i]);
         i = i + 1;
+    }
+    proof {
+        assert(out@ =~= v@);
     }
     out
 }
@@ -200,7 +240,10 @@ pub fn copy_usizes(v: &Vec<usize>) -> Vec<usize> {
     out
 }
 
-pub fn add_or_max(a: usize, b: usize) -> usize {
+pub fn add_or_max(a: usize, b: usize) -> (r: usize)
+    ensures
+        r == crate::spec::ranks::spec_add_or_max(a, b),
+{
     match a.checked_add(b) {
         Some(s) => s,
         None => usize::MAX,
@@ -222,11 +265,17 @@ pub fn copy_lit(l: &Lit) -> Lit {
     }
 }
 
-pub fn copy_f64x3(v: &F64x3) -> F64x3 {
+pub fn copy_f64x3(v: &F64x3) -> (r: F64x3)
+    ensures
+        r == *v,
+{
     F64x3 { x: v.x, y: v.y, z: v.z }
 }
 
-pub fn copy_dims(d: &Dims) -> Dims {
+pub fn copy_dims(d: &Dims) -> (r: Dims)
+    ensures
+        r == *d,
+{
     Dims { x: d.x, y: d.y, z: d.z }
 }
 
@@ -289,7 +338,9 @@ pub fn copy_sel(s: &FieldSel) -> FieldSel {
 // Recursive clones and type equality
 // ---------------------------------------------------------------------------------------------
 
-pub fn clone_type(t: &Type) -> Type
+pub fn clone_type(t: &Type) -> (r: Type)
+    ensures
+        r == *t,
     decreases t,
 {
     match t {
@@ -323,7 +374,9 @@ pub fn clone_types(ts: &Vec<Type>) -> Vec<Type> {
 }
 
 /// Structural type equality.
-pub fn type_eq(a: &Type, b: &Type) -> bool
+pub fn type_eq(a: &Type, b: &Type) -> (r: bool)
+    ensures
+        r == (*a == *b),
     decreases a,
 {
     match (a, b) {

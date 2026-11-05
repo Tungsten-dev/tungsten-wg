@@ -10,7 +10,9 @@
 //! `spec fn`s.
 
 #![allow(unused_imports)]
-// `check/` and `exec/` are written in the style Verus verifies (and the later proofs need):
+// Parameters that only proofs read look unused once the ghost code is erased.
+#![cfg_attr(not(verus_keep_ghost), allow(unused_variables))]
+// `check/` and `exec/` are written in the style Verus verifies:
 // explicit loops and matches, `i = i + 1`, no `Option` combinators or closures.
 #![allow(
     clippy::assign_op_pattern,
@@ -43,7 +45,9 @@
     clippy::implicit_saturating_add,
     // `&Vec` (not `&[_]`): the termination measures use vstd's `Vec` index axioms.
     clippy::ptr_arg,
-    clippy::single_match
+    clippy::single_match,
+    // The arm functions take the `&Box<Expr>` the `match` on `Expr` binds.
+    clippy::borrowed_box
 )]
 // The derived `Clone`s have no spec; nothing in the spec uses them.
 #![cfg_attr(verus_keep_ghost, verifier::allow(autoderive_clone_without_spec))]
@@ -55,7 +59,10 @@ pub mod exec;
 pub mod ir;
 pub mod layout;
 pub mod prim;
+pub mod prim_float;
+pub mod proofs;
 pub mod registry;
+pub mod spec;
 pub mod util;
 pub mod value;
 pub mod wf;

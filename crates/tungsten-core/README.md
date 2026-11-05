@@ -10,9 +10,8 @@ Tungsten programs have a rich representation (`tungsten-ir`'s `OptimizedProgram`
 built for compiling: generational `Ref`s, arenas, names everywhere, convenience variants such
 as `ConstructExtern`, and annotations the backends rely on.
 
-That representation is awkward to *reason about*. The long-term plan is to write a checker
-(and later an interpreter) and **prove** things about them with
-[Verus](https://github.com/verus-lang/verus). Proofs get harder with every enum variant, every
+That representation is awkward to *reason about*, and the checker and interpreter here are
+**proven** correct with [Verus](https://github.com/verus-lang/verus). Proofs get harder with every enum variant, every
 string and every float. So this crate defines a second, much plainer form of the same program:
 the **core IR**.
 
@@ -21,12 +20,12 @@ You never write the core IR by hand. `tungsten-check` produces it from an `Optim
 
 1. the data types (`ir.rs`, `registry.rs`, `value.rs`),
 2. a definition of what "well-formed" means for them (`wf.rs`),
-3. the executable **checker** (`check/`) and **interpreter** (`exec/`), and
-4. the trusted primitives they call (`prim.rs`).
+3. the executable **checker** (`check/`) and **interpreter** (`exec/`),
+4. the primitives they call (`prim.rs`, and the trusted `prim_float.rs`), and
+5. the semantics (`spec/`) and the proofs (`proofs/`).
 
-In this phase there are no functional proofs: Verus proves bounds, absence of overflow and
-termination of every exec fn. The code is shaped so the proof phase only *adds* `spec fn`s,
-`ensures`, invariants and lemmas.
+Verus proves that the interpreter computes the semantics, that a program the checker accepts never
+gets `Stuck`, and more: [VERUS.md](VERUS.md) §1 has the theorems and exactly what they trust.
 
 ```
 OptimizedProgram ──(tungsten-check::lower)──▶ core_ir::Program ──▶ check::check ──▶ exec::eval_program
@@ -51,7 +50,10 @@ OptimizedProgram ──(tungsten-check::lower)──▶ core_ir::Program ──�
 | `src/wf.rs` | `spec fn wf_program` and its helpers: "every id points at something that exists" | You want to know what a lowered program is guaranteed to satisfy |
 | `src/value.rs` | `Value`, `EvalError`, `StuckReason`, `Case`, `trait Externs`, `value_has_type` | You evaluate programs or write an `Externs` |
 | `src/util.rs` | `get`/`set` (bounds-checked `Vec` access), small copies, `clone_*` for the recursive types, `type_eq` | You write exec code here |
-| `src/prim.rs` | Trusted int/float/cast primitives on bits (Java semantics). The only `external_body` file | You want the exact semantics of an operator or cast |
+| `src/prim.rs` | Verified integer primitives, negation and float-to-`i8` (Java semantics) | You want the exact semantics of an operator or cast |
+| `src/prim_float.rs` | The 22 trusted float primitives on bits. The only `external_body` file | You want to audit what is trusted |
+| `src/spec/` | The semantics as `spec fn`s: `eval.rs`, `ops.rs`, `prim.rs`, `layout.rs`, `value.rs`, plus `ranks.rs` and `typing.rs` | You want the definition of what a program means. This is what to audit |
+| `src/proofs/` | Lemmas and theorems: `fuel.rs`, `layout.rs`, `ranks.rs`, `typing.rs`, `soundness.rs`, `value.rs` | You change a spec or a theorem |
 | `src/layout.rs` | `len`, `flat`, `decode` (x fastest), overflow-checked | Grid indexing |
 | `src/check/` | `check(p)`, `check_case(p, case)`: `wf.rs` (exec twin of `crate::wf`), `types.rs`, `flow.rs`, `scope.rs`, `acyclic.rs` (ranks, cycles), `error.rs` | You want to know what the checker accepts |
 | `src/exec/` | `eval_program`, `Memo`, `CaseResult`: `unit.rs` (entries, inputs, cells, consts), `stmt.rs` (calls, loops), `expr.rs` (expressions, density reads, operators) | You want to know what a program computes |
@@ -191,9 +193,7 @@ recursive itself; it quantifies over the recursive `wf_stmt`, so no recursion mi
 datatype measures.
 
 `tungsten-check` promises that every program it returns satisfies `wf_program`. Since you can't
-run a `spec fn`, its tests use a hand-written plain-Rust copy instead
-(`crates/tungsten-check/src/tests/wf_mirror.rs`). **If you change `wf.rs`, change the mirror
-too.**
+run a `spec fn`, its tests check `check_wf`, which Verus proves agrees with it.
 
 ### Reading Verus syntax
 
@@ -213,11 +213,13 @@ Quick decoder for the bits that aren't ordinary Rust:
 
 - `cargo build` / `cargo test`: normal Rust. Verus isn't needed; the ghost code is erased.
 - `scripts/verify.sh` (from the repo root): actually runs Verus on this crate. It downloads a
-  pinned Verus into `target/`, checks the `vstd` pin matches, and **refuses** `admit(`,
-  `assume(`, `external_body` or `#[verifier::external]` in this crate, so nothing can be
-  "trusted without proof". If the bundled z3 won't start (it needs glibc 2.38), set
+  pinned Verus into `target/`, checks the `vstd` pin matches, and **refuses** `admit(`, `assume(`,
+  `external_body` and similar outside `prim_float.rs`, so nothing can be "trusted without proof".
+  If the bundled z3 won't start (it needs glibc 2.38), set
   `VERUS_Z3_PATH` to a Z3 4.16.0 binary. Verus rejects any other Z3 version unless you pass
   `-- -V no-solver-version-check`.
+- `scripts/verify-negative.sh`: applies deliberate faults and requires verification to fail. Run it
+  by hand after changing specs or proofs. It takes a few minutes.
 - Pins: `VERUS_TAG = 0.2026.10.26.d17fbd0` goes with `vstd =0.0.0-2026-10-25-0158` and Rust
   1.99.1 (installed by the script, selected through `RUSTUP_TOOLCHAIN`). The pairing comes from
   Verus's own `source/cargo-verus/toolchain-manifests/<tag>.toml`. Bump them together; the
@@ -228,29 +230,9 @@ Quick decoder for the bits that aren't ordinary Rust:
   different types in different variants. They only disable `->field` syntax.
   `autoderive_clone_without_spec` is silenced in `lib.rs`.
 
-### Verus rules for this phase
+### Verus rules
 
-1. `scripts/verify.sh` passes: Verus proves bounds, absence of overflow and termination. Exec
-   fns have no functional `ensures`.
-2. Exec fns are allowed inside `verus!{}`. Loop invariants are for safety only (bounds, no
-   overflow). Lemmas, `ensures`, `assume`, `admit`, and `external_body` outside `prim.rs` are
-   forbidden. `verify.sh`'s grep guard enforces the last part (it exempts `prim.rs`).
-   A `requires` that only rules out overflow is fine.
-3. Every exec fn that will get a spec has the spec's name and arguments, plus `memo: &mut Memo`
-   where it needs one. Loops (`While`, `Repeat`) are Rust loops, documented as such.
-4. Functional style: no closures, iterators, `HashMap`, fn pointers or generics apart from
-   `E: Externs`.
-5. Every id-based `Vec` read goes through `util::get` / `get_mut`; a miss is `Stuck(BadIndex)`
-   in exec and a wf error in the checker. Loops over a node's own children index directly
-   under `i < len`, because `get` (no `ensures`) would hide from Verus that the element is part
-   of the node. Index arithmetic is checked.
-6. Every program-level integer op, float op, float comparison and cast goes through `prim.rs`.
-7. Every recursive fn and every loop has a `decreases`. A loop whose body recurses into a child
-   needs `#[verifier::loop_isolation(false)]`, so the termination check sees that the child is
-   part of the fn's argument. A rank comparison must be inline (`if r < rank`), not hidden in a
-   helper fn: Verus only sees the decrease if the comparison is in the caller.
-8. Recursive types get `clone_*` exec fns with `decreases`; the `impl Clone`s outside
-   `verus!{}` delegate to them.
+The rules, and why each exists, are in [VERUS.md](VERUS.md) §4.
 
 ## When you change something
 
@@ -258,10 +240,12 @@ Quick decoder for the bits that aren't ordinary Rust:
   for a type), `wf.rs` and its exec twin `check/wf.rs`, typing (`check/types.rs`), flow
   (`check/flow.rs`), scoping (`check/scope.rs`), the rank edges (`check/acyclic.rs::refs_*`),
   exec (`exec/expr.rs` or `exec/stmt.rs`), the step order in `check/mod.rs::step_key` if it has
-  new children, the rendering in `tungsten-check/src/check.rs`, the mirror in `tungsten-check`'s
-  `wf_mirror.rs`, and the lowering in `tungsten-check/src/lower/`.
+  new children, the rendering in `tungsten-check/src/check.rs`, and the lowering in
+  `tungsten-check/src/lower/`. Then the specs that mirror them (`spec/eval.rs`, `spec/typing.rs`,
+  `spec/ranks.rs`) and the inductions over them (`proofs/fuel.rs`, `typing.rs`, `ranks.rs`,
+  `soundness.rs`). Verus will point at each.
 - **Adding a `Value` variant:** `clone_value`, `value_has_type`, and the operator/cast dispatch
-  in `exec/expr.rs`.
+  in `exec/expr.rs`, and `SValue`, `view_value` and `spec/ops.rs`.
 - **Adding a `CheckErrorKind`:** its `Clone` arm in `check/error.rs` and its message in
   `tungsten-check/src/check.rs`, plus a reject test in `tungsten-check/src/tests/check_errors.rs`.
 - **Adding a table to `Program`:** add a new id type, a `wf_*` clause in `wf_program` and
@@ -284,7 +268,7 @@ Each line gives the choice and the alternative that was rejected, so it doesn't 
 | Declaration tables | `externs`/`records` live in `Program`, so the checker needs only `&Program`. | A separate registry argument to the checker. |
 | Names | Only in plain-Rust side tables (`Registry`, `LowerMap`). | Names inside core types: Verus would see `String`. |
 | Derives | Derived `Clone`/`Debug`/`Eq`/… inside `verus!{}`, except a hand-written `Clone` for the recursive types (Verus rejects the derive as a possible cycle). | — |
-| No proofs yet | Bounds, overflow and termination only. `prim.rs` is the only trusted file. | `external_body` gaps elsewhere, or reshaping the IR around tooling. |
+| Trusted base | 22 float functions in `prim_float.rs`, counted by `verify.sh`. Integers are verified. | Uninterpreted integers: the theorems would hold for any integer semantics. `external_body` gaps elsewhere. |
 | Termination across calls | Per-item ranks from `acyclic::ranks`, checked at every call/read; measure `(rank, layer, structure)`. | A global depth counter: a memoized cell computed deep and reused shallow would disagree with the unmemoized spec. |
 | Fuel | Per `While` execution; `Repeat` is free. | A shared budget: the memo could change results. |
 | Evaluation | Eager consts (global) and eager input buffers (per unit context), memoized per id; per-cell results; canonical error choice. | Lazy pointwise reads: a backend computes every scheduled input, so an unread failing cell would be a backend failure with an interpreter `Ok`. |
@@ -294,14 +278,7 @@ Each line gives the choice and the alternative that was rejected, so it doesn't 
 | Re-export | Reachable as `tungsten_check::core_ir`. | As `core`: shadows `::core` in derive output. |
 | CI | Verus runs locally only. | Gating CI on it. |
 
-## What's coming later
-
-Later stages (see `TESTING.md`) add spec semantics (`spec/`), `well_typed`, the `ensures` on
-`prim.rs` and the exec fns, and proofs (`proofs/`): refinement, type soundness (the checker's
-`Ok` implies the interpreter never gets stuck; tested now by mutation), fuel monotonicity per
-cell and memo soundness (both tested now), and the layout lemma.
-
-Open questions:
+## Open questions
 
 - Whether `CompileError` should become `#[non_exhaustive]`, since `Invalid` is feature-gated.
 - Core IR snapshots (TESTING.md L2), deferred to the testsuite.

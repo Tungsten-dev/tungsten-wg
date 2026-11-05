@@ -1,4 +1,5 @@
-//! "No Stuck" (a stand-in for the later type-soundness proof): checker-accepted programs are
+//! "No Stuck": proven in `tungsten-core` (T4), and run here as an integration check of what the
+//! proof trusts, the primitives and externs, on the lowering's output. Checker-accepted programs are
 //! mutated at random on the core IR (literals, operators, local and const ids, statements,
 //! types). Those the checker still accepts are evaluated on random cases with toy externs that
 //! respect their decls, and no result may contain `Stuck`.
@@ -7,7 +8,7 @@
 
 use proptest::prelude::*;
 use tungsten_core::check::{check, check_case};
-use tungsten_core::exec::{CaseResult, Failure, eval_program, new_memo};
+use tungsten_core::exec::{CaseResult, Failure, eval_program};
 use tungsten_core::*;
 use tungsten_core::Function;
 
@@ -338,8 +339,7 @@ pub fn rand_case(p: &Program, rng: &mut Rng) -> Case {
 }
 
 pub fn eval(p: &Program, case: &Case, fuel: u64, memo: bool) -> CaseResult {
-    let mut m = new_memo(p, memo);
-    eval_program(p, case, &DeclExterns(p), fuel, &mut m)
+    eval_program(p, case, &DeclExterns(p), fuel, memo)
 }
 
 pub fn has_stuck(r: &CaseResult) -> bool {
