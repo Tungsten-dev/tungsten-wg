@@ -537,27 +537,20 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         });
         units.push(u);
     }
-    let all_vars: Vec<Ref<Var>> = p
-        .functions
-        .values()
-        .flat_map(|f| f.variables.iter().map(|(r, _)| r))
-        .collect();
     let mut inputs = vec![];
-    if !all_vars.is_empty() {
-        for &u in &units {
-            let mut arena = Arena::new();
-            for _ in 0..rng.below(3) {
-                inputs.push(arena.insert(DensityInput {
-                    var: *rng.pick(&all_vars),
-                    density_function: *rng.pick(&units),
-                    scaled_origin: (f64_edge(rng), 1.0, -2.5),
-                    scaled_position: (0.5, f64_edge(rng), 1.0),
-                    dimensions: (rng.below(5) as i32 - 1, 4, 16),
-                }));
-            }
-            let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[u];
-            *density_inputs = arena;
+    for &u in &units {
+        let mut arena = Arena::new();
+        for _ in 0..rng.below(3) {
+            inputs.push(arena.insert(DensityInput {
+                name: var_name(rng),
+                density_function: *rng.pick(&units),
+                scaled_origin: (f64_edge(rng), 1.0, -2.5),
+                scaled_position: (0.5, f64_edge(rng), 1.0),
+                dimensions: (rng.below(5) as i32 - 1, 4, 16),
+            }));
         }
+        let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[u];
+        *density_inputs = arena;
     }
 
     // bodies

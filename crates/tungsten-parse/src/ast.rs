@@ -166,8 +166,6 @@ pub struct InputItem {
     pub label: Label,
     pub target: Label,
     pub grid: GridAttrs,
-    /// `@var(f.v)`
-    pub var: Option<(Label, Label)>,
 }
 
 #[derive(Debug, Clone)]

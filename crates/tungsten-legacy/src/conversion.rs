@@ -374,9 +374,12 @@ impl<'m> Converter<'m> {
             const_refs.push(r);
         }
 
-        // 3. Declared variables.
+        // 3. Declared variables. Density-input vars only name their input (step 5).
         for v in &df.variables {
-            if !scope.is_read_only(v) && !is_ambient_var(v) {
+            if !scope.is_read_only(v)
+                && !is_ambient_var(v)
+                && v.t != old::VariableType::DensityInput
+            {
                 declare_var(&mut scope, *v);
             }
         }
@@ -465,7 +468,7 @@ impl<'m> Converter<'m> {
             parameters.push(declare_var(&mut scope, *p));
         }
         for v in &f.variables {
-            if !is_ambient_var(v) {
+            if !is_ambient_var(v) && v.t != old::VariableType::DensityInput {
                 declare_var(&mut scope, *v);
             }
         }
@@ -577,9 +580,8 @@ impl<'m> Converter<'m> {
         }
 
         let target = self.density_function(di.density_function)?;
-        let var = declare_var(scope, di.var);
         let r = scope.density_inputs.insert(new::DensityInput {
-            var,
+            name: di.var.name.clone(),
             density_function: target,
             scaled_origin: di.scaled_origin,
             scaled_position: di.scaled_position,

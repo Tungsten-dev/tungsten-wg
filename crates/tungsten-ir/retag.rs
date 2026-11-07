@@ -194,7 +194,6 @@ fn walk_compute_unit(cu: &mut ComputeUnit, v: &mut impl RefVisitor) {
     } = cu;
     v.function(function);
     for input in density_inputs.values_mut() {
-        v.var(&mut input.var);
         v.compute_unit(&mut input.density_function);
     }
     permutation_table_inputs.iter_mut().for_each(|r| v.table(r));
@@ -417,11 +416,10 @@ mod tests {
         });
 
         let mut root_fn = function("root");
-        let input_var = var(&mut root_fn, "in0", VariableType::DensityInput);
         let x = var(&mut root_fn, "x", VariableType::F64);
         let mut inputs = Arena::new();
         let input = inputs.insert(DensityInput {
-            var: input_var,
+            name: Name::Named("in0".into()),
             density_function: leaf,
             scaled_origin: (1.0, 1.0, 1.0),
             scaled_position: (1.0, 1.0, 1.0),

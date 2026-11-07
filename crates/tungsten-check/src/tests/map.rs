@@ -34,7 +34,6 @@ fn forward_then_reverse() {
         }
         assert_eq!(m.host_names.len(), pr.hosts.len());
         assert_eq!(m.table_idents.len(), pr.tables.len());
-        assert_eq!(m.input_vars.len(), pr.inputs.len());
         assert_eq!(m.externs.len(), pr.externs.len());
         assert_eq!(m.records.len(), pr.records.len());
         for (r, d) in m.records.iter().zip(&pr.records) {
@@ -72,7 +71,7 @@ fn names_and_side_data() {
     assert_eq!(m.extern_name(ExternId(0)), Some("sin"));
     assert_eq!(m.record_name(RecordId(0)), Some("Pair"));
     assert_eq!(m.field_name(RecordId(0), 1), Some("b"));
-    assert!(m.input_vars[0].is_some());
+    assert_eq!(m.inputs.name(tungsten_core::InputId(0)), Some("d"));
     let main = fn_id(&l, "top");
     let pr = m.functions.get(main).unwrap();
     let param = p.functions[pr].parameters[0];

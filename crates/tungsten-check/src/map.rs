@@ -123,8 +123,6 @@ pub struct LowerMap {
     /// By `TableId`: the table as written (`ident`, `subident`, `subident_index`).
     pub table_idents: Vec<PermutationTableInput>,
     pub inputs: IdMap<DensityInput, InputId>,
-    /// By `InputId`: `DensityInput.var`, if it resolves in the owner's main function.
-    pub input_vars: Vec<Option<Ref<Var>>>,
     /// By `FnId`: that function's locals.
     pub locals: Vec<IdMap<Var, LocalId>>,
     /// By `ExternId`.

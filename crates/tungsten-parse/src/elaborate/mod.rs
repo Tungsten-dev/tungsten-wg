@@ -550,10 +550,7 @@ impl<'a> Ctx<'a> {
     }
 
     fn declare_inputs(&mut self, u: &ast::UnitItem) -> R<()> {
-        let (unit, main) = {
-            let info = self.lookup_unit(&u.label)?;
-            (info.r, info.main)
-        };
+        let unit = self.lookup_unit(&u.label)?.r;
         for input in &u.inputs {
             if self.units[&u.label.key()]
                 .inputs
@@ -566,41 +563,10 @@ impl<'a> Ctx<'a> {
             }
             let target = self.lookup_unit(&input.target)?.r;
             let (dimensions, scaled_origin, scaled_position) = self.grid(&input.grid)?;
-            let var = match &input.var {
-                Some((f, v)) => {
-                    let f = self.lookup_fn(f)?;
-                    match self.fn_vars[&f].get(&v.key()) {
-                        Some(r) => *r,
-                        None => return err(v.span, format!("unknown variable `{}`", v.display())),
-                    }
-                }
-                None => {
-                    if self.fn_vars[&main].contains_key(&input.label.key()) {
-                        return err(
-                            input.label.span,
-                            format!(
-                                "the main function already has a variable `{}`; \
-                                 name it with `@var(f.v)` or rename the input",
-                                input.label.display()
-                            ),
-                        );
-                    }
-                    let v = self.prog.functions[main].variables.insert(Var {
-                        name: var_name(&input.label),
-                        t: VariableType::DensityInput,
-                    });
-                    self.fn_vars
-                        .get_mut(&main)
-                        .unwrap()
-                        .insert(input.label.key(), v);
-                    self.map.vars.insert((main, v), input.label.span);
-                    v
-                }
-            };
             let ComputeUnit::DensityFunction { density_inputs, .. } =
                 &mut self.prog.compute_units[unit];
             let d = density_inputs.insert(DensityInput {
-                var,
+                name: var_name(&input.label),
                 density_function: target,
                 scaled_origin,
                 scaled_position,

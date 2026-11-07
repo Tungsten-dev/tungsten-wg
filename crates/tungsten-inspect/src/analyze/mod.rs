@@ -313,31 +313,25 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Local input names: the variable's name, made unique within the unit in arena order.
+    /// Local input names: the input's name (`Anonymous` → `_t1`, `_t2` …), made unique within
+    /// the unit in arena order.
     fn name_inputs(&mut self) {
         for (cu_ref, cu) in self.program.compute_units.iter() {
-            let ComputeUnit::DensityFunction {
-                function,
-                density_inputs,
-                ..
-            } = cu;
+            let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
             let mut used = HashSet::new();
+            let mut anonymous = 0;
             for (r, input) in density_inputs.iter() {
-                let base = self.var_name_anywhere(input.var, *function);
+                let base = match &input.name {
+                    Name::Named(s) | Name::Prefixed(s) => s.clone(),
+                    Name::Anonymous => {
+                        anonymous += 1;
+                        format!("_t{anonymous}")
+                    }
+                };
                 let name = unique_suffix(&mut used, base);
                 self.inputs.insert(r, InputName { unit: cu_ref, name });
             }
         }
-    }
-
-    /// The name of `var`, looked up in `hint` first and then in every function (an inlined
-    /// unit's inputs keep pointing into the variables of the now-helper function).
-    fn var_name_anywhere(&self, var: Ref<Var>, hint: Ref<Function>) -> String {
-        std::iter::once(hint)
-            .chain(self.program.functions.iter().map(|(r, _)| r))
-            .find(|f| self.program.functions[*f].variables.contains(var))
-            .map(|f| self.var_names[&f][&var].clone())
-            .expect("density input variable is in no function")
     }
 
     fn find_indexed_inputs(&mut self) {

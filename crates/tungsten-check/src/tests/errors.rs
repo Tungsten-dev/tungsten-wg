@@ -158,7 +158,7 @@ fn hand_built() {
     let leaf = p.functions.insert(function("leaf", &[], &[], VariableType::F64, |_| vec![]));
     let leaf_u = p.compute_units.insert(unit(leaf));
     let din = inputs.insert(DensityInput {
-        var: foreign_var,
+        name: Name::Anonymous,
         density_function: leaf_u,
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
@@ -178,9 +178,10 @@ fn hand_built() {
         errs(&p, &registry()),
         [
             "fn `f` › param 1: parameter not in the function's variables",
+            // No placeholder vars any more: a `density` local is rejected where it's declared.
+            "fn `f` › local 1: `density` can't be used as a value type",
             "fn `f` › stmt 0: dangling reference to a variable",
             "fn `f` › stmt 0 › value: dangling reference to a variable",
-            "fn `f` › stmt 1 › value: `density` can't be used as a value type",
             "fn `f` › stmt 2 › value: dangling reference to a density input",
             "entry 0 › unit: dangling reference to a compute unit",
         ]
@@ -239,9 +240,8 @@ fn dangling_input_source_and_main() {
     p.compute_units.remove(gone);
     let mut u = unit(main);
     let ComputeUnit::DensityFunction { density_inputs, .. } = &mut u;
-    let var_owner = function("x", &[("d", VariableType::DensityInput)], &[], VariableType::F64, |_| vec![]);
     density_inputs.insert(DensityInput {
-        var: var_owner.variables.iter().next().unwrap().0,
+        name: Name::Anonymous,
         density_function: gone,
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),

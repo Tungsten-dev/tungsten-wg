@@ -108,20 +108,13 @@ fn build_ids(p: &OptimizedProgram) -> LowerMap {
         m.table_idents.push(t.clone());
     }
     for (_, u) in p.compute_units.iter() {
-        let ComputeUnit::DensityFunction {
-            function,
-            density_inputs,
-            ..
-        } = u;
-        let main = get(&p.functions, *function);
+        let ComputeUnit::DensityFunction { density_inputs, .. } = u;
         for (r, d) in density_inputs.iter() {
             let i = m.inputs.len();
-            let var = main.and_then(|f| get(&f.variables, d.var).map(|v| (d.var, v)));
-            let name = var
-                .and_then(|(_, v)| name_str(&v.name).map(str::to_string))
+            let name = name_str(&d.name)
+                .map(str::to_string)
                 .unwrap_or_else(|| format!("#{i}"));
             m.inputs.push(r, name);
-            m.input_vars.push(var.map(|(r, _)| r));
         }
     }
     m
@@ -261,8 +254,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
         }
         let params = types.len();
         for (r, v) in f.variables.iter() {
-            // Density-input vars are `DensityInput.var` placeholders; backends skip them too.
-            if seen.contains(&r) || v.t == VariableType::DensityInput {
+            if seen.contains(&r) {
                 continue;
             }
             self.path = vec![Step::Local(types.len())];

@@ -380,7 +380,7 @@ pub enum ComputeUnit {
 }
 #[derive(PartialEq, Debug, Clone)]
 pub struct DensityInput {
-    pub var: Ref<Var>,
+    pub name: Name,
     pub density_function: Ref<ComputeUnit>,
     pub scaled_origin: (f64, f64, f64),
     pub scaled_position: (f64, f64, f64),

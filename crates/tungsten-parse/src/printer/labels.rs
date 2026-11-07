@@ -76,7 +76,7 @@ macro_rules! accessors {
 }
 
 impl Labels {
-    /// Panics (naming the entity) if a `DensityInput.var` or an entry's unit doesn't resolve.
+    /// Panics (naming the entity) if an entry's unit doesn't resolve.
     pub fn new(p: &OptimizedProgram) -> Labels {
         let mut l = Labels::default();
 
@@ -121,13 +121,9 @@ impl Labels {
             l.tables.insert(r, format!("t{i}"));
         }
 
-        let mut var_names: HashMap<Ref<Var>, Name> = HashMap::new();
         for (f, func) in p.functions.iter() {
             for (r, s) in name_labels(func.variables.iter().map(|(r, v)| (r, Some(&v.name)))) {
                 l.vars.insert((f, r), s);
-            }
-            for (r, v) in func.variables.iter() {
-                var_names.insert(r, v.name.clone());
             }
         }
 
@@ -150,29 +146,10 @@ impl Labels {
             l.units.insert(r, s);
         }
 
-        // inputs: per unit
+        // inputs: per unit, by the host rule
         for (_, u) in p.compute_units.iter() {
             let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-            let bases: Vec<Option<String>> = density_inputs
-                .values()
-                .map(|d| {
-                    let name = var_names.get(&d.var).unwrap_or_else(|| {
-                        panic!("DensityInput.var refers to a variable that is in no function")
-                    });
-                    match name {
-                        Name::Named(s) | Name::Prefixed(s) => {
-                            (plain(s) && !is_numbered(s, 'd')).then(|| s.clone())
-                        }
-                        Name::Anonymous => None,
-                    }
-                })
-                .collect();
-            let bc = count(bases.iter().flatten().map(|s| s.as_str()));
-            for (i, (r, _)) in density_inputs.iter().enumerate() {
-                let s = match &bases[i] {
-                    Some(b) if bc[b.as_str()] == 1 => b.clone(),
-                    _ => format!("d{i}"),
-                };
+            for (r, s) in name_labels(density_inputs.iter().map(|(r, d)| (r, Some(&d.name)))) {
                 l.inputs.insert(r, s);
             }
         }

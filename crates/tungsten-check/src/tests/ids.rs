@@ -4,8 +4,7 @@ use tungsten_core::{Expr, InputId, LocalId, Stmt, Type, UnitId};
 
 use super::*;
 
-/// Params first (in `parameters` order, not slot order), then the other vars in slot order,
-/// skipping `density` vars.
+/// Params first (in `parameters` order, not slot order), then the other vars in slot order.
 #[test]
 fn locals() {
     let mut p = empty();
@@ -13,20 +12,19 @@ fn locals() {
         "f",
         &[
             ("t", VariableType::I32),
-            ("d", VariableType::DensityInput),
             ("b", VariableType::F32),
             ("a", VariableType::F64),
             ("u", VariableType::I64),
         ],
-        &[3, 2],
+        &[2, 1],
         VariableType::F64,
         |v| {
             vec![
                 Statement::Assign {
-                    target: v[4],
+                    target: v[3],
                     value: Expression::Long(1),
                 },
-                Statement::Return(Expression::Variable(v[3])),
+                Statement::Return(Expression::Variable(v[2])),
             ]
         },
     );

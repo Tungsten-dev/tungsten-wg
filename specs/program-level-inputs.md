@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestone 1 implemented; milestones 2–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
+Status: design agreed. Milestones 1 and 2 implemented; milestones 3–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
 which already assume this design.
 
 ## 1. Summary
@@ -387,6 +387,15 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
   helper reading an input both of its units list. The `wf_mirror` agreement proptest no longer has an owner to
   break, so mutation 3 breaks an input's `source` instead. `CHECK.md`, `SEMANTICS.md` and `tungsten-core/README.md`
   still describe `owner` until milestone 6.
+- **Milestone 2.** Input labels use `name_labels`, the host rule, with `N` the slot index in the unit's arena; the
+  `d<N>` labels are gone and anonymous inputs print as `%N`. Placeholders also leave helpers in legacy conversion,
+  not only main functions (step 3), so no converted function holds a `DensityInput` var. With no placeholders,
+  lowering rejects a `density` local where it is declared (`local N`), as it already did for parameters, instead of
+  skipping it and reporting the read; `local()`'s use-site arm went. `tungsten-inspect` names anonymous inputs
+  `_t1`, `_t2` … per unit. `@var` now fails as an unknown attribute. Byte comparison, done once with inlining off:
+  all 59 non-reject testsuite corpus files and the legacy-converted program of `tungsten-parse/tests/legacy.rs`
+  generate identical Rust, Java and CUDA before and after. `tungsten-parse/SPEC.md` §5.2 still describes the old
+  input labels and `@var` until milestone 6.
 
 ## 10. Open and deferred
 

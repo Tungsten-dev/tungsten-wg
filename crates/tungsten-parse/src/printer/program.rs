@@ -153,24 +153,11 @@ fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> Stri
         constants.iter().map(|c| labels.constant(*c)).collect(),
     ));
     for (d, input) in density_inputs.iter() {
-        let owner = p
-            .functions
-            .iter()
-            .find(|(_, f)| f.variables.contains(input.var))
-            .map(|(f, _)| f)
-            .unwrap_or_else(|| {
-                panic!(
-                    "dangling Ref: the variable of density input `{}` is in no function",
-                    labels.input(d)
-                )
-            });
         s.push_str(&format!(
-            "        input {} = {}{} @var({}.{});\n",
+            "        input {} = {}{};\n",
             labels.input(d),
             labels.unit(input.density_function),
             grid_text(input.dimensions, input.scaled_origin, input.scaled_position),
-            labels.function(owner),
-            labels.var(owner, input.var),
         ));
     }
     s.push_str("    }");

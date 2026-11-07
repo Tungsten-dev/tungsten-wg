@@ -1,7 +1,7 @@
 //! Statements, and locals as assignment targets and reads.
 
 use tungsten_core::{LocalId, Stmt};
-use tungsten_ir::{Ref, Statement, Var, VariableType};
+use tungsten_ir::{Ref, Statement, Var};
 
 use super::{Ctx, get};
 use crate::error::{EntityKind, LowerErrorKind, Step};
@@ -52,11 +52,8 @@ impl<'p, 'r> Ctx<'p, 'r> {
         }
         let var = self.func.and_then(|f| get(&f.variables, r));
         match var {
-            Some(v) if v.t == VariableType::DensityInput => {
-                self.err(LowerErrorKind::DensityInputType)
-            }
-            // A var in the arena that isn't a local: a `density`-typed parameter (already
-            // reported), so nothing more to say.
+            // A var in the arena that isn't a local: a `density`-typed var (already reported
+            // where it's declared), so nothing more to say.
             Some(_) => {}
             None => self.err(LowerErrorKind::DanglingRef {
                 kind: EntityKind::Var,

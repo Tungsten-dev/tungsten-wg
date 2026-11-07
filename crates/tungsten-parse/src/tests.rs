@@ -1004,48 +1004,55 @@ fn density_read_type_is_the_target_return_type() {
 }
 
 #[test]
-fn input_var_defaults_and_collisions() {
+fn input_names() {
     let t = ok(&format!(
         "program {{
             fn leaf() -> f64 {{ return 1.0; }}
-            fn root(p: f64) -> f64 {{ vars {{ other: f64 }} let l: f64 = 1.0; return density(a.d); }}
+            fn root(p: f64) -> f64 {{ vars {{ d: f64 }} let l: f64 = 1.0; return density(a.d); }}
             unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input d = leaf_u {GRID}; input e = leaf_u {GRID}; }}
+            unit a {{
+                main root;
+                input d = leaf_u {GRID};
+                input %0 = leaf_u {GRID};
+                input e#4 = leaf_u {GRID};
+                input f##2 = leaf_u {GRID};
+                input f##3 = leaf_u {GRID};
+            }}
         }}"
     ));
+    // no placeholder vars, and a var may share an input's label
     let (_, root) = find_fn(&t, "root");
-    let vars: Vec<_> = root.variables.values().cloned().collect();
-    // declared vars first, then the implicit ones in input order
-    let names: Vec<_> = vars.iter().map(|v| v.name.clone()).collect();
+    let names: Vec<_> = root.variables.values().map(|v| v.name.clone()).collect();
     assert_eq!(
         names,
         [
             Name::Named("p".into()),
-            Name::Named("other".into()),
-            Name::Named("l".into()),
             Name::Named("d".into()),
-            Name::Named("e".into())
+            Name::Named("l".into())
         ]
     );
-    assert_eq!(vars[3].t, VariableType::DensityInput);
+    assert!(root.variables.values().all(|v| v.t != VariableType::DensityInput));
+    // input labels follow the host rule
     let ComputeUnit::DensityFunction { density_inputs, .. } =
         t.program.compute_units.values().nth(1).unwrap();
-    let vs: Vec<_> = density_inputs.values().map(|d| d.var).collect();
-    let slots: Vec<_> = root.variables.iter().map(|(r, _)| r).collect();
-    assert_eq!(vs, vec![slots[3], slots[4]]);
-
-    fails(
-        &format!(
-            "program {{
-                fn leaf() -> f64 {{ return 1.0; }}
-                fn root() -> f64 {{ vars {{ d: f64 }} return 1.0; }}
-                unit leaf_u {{ main leaf; }}
-                unit a {{ main root; input d = leaf_u {GRID}; }}
-            }}"
-        ),
-        "already has a variable `d`",
+    let names: Vec<_> = density_inputs.values().map(|d| d.name.clone()).collect();
+    assert_eq!(
+        names,
+        [
+            Name::Named("d".into()),
+            Name::Anonymous,
+            Name::Prefixed("e".into()),
+            Name::Named("f".into()),
+            Name::Named("f".into())
+        ]
     );
-    // a repeated input label is reported as such, not as a var collision
+    // and print back as such, with `##N` only for the duplicated `Named`
+    let text = print(&t.program);
+    for l in ["input d = ", "input %1 = ", "input e#2 = ", "input f##3 = ", "input f##4 = "] {
+        assert!(text.contains(l), "{l}\n{text}");
+    }
+    assert!(!text.contains("@var"), "{text}");
+
     fails(
         &format!(
             "program {{
@@ -1056,35 +1063,16 @@ fn input_var_defaults_and_collisions() {
         ),
         "duplicate input label `d`",
     );
-    // the implicit var takes the input label's kind
-    let t = ok(&format!(
-        "program {{
-            fn leaf() -> f64 {{ return 1.0; }}
-            fn root() -> f64 {{ return 1.0; }}
-            unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input %0 = leaf_u {GRID}; input d#4 = leaf_u {GRID}; }}
-        }}"
-    ));
-    let (_, root) = find_fn(&t, "root");
-    let names: Vec<_> = root.variables.values().map(|v| v.name.clone()).collect();
-    assert_eq!(names, [Name::Anonymous, Name::Prefixed("d".into())]);
-    // an explicit @var avoids both, and may name another function's var
-    let t = ok(&format!(
-        "program {{
-            fn leaf() -> f64 {{ return 1.0; }}
-            fn root() -> f64 {{ vars {{ d: f64 }} return 1.0; }}
-            fn helper() -> f64 {{ vars {{ slot: density }} return 1.0; }}
-            unit leaf_u {{ main leaf; }}
-            unit a {{ main root; helpers [helper]; input d = leaf_u {GRID} @var(helper.slot); }}
-        }}"
-    ));
-    let (hr, h) = find_fn(&t, "helper");
-    let _ = hr;
-    let ComputeUnit::DensityFunction { density_inputs, .. } =
-        t.program.compute_units.values().nth(1).unwrap();
-    assert_eq!(
-        density_inputs.values().next().unwrap().var,
-        h.variables.iter().next().unwrap().0
+    // `@var` is gone
+    fails(
+        &format!(
+            "program {{
+                fn leaf() -> f64 {{ vars {{ v: density }} return 1.0; }}
+                unit leaf_u {{ main leaf; }}
+                unit a {{ main leaf; input d = leaf_u {GRID} @var(leaf.v); }}
+            }}"
+        ),
+        "unknown attribute `@var`",
     );
 }
 
@@ -1894,10 +1882,6 @@ fn printing_is_total_for_unusual_programs() {
     leaf.body = vec![Statement::Return(Expression::Double(1.0))];
     let leaf_f = p.functions.insert(leaf);
     let mut shared = func(Some("shared"));
-    let dv = shared.variables.insert(Var {
-        name: Name::Named("dv".into()),
-        t: VariableType::DensityInput,
-    });
     let leaf_u = p.compute_units.insert(ComputeUnit::DensityFunction {
         function: leaf_f,
         density_inputs: Arena::new(),
@@ -1909,7 +1893,7 @@ fn printing_is_total_for_unusual_programs() {
     });
     let mut inputs = Arena::new();
     let d = inputs.insert(DensityInput {
-        var: dv,
+        name: Name::Named("dv".into()),
         density_function: leaf_u,
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),

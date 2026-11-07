@@ -613,7 +613,7 @@ impl Parser {
                     None
                 };
                 let unit = self.label()?;
-                let (grid, _) = self.grid_attrs(false)?;
+                let grid = self.grid_attrs()?;
                 self.expect(Tok::Semi)?;
                 Ok(Item::Entry(Box::new(EntryItem {
                     span: start.to(self.prev_span()),
@@ -751,7 +751,7 @@ impl Parser {
                     let label = self.label()?;
                     self.expect(Tok::Assign)?;
                     let target = self.label()?;
-                    let (mut grid, var) = self.grid_attrs(true)?;
+                    let mut grid = self.grid_attrs()?;
                     self.expect(Tok::Semi)?;
                     grid.span = span.to(self.prev_span());
                     u.inputs.push(InputItem {
@@ -759,7 +759,6 @@ impl Parser {
                         label,
                         target,
                         grid,
-                        var,
                     });
                 }
                 _ => return self.unexpected("`main`, a list, or `input`"),
@@ -770,16 +769,14 @@ impl Parser {
         Ok(u)
     }
 
-    /// `@dims(..) @origin_scale(..) @position_scale(..)` in any order, plus `@var(f.v)` among
-    /// them when `allow_var`.
-    fn grid_attrs(&mut self, allow_var: bool) -> R<(GridAttrs, Option<(Label, Label)>)> {
+    /// `@dims(..) @origin_scale(..) @position_scale(..)` in any order.
+    fn grid_attrs(&mut self) -> R<GridAttrs> {
         let mut g = GridAttrs {
             span: self.span(),
             dims: None,
             origin_scale: None,
             position_scale: None,
         };
-        let mut var = None;
         while let Some((name, span)) = self.attr() {
             let dup = format!("duplicate `@{name}`");
             match name.as_str() {
@@ -809,21 +806,11 @@ impl Parser {
                         return self.fail(span, dup);
                     }
                 }
-                "var" if allow_var => {
-                    self.expect(Tok::LParen)?;
-                    let f = self.label()?;
-                    self.expect(Tok::Dot)?;
-                    let v = self.label()?;
-                    self.expect(Tok::RParen)?;
-                    if var.replace((f, v)).is_some() {
-                        return self.fail(span, dup);
-                    }
-                }
                 _ => return self.fail(span, format!("unknown attribute `@{name}` here")),
             }
         }
         g.span = g.span.to(self.prev_span());
-        Ok((g, var))
+        Ok(g)
     }
 
     // ----- statements -----
