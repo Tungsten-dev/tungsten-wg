@@ -456,11 +456,6 @@ pub fn check_wf(p: &Program) -> Vec<CheckError> {
         decreases p.inputs.len() - k,
     {
         set_item(&mut w, CoreItem::Input(InputId(k)));
-        if p.inputs[k].owner.0 >= p.units.len() {
-            w.path.push(CoreStep::Unit);
-            bad(&mut w, IdTable::Unit, p.inputs[k].owner.0);
-            pop(&mut w);
-        }
         if p.inputs[k].source.0 >= p.units.len() {
             w.path.push(CoreStep::Source);
             bad(&mut w, IdTable::Unit, p.inputs[k].source.0);
@@ -504,50 +499,6 @@ pub fn check_wf(p: &Program) -> Vec<CheckError> {
         set_item(&mut w, CoreItem::Record(RecordId(k)));
         wf_types(p, &p.records[k].fields, &mut w, StepKind::Element);
         k = k + 1;
-    }
-    // Input links, both directions.
-    let mut i: usize = 0;
-    while i < p.inputs.len()
-        invariant
-            i <= p.inputs.len(),
-        decreases p.inputs.len() - i,
-    {
-        let owner = p.inputs[i].owner;
-        let listed = match get(&p.units, owner.0) {
-            Some(u) => contains_input(&u.inputs, InputId(i)),
-            None => false,
-        };
-        if !listed {
-            set_item(&mut w, CoreItem::Input(InputId(i)));
-            report(&mut w.errs, CheckErrorKind::WfInputLink { input: InputId(i), unit: owner }, w.item, &w.path);
-        }
-        i = i + 1;
-    }
-    let mut u: usize = 0;
-    while u < p.units.len()
-        invariant
-            u <= p.units.len(),
-        decreases p.units.len() - u,
-    {
-        let unit = &p.units[u];
-        let mut k: usize = 0;
-        while k < unit.inputs.len()
-            invariant
-                k <= unit.inputs.len(),
-            decreases unit.inputs.len() - k,
-        {
-            let ok = match get(&p.inputs, unit.inputs[k].0) {
-                Some(d) => d.owner.0 == u,
-                None => false,
-            };
-            if !ok {
-                set_item(&mut w, CoreItem::Unit(UnitId(u)));
-                w.path.push(CoreStep::List(ScopeList::Inputs, k));
-                report(&mut w.errs, CheckErrorKind::WfInputLink { input: unit.inputs[k], unit: UnitId(u) }, w.item, &w.path);
-            }
-            k = k + 1;
-        }
-        u = u + 1;
     }
     w.errs
 }

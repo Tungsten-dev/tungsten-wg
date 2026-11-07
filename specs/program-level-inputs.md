@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed, not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
+Status: design agreed. Milestone 1 implemented; milestones 2–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
 which already assume this design.
 
 ## 1. Summary
@@ -379,6 +379,14 @@ Each lands green.
 Decided without an interview question, and easy to revisit: ids in arena order; duplicate listings being legal; the
 field name `density_inputs` on both the program and the unit; `InputNotListed` as the error's name; removing unlisted
 inputs whose source is an inlined callee; the milestone split; and printing inputs before units.
+
+## Implementation notes
+
+- **Milestone 1.** Until milestone 3, the text format can't make two units list one input. So
+  `check_errors::input_listed_by_two_units` edits the lowered core program to show that core now accepts a shared
+  helper reading an input both of its units list. The `wf_mirror` agreement proptest no longer has an owner to
+  break, so mutation 3 breaks an input's `source` instead. `CHECK.md`, `SEMANTICS.md` and `tungsten-core/README.md`
+  still describe `owner` until milestone 6.
 
 ## 10. Open and deferred
 

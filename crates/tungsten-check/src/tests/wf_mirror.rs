@@ -94,29 +94,16 @@ fn wf_unit(p: &Program, u: &Unit) -> bool {
         && u.consts.iter().all(|c| c.0 < p.consts.len())
 }
 
-fn wf_input_links(p: &Program) -> bool {
-    p.inputs.iter().enumerate().all(|(i, d)| {
-        p.units
-            .get(d.owner.0)
-            .is_some_and(|u| u.inputs.contains(&InputId(i)))
-    }) && p.units.iter().enumerate().all(|(u, unit)| {
-        unit.inputs
-            .iter()
-            .all(|i| p.inputs.get(i.0).is_some_and(|d| d.owner == UnitId(u)))
-    })
-}
-
 /// `wf_program(p)`.
 pub fn is_wf(p: &Program) -> bool {
     p.units.iter().all(|u| wf_unit(p, u))
         && p.functions.iter().all(|f| wf_function(p, f))
         && p.consts.iter().all(|c| wf_expr(p, 0, &c.init))
         && p.hosts.iter().all(|h| wf_type(p, &h.ty))
-        && p.inputs.iter().all(|d| d.owner.0 < p.units.len() && d.source.0 < p.units.len())
+        && p.inputs.iter().all(|d| d.source.0 < p.units.len())
         && p.entries.iter().all(|e| e.unit.0 < p.units.len())
         && p.externs.iter().all(|d| wf_types(p, &d.params) && wf_type(p, &d.ret))
         && p.records.iter().all(|d| wf_types(p, &d.fields))
-        && wf_input_links(p)
 }
 
 #[test]
@@ -177,8 +164,8 @@ mod agreement {
             }
             3 => {
                 let n = p.units.len();
-                if let (true, Some(d)) = (n > 1, p.inputs.first_mut()) {
-                    d.owner = UnitId((d.owner.0 + 1) % n);
+                if let Some(d) = p.inputs.first_mut() {
+                    d.source = UnitId(n + big);
                 }
             }
             4 => p.hosts.push(HostDecl { ty: Type::Array(Box::new(Type::Record(RecordId(big))), 1) }),

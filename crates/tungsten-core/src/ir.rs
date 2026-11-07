@@ -223,7 +223,7 @@ pub struct Function {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unit {
     pub main: FnId,
-    /// The unit's density inputs, in its arena order.
+    /// The density inputs the unit may read, in build order.
     pub inputs: Vec<InputId>,
     pub tables: Vec<TableId>,
     pub hosts: Vec<HostId>,
@@ -233,8 +233,6 @@ pub struct Unit {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputDecl {
-    /// The unit whose `density_inputs` arena holds this input.
-    pub owner: UnitId,
     /// `DensityInput.density_function`.
     pub source: UnitId,
     pub dims: Dims,

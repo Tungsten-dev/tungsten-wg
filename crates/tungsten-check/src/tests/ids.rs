@@ -51,7 +51,7 @@ fn locals() {
 }
 
 /// Inputs: units in order, then each unit's arena in order. A shared helper's density read
-/// names exactly the input it refers to, with its owner.
+/// names exactly the input it refers to, and only the unit that lists it.
 #[test]
 fn inputs_across_units() {
     let src = "program {
@@ -80,8 +80,8 @@ fn inputs_across_units() {
     assert_eq!(pr.units[a.0].inputs, vec![InputId(0), InputId(1)]);
     assert_eq!(pr.units[b.0].inputs, vec![InputId(2)]);
     assert_eq!(
-        pr.inputs.iter().map(|i| (i.owner, i.dims.x)).collect::<Vec<_>>(),
-        vec![(a, 1), (a, 2), (b, 3)]
+        pr.inputs.iter().map(|i| i.dims.x).collect::<Vec<_>>(),
+        vec![1, 2, 3]
     );
     assert_eq!(
         pr.inputs.iter().map(|i| i.source).collect::<Vec<_>>(),
@@ -95,7 +95,7 @@ fn inputs_across_units() {
             index: None
         })]
     );
-    assert_eq!(pr.inputs[2].owner, b);
+    assert!(pr.units.iter().enumerate().all(|(u, unit)| unit.inputs.contains(&InputId(2)) == (u == b.0)));
     let names: Vec<&str> = l.map.inputs.iter().map(|(_, _, n)| n).collect();
     assert_eq!(names, ["x", "y", "y"]);
 }

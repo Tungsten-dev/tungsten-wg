@@ -148,8 +148,6 @@ pub enum CheckErrorKind {
     WfBadId { table: IdTable, id: usize },
     WfParams { params: usize, locals: usize },
     WfField { record: RecordId, field: usize },
-    /// Input `input` and unit `unit` disagree about ownership.
-    WfInputLink { input: InputId, unit: UnitId },
 
     // --- types (§6.3) ---
     TypeMismatch { expected: Type, found: Type },
@@ -180,8 +178,7 @@ pub enum CheckErrorKind {
     HostNotInUnit { unit: UnitId, host: HostId },
     TableNotListed { unit: UnitId, table: TableId },
     ConstNotListed { unit: UnitId, konst: ConstId },
-    InputNotOwned { unit: UnitId, input: InputId },
-    InputReaderShared { func: FnId, units: Vec<UnitId> },
+    InputNotListed { unit: UnitId, input: InputId },
 
     // --- grids and cycles (§6.6) ---
     DimsTooSmall,
@@ -272,7 +269,6 @@ impl Clone for CheckErrorKind {
             CheckErrorKind::WfBadId { table, id } => CheckErrorKind::WfBadId { table: *table, id: *id },
             CheckErrorKind::WfParams { params, locals } => CheckErrorKind::WfParams { params: *params, locals: *locals },
             CheckErrorKind::WfField { record, field } => CheckErrorKind::WfField { record: *record, field: *field },
-            CheckErrorKind::WfInputLink { input, unit } => CheckErrorKind::WfInputLink { input: *input, unit: *unit },
             CheckErrorKind::TypeMismatch { expected, found } => CheckErrorKind::TypeMismatch { expected: expected.clone(), found: found.clone() },
             CheckErrorKind::BadBinary { op, left, right } => CheckErrorKind::BadBinary { op: op.clone(), left: left.clone(), right: right.clone() },
             CheckErrorKind::BadUnary { op, operand } => CheckErrorKind::BadUnary { op: op.clone(), operand: operand.clone() },
@@ -295,8 +291,7 @@ impl Clone for CheckErrorKind {
             CheckErrorKind::HostNotInUnit { unit, host } => CheckErrorKind::HostNotInUnit { unit: *unit, host: *host },
             CheckErrorKind::TableNotListed { unit, table } => CheckErrorKind::TableNotListed { unit: *unit, table: *table },
             CheckErrorKind::ConstNotListed { unit, konst } => CheckErrorKind::ConstNotListed { unit: *unit, konst: *konst },
-            CheckErrorKind::InputNotOwned { unit, input } => CheckErrorKind::InputNotOwned { unit: *unit, input: *input },
-            CheckErrorKind::InputReaderShared { func, units } => CheckErrorKind::InputReaderShared { func: *func, units: units.clone() },
+            CheckErrorKind::InputNotListed { unit, input } => CheckErrorKind::InputNotListed { unit: *unit, input: *input },
             CheckErrorKind::DimsTooSmall => CheckErrorKind::DimsTooSmall,
             CheckErrorKind::GridTooLarge => CheckErrorKind::GridTooLarge,
             CheckErrorKind::Cycle { members } => CheckErrorKind::Cycle { members: members.clone() },

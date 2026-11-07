@@ -350,7 +350,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
     fn inputs(&mut self) -> Vec<core::InputDecl> {
         let p = self.p;
         let mut out = vec![];
-        for (u, (_, unit)) in p.compute_units.iter().enumerate() {
+        for (_, unit) in p.compute_units.iter() {
             let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
             for (r, d) in density_inputs.iter() {
                 let Some(id) = self.map.inputs.id(r) else {
@@ -363,7 +363,6 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 });
                 let source = self.at(Step::Source, |cx| cx.unit_ref(d.density_function));
                 out.push(core::InputDecl {
-                    owner: UnitId(u),
                     source,
                     dims: dims(d.dimensions),
                     origin_scale: f64x3(d.scaled_origin),

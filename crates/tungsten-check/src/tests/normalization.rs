@@ -432,7 +432,6 @@ fn items() {
     assert_eq!(
         pr.inputs,
         vec![InputDecl {
-            owner: u,
             source: leaf_u,
             dims: Dims { x: 1, y: 1, z: 1 },
             origin_scale: one.clone(),

@@ -109,9 +109,6 @@ Program {
     tables: [],
     inputs: [
         InputDecl {
-            owner: UnitId(
-                1,
-            ),
             source: UnitId(
                 0,
             ),

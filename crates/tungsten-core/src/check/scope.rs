@@ -1,7 +1,7 @@
 //! Scoping (§6.5). For every unit `U`, `F(U) = {U.main} ∪ U.helpers`, and for every `f ∈ F(U)`:
 //! (a) calls stay in `F(U)`, (b) hosts are in `f.hosts ⊆ U.hosts`, (c) tables in `U.tables`,
 //! (d) consts (and everything their inits reach) in `U.consts`, (e) density reads only of
-//! inputs `U` owns, by a function no other unit lists.
+//! inputs in `U.inputs`.
 //!
 //! One pre-order walk per function covers every unit that lists it. Each violation is reported
 //! once per `(unit, offending id)`, at its first occurrence in walk order.
@@ -25,7 +25,6 @@ pub enum SeenKind {
     Table,
     Const,
     Input,
-    Shared,
 }
 
 #[derive(Clone, Copy)]
@@ -43,7 +42,6 @@ fn same_kind(a: SeenKind, b: SeenKind) -> bool {
         (SeenKind::Table, SeenKind::Table) => true,
         (SeenKind::Const, SeenKind::Const) => true,
         (SeenKind::Input, SeenKind::Input) => true,
-        (SeenKind::Shared, SeenKind::Shared) => true,
         _ => false,
     }
 }
@@ -94,20 +92,6 @@ pub struct SCx<'a> {
     pub units: Vec<usize>,
 }
 
-fn unit_ids(units: &Vec<usize>) -> Vec<UnitId> {
-    let mut out: Vec<UnitId> = Vec::new();
-    let mut i: usize = 0;
-    while i < units.len()
-        invariant
-            i <= units.len(),
-        decreases units.len() - i,
-    {
-        out.push(UnitId(units[i]));
-        i = i + 1;
-    }
-    out
-}
-
 /// The checks at one node, for every unit in `cx.units`.
 fn scope_node(cx: &SCx, e: &Expr, seen: &mut Vec<Seen>, path: &Vec<CoreStep>, errs: &mut Vec<CheckError>) {
     let item = CoreItem::Function(cx.func);
@@ -115,11 +99,6 @@ fn scope_node(cx: &SCx, e: &Expr, seen: &mut Vec<Seen>, path: &Vec<CoreStep>, er
         Expr::Host(h) => {
             if !contains_host(&cx.f.hosts, *h) && first(seen, SeenKind::HostFn, cx.func.0, h.0) {
                 report(errs, CheckErrorKind::HostNotInFn { host: *h }, item, path);
-            }
-        },
-        Expr::Density { .. } => {
-            if cx.units.len() > 1 && first(seen, SeenKind::Shared, 0, cx.func.0) {
-                report(errs, CheckErrorKind::InputReaderShared { func: cx.func, units: unit_ids(&cx.units) }, item, path);
             }
         },
         _ => {},
@@ -149,12 +128,8 @@ fn scope_node(cx: &SCx, e: &Expr, seen: &mut Vec<Seen>, path: &Vec<CoreStep>, er
                     }
                 },
                 Expr::Density { input, .. } => {
-                    let owned = match get(&cx.p.inputs, input.0) {
-                        Some(d) => d.owner.0 == uid,
-                        None => true,
-                    };
-                    if !owned && first(seen, SeenKind::Input, uid, input.0) {
-                        report(errs, CheckErrorKind::InputNotOwned { unit: UnitId(uid), input: *input }, item, path);
+                    if !contains_input(&u.inputs, *input) && first(seen, SeenKind::Input, uid, input.0) {
+                        report(errs, CheckErrorKind::InputNotListed { unit: UnitId(uid), input: *input }, item, path);
                     }
                 },
                 _ => {},

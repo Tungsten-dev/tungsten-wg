@@ -1,10 +1,10 @@
-//! Well-formedness: index bounds and input ownership links, as `spec fn`s only.
+//! Well-formedness: index bounds, as `spec fn`s only.
 //!
 //! `wf_program(p)` holds iff every id anywhere is in range of its table (a `LocalId` against the
 //! enclosing function's `locals`, and constant initializers with no locals at all), every
 //! function has `params <= locals.len()`, every type is wf (`Record(r)` in range, recursively
-//! through `Array`), every record field selector and record construction names an existing field,
-//! and input ownership links agree in both directions.
+//! through `Array`), and every record field selector and record construction names an existing
+//! field.
 //!
 //! Nothing type-related is checked here: types, exactly-once fields, scoping, acyclicity, dims,
 //! definite assignment and density-read legality are checker rules.
@@ -172,8 +172,7 @@ pub open spec fn wf_unit(p: &Program, u: &Unit) -> bool {
 }
 
 pub open spec fn wf_input(p: &Program, i: &InputDecl) -> bool {
-    &&& i.owner.0 < p.units.len()
-    &&& i.source.0 < p.units.len()
+    i.source.0 < p.units.len()
 }
 
 pub open spec fn wf_entry(p: &Program, e: &Entry) -> bool {
@@ -189,15 +188,6 @@ pub open spec fn wf_record(p: &Program, d: &RecordDecl) -> bool {
     wf_types(p, d.fields@)
 }
 
-/// Every input is listed by its owner, and every input a unit lists names that unit as owner.
-pub open spec fn wf_input_links(p: &Program) -> bool {
-    &&& forall|i: int| #![trigger p.inputs[i]] 0 <= i < p.inputs.len()
-        ==> p.units[p.inputs[i].owner.0 as int].inputs@.contains(InputId(i as usize))
-    &&& forall|u: int, k: int| #![trigger p.units[u].inputs[k]]
-        0 <= u < p.units.len() && 0 <= k < p.units[u].inputs.len()
-        ==> p.inputs[p.units[u].inputs[k].0 as int].owner == UnitId(u as usize)
-}
-
 pub open spec fn wf_program(p: &Program) -> bool {
     &&& forall|k: int| #![trigger p.units[k]] 0 <= k < p.units.len() ==> wf_unit(p, &p.units[k])
     &&& forall|k: int| #![trigger p.functions[k]] 0 <= k < p.functions.len() ==> wf_function(p, &p.functions[k])
@@ -207,7 +197,6 @@ pub open spec fn wf_program(p: &Program) -> bool {
     &&& forall|k: int| #![trigger p.entries[k]] 0 <= k < p.entries.len() ==> wf_entry(p, &p.entries[k])
     &&& forall|k: int| #![trigger p.externs[k]] 0 <= k < p.externs.len() ==> wf_extern(p, &p.externs[k])
     &&& forall|k: int| #![trigger p.records[k]] 0 <= k < p.records.len() ==> wf_record(p, &p.records[k])
-    &&& wf_input_links(p)
 }
 
 } // verus!

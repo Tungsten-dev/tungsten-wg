@@ -206,11 +206,6 @@ impl Names<'_> {
             K::WfBadId { table, id } => format!("internal: {} id {id} is out of range", id_table(*table)),
             K::WfParams { params, locals } => format!("internal: {params} params but only {locals} locals"),
             K::WfField { record, field } => format!("internal: record `{}` has no field {field}", self.record(*record)),
-            K::WfInputLink { input, unit } => format!(
-                "internal: input `{}` and unit `{}` disagree about ownership",
-                self.input(*input),
-                self.unit(*unit)
-            ),
             K::TypeMismatch { expected, found } => format!("expected `{}`, found `{}`", self.ty(expected), self.ty(found)),
             K::BadBinary { op, left, right } => format!(
                 "`{}` can't be applied to `{}` and `{}`",
@@ -296,27 +291,11 @@ impl Names<'_> {
                 self.konst(*konst),
                 self.unit(*unit)
             ),
-            K::InputNotOwned { unit, input } => {
-                let owner = self
-                    .p
-                    .inputs
-                    .get(input.0)
-                    .map(|d| self.unit(d.owner))
-                    .unwrap_or_else(|| "?".into());
-                format!(
-                    "input `{}` belongs to unit `{owner}`, not to unit `{}`",
-                    self.input(*input),
-                    self.unit(*unit)
-                )
-            }
-            K::InputReaderShared { func, units } => {
-                let us: Vec<String> = units.iter().map(|u| format!("`{}`", self.unit(*u))).collect();
-                format!(
-                    "`{}` reads a density input, so only one unit may list it, but {} do",
-                    self.func(*func),
-                    us.join(", ")
-                )
-            }
+            K::InputNotListed { unit, input } => format!(
+                "input `{}` isn't in the inputs of unit `{}`",
+                self.input(*input),
+                self.unit(*unit)
+            ),
             K::DimsTooSmall => "every dimension must be at least 1".into(),
             K::GridTooLarge => "the grid has more than i32::MAX cells".into(),
             K::Cycle { members } => {
