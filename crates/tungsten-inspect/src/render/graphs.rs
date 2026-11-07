@@ -278,7 +278,7 @@ pub(crate) fn function(ctx: &Ctx, f: &FunctionInfo, dag: &FunctionDag, path: &st
         }
     };
 
-    let renderer = DagRenderer { ctx, f, path };
+    let renderer = DagRenderer { ctx, path };
     fn emit(
         g: &mut Dot,
         r: &DagRenderer,
@@ -372,7 +372,6 @@ fn region_label(kind: &RegionKind) -> String {
 
 struct DagRenderer<'c, 'a> {
     ctx: &'c Ctx<'a>,
-    f: &'c FunctionInfo,
     path: &'c str,
 }
 
@@ -441,11 +440,7 @@ impl DagRenderer<'_, '_> {
     /// Label for a density read; adds the producer link and the exact grid as tooltip.
     fn density_read(&self, info: &DensityReadInfo, attrs: &mut Attrs) -> String {
         let ctx = self.ctx;
-        let mut label = if self.f.units.contains(&info.unit) {
-            info.input.clone()
-        } else {
-            format!("{}::{}", ctx.display(&info.unit), info.input)
-        };
+        let mut label = info.input.clone();
         label.push_str(&format!(
             "\n← {} @ {}",
             ctx.display(&info.producer_unit),

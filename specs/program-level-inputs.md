@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1 and 2 implemented; milestones 3–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
+Status: design agreed. Milestones 1–3 implemented; milestones 4–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
 which already assume this design.
 
 ## 1. Summary
@@ -396,6 +396,23 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
   all 59 non-reject testsuite corpus files and the legacy-converted program of `tungsten-parse/tests/legacy.rs`
   generate identical Rust, Java and CUDA before and after. `tungsten-parse/SPEC.md` §5.2 still describes the old
   input labels and `@var` until milestone 6.
+- **Milestone 3.** The migration covered ten `.tw` files, but seven of them are in the testsuite corpus (six in
+  `density/` and `errors/unread_failing_input`), not eight. Each moved input sits just before its old unit, so
+  textual order and input ids are unchanged. The inline programs in `tungsten-check`'s tests moved too, and
+  `check_errors::input_listed_by_two_units` is now written as text. The old forms fail with errors that point to the
+  new ones: `input` inside a unit, and `density(u.d)`. A unit's `inputs` list is lowered right after `main`, so its
+  `DanglingRef` comes before those of the other lists. Legacy conversion inserts an input into the program arena
+  once its target unit is converted, so arena order follows conversion order. Generated code doesn't depend on it.
+  In `tungsten-inspect`, `Inspection.inputs` (`ProgramInputInfo`) holds the program section with `listed_by`, and
+  each unit's section lists input names, marking `(indexed)` per unit. `DensityReadInfo.unit` is the first unit of
+  the analyzed function that lists the input, and `density_reads` is keyed by input name. The schema version stays
+  at 1. **Byte comparison**, done once with inlining off: all 59 non-reject testsuite corpus files and vanilla
+  overworld (converted by `tungsten-mc-compile`) generate identical Rust, Java and CUDA before and after. Inlined
+  vanilla differs only in function order and generated names, as §6.4 says. **Vanilla check**: `check::prepare`
+  doesn't accept vanilla yet, inlined or not, with a registry built from the program's own extern calls and field
+  accesses. Its 1,719 errors are the same before and after this milestone and have nothing to do with inputs
+  (`vec3 * f64`, extern annotations, helpers that aren't listed), so the frontend or core typing has to fix them
+  first. `tungsten-parse/SPEC.md` and `TESTING.md` §8 still describe nested inputs until milestone 6.
 
 ## 10. Open and deferred
 

@@ -27,9 +27,10 @@ program {
         return (density(b) * 2.0);
     }
 
+    input b = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
     unit top {
         main top_main;
-        input b = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
+        inputs [b];
     }
 
     entry top @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);

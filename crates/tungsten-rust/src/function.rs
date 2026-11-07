@@ -38,7 +38,7 @@ pub fn convert_helper<'a, 'm>(
     f: Ref<Function>,
 ) -> Converted<'m> {
     let func = &program.functions[f];
-    let mut conv = FunctionConverter::new(program, naming, func, None);
+    let mut conv = FunctionConverter::new(program, naming, func);
     let mut out = rcl::Function::new(
         Some(naming.helper(f).to_string()),
         Some(convert_type(&func.return_type)),
@@ -78,11 +78,10 @@ pub fn convert_density<'a, 'm>(
 ) -> Converted<'m> {
     let ComputeUnit::DensityFunction {
         function,
-        density_inputs,
         ..
     } = &program.compute_units[cu];
     let func = &program.functions[*function];
-    let mut conv = FunctionConverter::new(program, naming, func, Some(density_inputs));
+    let mut conv = FunctionConverter::new(program, naming, func);
     let mut out = rcl::Function::new(
         Some(naming.density_fn(cu, dimensions).to_string()),
         Some(convert_type(&func.return_type)),

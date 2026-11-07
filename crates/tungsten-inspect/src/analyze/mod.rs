@@ -44,6 +44,7 @@ pub(crate) fn inspection(ctx: &Ctx) -> Inspection {
     let instances = graph::instances(ctx);
     let entries = graph::entries(ctx, &instances);
     let units = graph::units(ctx, &instances);
+    let inputs = graph::inputs(ctx, &units);
     let functions = calls::functions(ctx);
     let call_graph = calls::call_graph(ctx);
     let (constants, tables, host_inputs, resources) = calls::resources(ctx);
@@ -75,6 +76,7 @@ pub(crate) fn inspection(ctx: &Ctx) -> Inspection {
         summary,
         entries,
         units,
+        inputs,
         instances,
         functions,
         constants,
@@ -102,10 +104,9 @@ pub(crate) struct Named {
     pub display: String,
 }
 
-/// A density input's local name, and the unit whose arena it lives in.
+/// A density input's name, unique within the program.
 #[derive(Debug, Clone)]
 pub(crate) struct InputName {
-    pub unit: Ref<ComputeUnit>,
     pub name: String,
 }
 
@@ -129,8 +130,8 @@ pub(crate) struct Ctx<'a> {
     pub helper_of: HashMap<Ref<Function>, Vec<Ref<ComputeUnit>>>,
     /// Variable names per function (SPEC.md §7.5 rules).
     pub var_names: HashMap<Ref<Function>, HashMap<Ref<Var>, String>>,
-    /// Density inputs that some function reads with an index.
-    pub indexed_inputs: HashSet<Ref<DensityInput>>,
+    /// `(unit, input)` where the unit's main function or a helper reads the input with an index.
+    pub indexed_inputs: HashSet<(Ref<ComputeUnit>, Ref<DensityInput>)>,
     pub reachable_functions: HashSet<Ref<Function>>,
 }
 
@@ -313,34 +314,42 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Local input names: the input's name (`Anonymous` → `_t1`, `_t2` …), made unique within
-    /// the unit in arena order.
+    /// Input names: the input's name (`Anonymous` → `_t1`, `_t2` …), made unique within the
+    /// program in arena order.
     fn name_inputs(&mut self) {
-        for (cu_ref, cu) in self.program.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-            let mut used = HashSet::new();
-            let mut anonymous = 0;
-            for (r, input) in density_inputs.iter() {
-                let base = match &input.name {
-                    Name::Named(s) | Name::Prefixed(s) => s.clone(),
-                    Name::Anonymous => {
-                        anonymous += 1;
-                        format!("_t{anonymous}")
-                    }
-                };
-                let name = unique_suffix(&mut used, base);
-                self.inputs.insert(r, InputName { unit: cu_ref, name });
-            }
+        let mut used = HashSet::new();
+        let mut anonymous = 0;
+        for (r, input) in self.program.density_inputs.iter() {
+            let base = match &input.name {
+                Name::Named(s) | Name::Prefixed(s) => s.clone(),
+                Name::Anonymous => {
+                    anonymous += 1;
+                    format!("_t{anonymous}")
+                }
+            };
+            let name = unique_suffix(&mut used, base);
+            self.inputs.insert(r, InputName { name });
         }
     }
 
+    /// Per unit, since a shared input can be read differently by each unit that lists it.
     fn find_indexed_inputs(&mut self) {
-        for f in self.program.functions.values() {
-            visit_exprs(&f.body, &mut |e| {
-                if let Expression::DensityVariable(r, Some(_)) = e {
-                    self.indexed_inputs.insert(*r);
-                }
-            });
+        for (u, cu) in self.program.compute_units.iter() {
+            let ComputeUnit::DensityFunction {
+                function,
+                helper_functions,
+                ..
+            } = cu;
+            for f in std::iter::once(function).chain(helper_functions) {
+                let Some(func) = self.program.functions.try_get(*f) else {
+                    continue;
+                };
+                visit_exprs(&func.body, &mut |e| {
+                    if let Expression::DensityVariable(r, Some(_)) = e {
+                        self.indexed_inputs.insert((u, *r));
+                    }
+                });
+            }
         }
     }
 

@@ -603,6 +603,21 @@ impl Parser {
             }
             Tok::Kw(Kw::Fn) => Ok(Item::Fn(self.fn_item()?)),
             Tok::Kw(Kw::Unit) => Ok(Item::Unit(self.unit_item()?)),
+            Tok::Kw(Kw::Input) => {
+                self.bump();
+                let label = self.label()?;
+                self.expect(Tok::Assign)?;
+                let target = self.label()?;
+                let mut grid = self.grid_attrs()?;
+                self.expect(Tok::Semi)?;
+                grid.span = start.to(self.prev_span());
+                Ok(Item::Input(InputItem {
+                    span: start.to(self.prev_span()),
+                    label,
+                    target,
+                    grid,
+                }))
+            }
             Tok::Kw(Kw::Entry) => {
                 self.bump();
                 let label = if self.at_label() && self.at(1).tok == Tok::Assign {
@@ -623,7 +638,9 @@ impl Parser {
                 })))
             }
             _ => {
-                self.unexpected("an item (`fn`, `unit`, `entry`, `const`, `host`, `table`, `use`)")
+                self.unexpected(
+                    "an item (`fn`, `unit`, `input`, `entry`, `const`, `host`, `table`, `use`)",
+                )
             }
         }
     }
@@ -709,7 +726,7 @@ impl Parser {
             tables: None,
             hosts: None,
             consts: None,
-            inputs: vec![],
+            inputs: None,
         };
         if let Some((a, span)) = self.attr() {
             if a != "hash" {
@@ -731,7 +748,7 @@ impl Parser {
                     u.main = Some(self.label()?);
                     self.expect(Tok::Semi)?;
                 }
-                Tok::Kw(k @ (Kw::Helpers | Kw::Tables | Kw::Hosts | Kw::Consts)) => {
+                Tok::Kw(k @ (Kw::Helpers | Kw::Tables | Kw::Hosts | Kw::Consts | Kw::Inputs)) => {
                     self.bump();
                     self.expect(Tok::LBracket)?;
                     let list = self.labels(Tok::RBracket)?;
@@ -740,28 +757,21 @@ impl Parser {
                         Kw::Helpers => &mut u.helpers,
                         Kw::Tables => &mut u.tables,
                         Kw::Hosts => &mut u.hosts,
-                        _ => &mut u.consts,
+                        Kw::Consts => &mut u.consts,
+                        _ => &mut u.inputs,
                     };
                     if slot.replace(list).is_some() {
                         return self.fail(span, format!("duplicate `{}` list", k.as_str()));
                     }
                 }
                 Tok::Kw(Kw::Input) => {
-                    self.bump();
-                    let label = self.label()?;
-                    self.expect(Tok::Assign)?;
-                    let target = self.label()?;
-                    let mut grid = self.grid_attrs()?;
-                    self.expect(Tok::Semi)?;
-                    grid.span = span.to(self.prev_span());
-                    u.inputs.push(InputItem {
-                        span: span.to(self.prev_span()),
-                        label,
-                        target,
-                        grid,
-                    });
+                    return self.fail(
+                        span,
+                        "inputs are program items now: write `input d = u @dims(…) …;` after \
+                         the functions, and list it in the unit with `inputs [d];`",
+                    );
                 }
-                _ => return self.unexpected("`main`, a list, or `input`"),
+                _ => return self.unexpected("`main` or a list"),
             }
         }
         self.expect(Tok::RBrace)?;
@@ -1129,19 +1139,20 @@ impl Parser {
             Tok::Kw(Kw::Density) => {
                 self.bump();
                 self.expect(Tok::LParen)?;
-                let first = self.label()?;
-                let (unit, input) = if self.eat(&Tok::Dot) {
-                    (Some(first), self.label()?)
-                } else {
-                    (None, first)
-                };
+                let input = self.label()?;
+                if self.is(&Tok::Dot) {
+                    return self.fail(
+                        self.span(),
+                        "inputs are program-wide: write `density(d)`, not `density(u.d)`",
+                    );
+                }
                 let index = if self.eat(&Tok::Comma) {
                     Some(Box::new(self.expr()?))
                 } else {
                     None
                 };
                 self.expect(Tok::RParen)?;
-                ExprKind::Density { unit, input, index }
+                ExprKind::Density { input, index }
             }
             Tok::Kw(Kw::Ambient) => {
                 self.bump();

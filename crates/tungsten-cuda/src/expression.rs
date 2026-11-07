@@ -10,7 +10,7 @@ use tungsten_ir::model::{AmbientKind, BinaryOperator, ConstExpr, Expression, Una
 
 use super::converter::FunctionConverter;
 use super::types::{
-    IntWidth, OperandKind, convert_binary_op, device_type, find_density_input, is_float, is_integer,
+    IntWidth, OperandKind, convert_binary_op, device_type, is_float, is_integer,
     is_pointer, is_scalar, is_vector, operand_kind, unit_return_type,
 };
 use super::{BUFFER_LAYOUT, PARAM_CTX, PARAM_POS, uniform_arguments};
@@ -155,7 +155,7 @@ impl<'a> FunctionConverter<'a> {
             }
             Expression::DensityVariable(input, index) => {
                 let program = self.program;
-                let di = find_density_input(program, *input);
+                let di = &program.density_inputs[*input];
                 let element = device_type(unit_return_type(program, di.density_function));
                 let buffer = self.naming.buffer_field(&Instance::from_input(di)).to_string();
                 let (dx, dy, dz) = di.dimensions;

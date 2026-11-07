@@ -68,20 +68,6 @@ pub fn unit_return_type(
     &program.functions[*function].return_type
 }
 
-/// The program's density input for `r`; inputs live in the units, so every unit is searched.
-pub fn find_density_input(
-    program: &opt::OptimizedProgram,
-    r: opt::Ref<opt::DensityInput>,
-) -> &opt::DensityInput {
-    for (_, cu) in program.compute_units.iter() {
-        let opt::ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-        if density_inputs.contains(r) {
-            return &density_inputs[r];
-        }
-    }
-    panic!("density input {:?} belongs to no compute unit", r)
-}
-
 /// Whether the device representation of `t` is a pointer (samplers).
 pub fn is_pointer(t: &VariableType) -> bool {
     matches!(

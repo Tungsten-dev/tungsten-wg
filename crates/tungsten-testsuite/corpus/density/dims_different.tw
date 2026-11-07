@@ -10,9 +10,10 @@ program {
     fn top_main() -> i32 {
         return density(b);
     }
+    input b = base @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     unit top {
         main top_main;
-        input b = base @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        inputs [b];
     }
     entry top @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }

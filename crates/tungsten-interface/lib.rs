@@ -328,8 +328,8 @@ fn discover_instances(
         instances.push(inst);
         let ComputeUnit::DensityFunction { density_inputs, .. } = &program.compute_units[inst.cu];
         let mut deps: Vec<Instance> = Vec::new();
-        for (_, di) in density_inputs.iter() {
-            let dep = Instance::from_input(di);
+        for &r in density_inputs {
+            let dep = Instance::from_input(&program.density_inputs[r]);
             if !deps.contains(&dep) {
                 deps.push(dep);
             }

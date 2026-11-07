@@ -202,20 +202,32 @@ fn dangling_lists() {
         name: "c".into(),
     });
     let t = p.permutation_tables.insert(PermutationTableInput::Base3DNoise);
+    let leaf = p.functions.insert(function("leaf", &[], &[], VariableType::F64, |_| vec![]));
+    let src = p.compute_units.insert(unit(leaf));
+    let d = p.density_inputs.insert(DensityInput {
+        name: Name::Anonymous,
+        density_function: src,
+        scaled_origin: (1.0, 1.0, 1.0),
+        scaled_position: (1.0, 1.0, 1.0),
+        dimensions: (1, 1, 1),
+    });
     p.functions[main].host_inputs.push(h);
     let mut u = unit(main);
     let ComputeUnit::DensityFunction {
+        density_inputs,
         permutation_table_inputs,
         host_inputs,
         helper_functions,
         constants,
         ..
     } = &mut u;
+    density_inputs.push(d);
     permutation_table_inputs.push(t);
     host_inputs.push(h);
     helper_functions.push(helper);
     constants.push(c);
     p.compute_units.insert(u);
+    p.density_inputs.remove(d);
     p.functions.remove(helper);
     p.host_inputs.remove(h);
     p.constants.remove(c);
@@ -224,6 +236,7 @@ fn dangling_lists() {
         errs(&p, &registry()),
         [
             "fn `main` › hosts 0: dangling reference to a host input",
+            "unit `main` › inputs 0: dangling reference to a density input",
             "unit `main` › tables 0: dangling reference to a permutation table",
             "unit `main` › hosts 0: dangling reference to a host input",
             "unit `main` › helpers 0: dangling reference to a function",
@@ -239,14 +252,15 @@ fn dangling_input_source_and_main() {
     let gone = p.compute_units.insert(unit(main));
     p.compute_units.remove(gone);
     let mut u = unit(main);
-    let ComputeUnit::DensityFunction { density_inputs, .. } = &mut u;
-    density_inputs.insert(DensityInput {
+    let d = p.density_inputs.insert(DensityInput {
         name: Name::Anonymous,
         density_function: gone,
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
         dimensions: (1, 1, 1),
     });
+    let ComputeUnit::DensityFunction { density_inputs, .. } = &mut u;
+    density_inputs.push(d);
     p.compute_units.insert(u);
     let gone_fn = p.functions.insert(function("g", &[], &[], VariableType::F64, |_| vec![]));
     p.functions.remove(gone_fn);

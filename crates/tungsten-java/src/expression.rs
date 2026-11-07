@@ -6,7 +6,7 @@ the generated class so locals cannot shadow them.
 */
 
 use super::converter::FunctionConverter;
-use super::types::{boxed_class, find_density_input, convert_binary_op, convert_type, holder_class, is_object, numeric_literal};
+use super::types::{boxed_class, convert_binary_op, convert_type, holder_class, is_object, numeric_literal};
 use super::{HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_POS, uniform_arguments};
 use tungsten_interface::Instance;
 use tungsten_interface::naming::java_sanitize;
@@ -132,7 +132,7 @@ impl<'a> FunctionConverter<'a> {
                 J::call(Some(J::name(HELPERS_CLASS)), &java_sanitize(function_name), args)
             }
             Expression::DensityVariable(input, index) => {
-                let di = find_density_input(self.program, *input);
+                let di = &self.program.density_inputs[*input];
                 let buffer = self.naming.buffer_field(&Instance::from_input(di)).to_string();
                 let index = match index {
                     Some(i) => self.convert_to_type(i, &VariableType::I32),

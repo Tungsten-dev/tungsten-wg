@@ -202,7 +202,8 @@ impl<'a> FunctionConverter<'a> {
                 }
             }
             Expression::DensityVariable(input, index) => {
-                let di = self.find_density_input(*input);
+                let program: &'a OptimizedProgram = self.program;
+                let di = &program.density_inputs[*input];
                 let buffer = self.naming.buffer_field(&Instance::from_input(di));
                 let index = match index {
                     Some(i) => self.convert_expression(i),

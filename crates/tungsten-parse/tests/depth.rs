@@ -16,6 +16,7 @@ fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
         constants: Arena::new(),
         host_inputs: Arena::new(),
         permutation_tables: Arena::new(),
+        density_inputs: Arena::new(),
     };
     let mut variables = Arena::new();
     let x = variables.insert(Var {
@@ -33,7 +34,7 @@ fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
     });
     p.compute_units.insert(ComputeUnit::DensityFunction {
         function: f,
-        density_inputs: Arena::new(),
+        density_inputs: vec![],
         permutation_table_inputs: vec![],
         host_inputs: vec![],
         helper_functions: vec![],

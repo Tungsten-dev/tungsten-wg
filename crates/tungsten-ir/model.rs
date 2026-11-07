@@ -363,12 +363,12 @@ pub struct EntryPoint {
     pub scaled_position: (f64, f64, f64),
 }
 
-/// `Clone` gives `density_inputs` a fresh tag and rewrites the refs into it (see `retag`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ComputeUnit {
     DensityFunction {
         function: Ref<Function>,
-        density_inputs: Arena<DensityInput>,
+        /// The program inputs this unit lists, in build order.
+        density_inputs: Vec<Ref<DensityInput>>,
         permutation_table_inputs: Vec<Ref<PermutationTableInput>>,
         host_inputs: Vec<Ref<HostInput>>,
         helper_functions: Vec<Ref<Function>>,
@@ -453,8 +453,8 @@ pub struct Function {
     pub source_hash: u64,
 }
 
-/// `Clone` is fully independent: every arena (including the ones nested in compute units and
-/// functions) gets a fresh tag, and every embedded `Ref` is rewritten to it.
+/// `Clone` is fully independent: every arena (including the ones nested in functions) gets a
+/// fresh tag, and every embedded `Ref` is rewritten to it.
 ///
 /// Any new `Ref`-holding field anywhere in the IR must be added to the walker in `retag.rs`.
 pub struct OptimizedProgram {
@@ -464,6 +464,7 @@ pub struct OptimizedProgram {
     pub constants: Arena<Constant>,
     pub host_inputs: Arena<HostInput>,
     pub permutation_tables: Arena<PermutationTableInput>,
+    pub density_inputs: Arena<DensityInput>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

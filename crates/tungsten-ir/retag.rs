@@ -63,34 +63,6 @@ impl Retag {
 // Raw clones: fresh tags for the nested arenas, embedded refs untouched.
 // ---------------------------------------------------------------------------------------------
 
-impl ComputeUnit {
-    pub(crate) fn clone_raw(&self) -> Self {
-        let ComputeUnit::DensityFunction {
-            function,
-            density_inputs,
-            permutation_table_inputs,
-            host_inputs,
-            helper_functions,
-            constants,
-            source_hash,
-        } = self;
-        ComputeUnit::DensityFunction {
-            function: *function,
-            density_inputs: density_inputs.clone(),
-            permutation_table_inputs: permutation_table_inputs.clone(),
-            host_inputs: host_inputs.clone(),
-            helper_functions: helper_functions.clone(),
-            constants: constants.clone(),
-            source_hash: *source_hash,
-        }
-    }
-
-    fn density_inputs(&self) -> &Arena<DensityInput> {
-        let ComputeUnit::DensityFunction { density_inputs, .. } = self;
-        density_inputs
-    }
-}
-
 impl Function {
     pub(crate) fn clone_raw(&self) -> Self {
         Self {
@@ -102,20 +74,6 @@ impl Function {
             return_type: self.return_type.clone(),
             source_hash: self.source_hash,
         }
-    }
-}
-
-impl Clone for ComputeUnit {
-    /// Refs into the unit's own `density_inputs` are rewritten; refs into program-wide arenas
-    /// (and `DensityInput::var`, which points into a function's arena) are kept.
-    fn clone(&self) -> Self {
-        let mut c = self.clone_raw();
-        let mut retag = Retag {
-            map: HashMap::from([(self.density_inputs().tag(), c.density_inputs().tag())]),
-            strict: false,
-        };
-        walk_compute_unit(&mut c, &mut retag);
-        c
     }
 }
 
@@ -135,12 +93,13 @@ impl Clone for Function {
 impl Clone for OptimizedProgram {
     fn clone(&self) -> Self {
         let mut c = OptimizedProgram {
-            compute_units: self.compute_units.clone_with(ComputeUnit::clone_raw),
+            compute_units: self.compute_units.clone(),
             functions: self.functions.clone_with(Function::clone_raw),
             entry_points: self.entry_points.clone(),
             constants: self.constants.clone(),
             host_inputs: self.host_inputs.clone(),
             permutation_tables: self.permutation_tables.clone(),
+            density_inputs: self.density_inputs.clone(),
         };
 
         let mut map = HashMap::from([
@@ -149,11 +108,9 @@ impl Clone for OptimizedProgram {
             (self.constants.tag(), c.constants.tag()),
             (self.host_inputs.tag(), c.host_inputs.tag()),
             (self.permutation_tables.tag(), c.permutation_tables.tag()),
+            (self.density_inputs.tag(), c.density_inputs.tag()),
         ]);
         // `clone_with` keeps every slot in place, so live values pair up in iteration order.
-        for ((_, old), (_, new)) in self.compute_units.iter().zip(c.compute_units.iter()) {
-            map.insert(old.density_inputs().tag(), new.density_inputs().tag());
-        }
         for ((_, old), (_, new)) in self.functions.iter().zip(c.functions.iter()) {
             map.insert(old.variables.tag(), new.variables.tag());
         }
@@ -180,6 +137,9 @@ pub(crate) fn walk_program(p: &mut OptimizedProgram, v: &mut impl RefVisitor) {
     for c in p.constants.values_mut() {
         walk_const_expr(&mut c.value, v);
     }
+    for input in p.density_inputs.values_mut() {
+        v.compute_unit(&mut input.density_function);
+    }
 }
 
 fn walk_compute_unit(cu: &mut ComputeUnit, v: &mut impl RefVisitor) {
@@ -193,9 +153,7 @@ fn walk_compute_unit(cu: &mut ComputeUnit, v: &mut impl RefVisitor) {
         source_hash: _,
     } = cu;
     v.function(function);
-    for input in density_inputs.values_mut() {
-        v.compute_unit(&mut input.density_function);
-    }
+    density_inputs.iter_mut().for_each(|r| v.density_input(r));
     permutation_table_inputs.iter_mut().for_each(|r| v.table(r));
     host_inputs.iter_mut().for_each(|r| v.host_input(r));
     helper_functions.iter_mut().for_each(|r| v.function(r));
@@ -377,6 +335,7 @@ mod tests {
             constants: Arena::new(),
             host_inputs: Arena::new(),
             permutation_tables: Arena::new(),
+            density_inputs: Arena::new(),
         };
         let a = p.constants.insert(Constant {
             value: ConstExpr::Double(0.5),
@@ -407,7 +366,7 @@ mod tests {
         let leaf_fn = p.functions.insert(leaf_fn);
         let leaf = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: leaf_fn,
-            density_inputs: Arena::new(),
+            density_inputs: vec![],
             permutation_table_inputs: vec![],
             host_inputs: vec![],
             helper_functions: vec![],
@@ -417,8 +376,7 @@ mod tests {
 
         let mut root_fn = function("root");
         let x = var(&mut root_fn, "x", VariableType::F64);
-        let mut inputs = Arena::new();
-        let input = inputs.insert(DensityInput {
+        let input = p.density_inputs.insert(DensityInput {
             name: Name::Named("in0".into()),
             density_function: leaf,
             scaled_origin: (1.0, 1.0, 1.0),
@@ -472,7 +430,7 @@ mod tests {
         let root_fn = p.functions.insert(root_fn);
         let root = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: root_fn,
-            density_inputs: inputs,
+            density_inputs: vec![input],
             permutation_table_inputs: vec![table],
             host_inputs: vec![seed],
             helper_functions: vec![helper],
@@ -517,11 +475,7 @@ mod tests {
             assert!(c.functions.values().any(|f| f.variables.contains(*r)));
         }
         for r in &refs.inputs {
-            assert!(
-                c.compute_units
-                    .values()
-                    .any(|cu| cu.density_inputs().contains(*r))
-            );
+            c.density_inputs.get(*r);
         }
 
         // Top-level refs translate back to the originals.
@@ -536,6 +490,7 @@ mod tests {
         back(&p.constants, &c.constants);
         back(&p.host_inputs, &c.host_inputs);
         back(&p.permutation_tables, &c.permutation_tables);
+        back(&p.density_inputs, &c.density_inputs);
 
         // The removed slot stays removed, and its stale ref is stale in the clone too.
         assert_eq!(p.functions.iter().count(), c.functions.iter().count());

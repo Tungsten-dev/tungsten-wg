@@ -167,13 +167,8 @@ impl Printer<'_, '_> {
                 ..
             } => format!("extern {function_name}({})", self.exprs(parameters)),
             Expression::DensityVariable(r, idx) => {
-                let input = &ctx.inputs[r];
-                // Helpers may read inputs of a unit other than the one they are printed under.
-                let name = if ctx.owners(self.f).contains(&input.unit) {
-                    input.name.clone()
-                } else {
-                    format!("{}::{}", ctx.units[&input.unit].display, input.name)
-                };
+                // Input names are unique within the program.
+                let name = ctx.inputs[r].name.clone();
                 match idx {
                     None => name,
                     Some(i) => format!("{name}[{}]", self.expr(i)),

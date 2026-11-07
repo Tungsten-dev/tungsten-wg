@@ -59,7 +59,7 @@ pub struct SourceMap {
     /// Index = `entry_points` index.
     pub entries: Vec<Span>,
     pub vars: HashMap<(Ref<Function>, Ref<Var>), Span>,
-    pub inputs: HashMap<(Ref<ComputeUnit>, Ref<DensityInput>), Span>,
+    pub inputs: HashMap<Ref<DensityInput>, Span>,
     pub statements: HashMap<(Ref<Function>, StmtPath), Span>,
     pub expressions: HashMap<(ExprOwner, ExprPath), Span>,
 }

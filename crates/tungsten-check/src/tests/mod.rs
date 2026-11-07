@@ -101,6 +101,7 @@ pub fn snippet(decls: &str, body: &str) -> String {
     fn leaf() -> f64 {{ return 1.0; }}
     fn top(p: f64) -> f64 @hosts(h) {{ {body} }}
     fn top_main() -> f64 {{ return top(1.0); }}
+    input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     unit leaf_u {{ main leaf; }}
     unit u {{
         main top_main;
@@ -108,7 +109,7 @@ pub fn snippet(decls: &str, body: &str) -> String {
         hosts [h];
         tables [t];
         consts [c];
-        input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        inputs [d];
     }}
     entry e = u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }}"
@@ -169,6 +170,7 @@ pub fn empty() -> OptimizedProgram {
         constants: Arena::new(),
         host_inputs: Arena::new(),
         permutation_tables: Arena::new(),
+        density_inputs: Arena::new(),
     }
 }
 
@@ -205,7 +207,7 @@ pub fn function(
 pub fn unit(main: Ref<Function>) -> ComputeUnit {
     ComputeUnit::DensityFunction {
         function: main,
-        density_inputs: Arena::new(),
+        density_inputs: vec![],
         permutation_table_inputs: vec![],
         host_inputs: vec![],
         helper_functions: vec![],

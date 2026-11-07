@@ -431,6 +431,7 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         constants: Arena::new(),
         host_inputs: Arena::new(),
         permutation_tables: Arena::new(),
+        density_inputs: Arena::new(),
     };
     let lib = opts.library;
     let mut hosts = vec![];
@@ -520,7 +521,7 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
     for _ in 0..n_units {
         let u = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: *rng.pick(&fns),
-            density_inputs: Arena::new(),
+            density_inputs: vec![],
             permutation_table_inputs: tables
                 .iter()
                 .filter(|_| rng.chance(1, 2))
@@ -537,47 +538,44 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         });
         units.push(u);
     }
+    // program inputs; each unit lists a random subset, so some are shared, some unlisted,
+    // and a listing is sometimes repeated
     let mut inputs = vec![];
+    for _ in 0..if lib { 0 } else { rng.below(2 * n_units + 1) } {
+        inputs.push(p.density_inputs.insert(DensityInput {
+            name: var_name(rng),
+            density_function: *rng.pick(&units),
+            scaled_origin: (f64_edge(rng), 1.0, -2.5),
+            scaled_position: (0.5, f64_edge(rng), 1.0),
+            dimensions: (rng.below(5) as i32 - 1, 4, 16),
+        }));
+    }
     for &u in &units {
-        let mut arena = Arena::new();
-        for _ in 0..rng.below(3) {
-            inputs.push(arena.insert(DensityInput {
-                name: var_name(rng),
-                density_function: *rng.pick(&units),
-                scaled_origin: (f64_edge(rng), 1.0, -2.5),
-                scaled_position: (0.5, f64_edge(rng), 1.0),
-                dimensions: (rng.below(5) as i32 - 1, 4, 16),
-            }));
+        let mut list: Vec<Ref<DensityInput>> =
+            inputs.iter().filter(|_| rng.chance(1, 2)).copied().collect();
+        if !list.is_empty() && rng.chance(1, 6) {
+            let again = *rng.pick(&list);
+            list.push(again);
         }
         let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[u];
-        *density_inputs = arena;
+        *density_inputs = list;
     }
 
     // bodies
     let fn_list = fns.clone();
     for &f in &fns {
         let vars: Vec<Ref<Var>> = p.functions[f].variables.iter().map(|(r, _)| r).collect();
-        // `inputs` must be refs of the *final* arenas, so collect them again from the units
-        let live_inputs: Vec<Ref<DensityInput>> = p
-            .compute_units
-            .values()
-            .flat_map(|u| {
-                let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-                density_inputs.iter().map(|(r, _)| r).collect::<Vec<_>>()
-            })
-            .collect();
         let sc = Scope {
             vars,
             consts: &consts,
             hosts: &hosts,
             tables: &tables,
             fns: &fn_list,
-            inputs: &live_inputs,
+            inputs: &inputs,
         };
         let body = gen_stmts(rng, &sc, 3, false);
         p.functions[f].body = body;
     }
-    let _ = inputs;
 
     for _ in 0..if lib { 0 } else { rng.below(4) } {
         p.entry_points.push(EntryPoint {

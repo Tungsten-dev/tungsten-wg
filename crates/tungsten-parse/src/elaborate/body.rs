@@ -210,11 +210,11 @@ impl<'a> Ctx<'a> {
                 Some(VariableType::PermutationTable),
             ),
             ExprKind::Ambient(k) => (Expression::Ambient(*k), Some(ambient_type(*k))),
-            ExprKind::Density { unit, input, index } => {
-                let Some(f) = sc.f else {
+            ExprKind::Density { input, index } => {
+                if sc.f.is_none() {
                     return err(e.span, "not allowed in a constant expression");
-                };
-                let d = self.resolve_density(f, unit.as_ref(), input)?;
+                }
+                let d = self.lookup_input(input)?;
                 let index = match index {
                     Some(i) => Some(Box::new(self.child(sc, i, path, ExprStep::DensityIndex)?.0)),
                     None => None,
@@ -377,57 +377,8 @@ impl<'a> Ctx<'a> {
     }
 
     fn density_return_type(&self, d: Ref<DensityInput>) -> VariableType {
-        for u in self.units.values() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = &self.prog.compute_units[u.r];
-            if density_inputs.contains(d) {
-                let target = density_inputs[d].density_function;
-                let ComputeUnit::DensityFunction { function, .. } =
-                    &self.prog.compute_units[target];
-                return self.prog.functions[*function].return_type.clone();
-            }
-        }
-        unreachable!("density input without a unit")
-    }
-
-    fn resolve_density(
-        &self,
-        f: Ref<Function>,
-        unit: Option<&Label>,
-        input: &Label,
-    ) -> R<Ref<DensityInput>> {
-        let u = match unit {
-            Some(u) => self.lookup_unit(u)?,
-            None => {
-                let mut candidates = self
-                    .unit_order
-                    .iter()
-                    .filter_map(|r| self.units.values().find(|u| u.r == *r))
-                    .filter(|u| u.main == f || u.helpers.contains(&f));
-                let first = candidates.next();
-                match (first, candidates.next()) {
-                    (Some(u), None) => u,
-                    (None, _) => {
-                        return err(
-                            input.span,
-                            "this function belongs to no unit; write `density(unit.input)`",
-                        );
-                    }
-                    _ => {
-                        return err(
-                            input.span,
-                            "this function belongs to several units; \
-                             write `density(unit.input)`",
-                        );
-                    }
-                }
-            }
-        };
-        match u.inputs.get(&input.key()) {
-            Some(d) => Ok(*d),
-            None => err(
-                input.span,
-                format!("the unit has no input `{}`", input.display()),
-            ),
-        }
+        let target = self.prog.density_inputs[d].density_function;
+        let ComputeUnit::DensityFunction { function, .. } = &self.prog.compute_units[target];
+        self.prog.functions[*function].return_type.clone()
     }
 }

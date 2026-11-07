@@ -702,6 +702,7 @@ fn empty_program() -> OptimizedProgram {
         constants: Arena::new(),
         host_inputs: Arena::new(),
         permutation_tables: Arena::new(),
+        density_inputs: Arena::new(),
     }
 }
 
@@ -930,57 +931,112 @@ fn labels_must_be_unique_per_namespace() {
 const GRID: &str = "@dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)";
 
 #[test]
-fn unqualified_density_needs_exactly_one_unit() {
-    let base = |helper_in_two: bool| {
-        format!(
-            "program {{
-                fn leaf() -> f64 {{ return 1.0; }}
-                fn shared() -> f64 {{ return density(d); }}
-                fn root_a() -> f64 {{ return shared(); }}
-                fn root_b() -> f64 {{ return shared(); }}
-                fn orphan() -> f64 {{ return density(d); }}
-                unit leaf_u {{ main leaf; }}
-                unit a {{ main root_a; helpers [shared]; input d = leaf_u {GRID}; }}
-                unit b {{ main root_b; helpers [{}]; input d = leaf_u {GRID}; }}
-            }}",
-            if helper_in_two { "shared" } else { "" }
-        )
-    };
-    let d = fails(&base(true), "several units");
-    assert!(d.snippet().unwrap().text.contains("density(d)"));
-    // `shared` is only in unit a's helpers now, but `orphan` is in no unit
-    fails(&base(false), "no unit");
-    // qualified reads work from anywhere
-    ok(&format!(
-        "program {{
-            fn leaf() -> f64 {{ return 1.0; }}
-            fn root() -> f64 {{ return (density(a.d) + helper()); }}
-            fn helper() -> f64 {{ return density(a.d, 1); }}
-            unit leaf_u {{ main leaf; }}
-            unit a {{ main root; helpers [helper]; input d = leaf_u {GRID}; }}
-        }}"
-    ));
-    // unqualified, in the unit's own main fn
+fn density_reads_resolve_program_wide() {
+    // a shared helper reads an input both of its units list, from any function
     let t = ok(&format!(
         "program {{
             fn leaf() -> f64 {{ return 1.0; }}
-            fn root() -> f64 {{ return density(d); }}
+            fn shared() -> f64 {{ return (density(d) + density(d, 1)); }}
+            fn root_a() -> f64 {{ return shared(); }}
+            fn root_b() -> f64 {{ return shared(); }}
+            fn orphan() -> f64 {{ return density(d); }}
+            input d = leaf_u {GRID};
             unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input d = leaf_u {GRID}; }}
+            unit a {{ main root_a; helpers [shared]; inputs [d]; }}
+            unit b {{ main root_b; helpers [shared]; inputs [d]; }}
         }}"
     ));
-    let (_, root) = find_fn(&t, "root");
+    let (_, root) = find_fn(&t, "orphan");
     assert!(matches!(
         &root.body[0],
         Statement::Return(Expression::DensityVariable(_, None))
     ));
+    assert_eq!(t.program.density_inputs.iter().count(), 1);
+    // a read of an input the unit doesn't list is the checker's business, not an error here
+    ok(&format!(
+        "program {{
+            fn leaf() -> f64 {{ return 1.0; }}
+            fn root() -> f64 {{ return density(d); }}
+            input d = leaf_u {GRID};
+            unit leaf_u {{ main leaf; }}
+            unit a {{ main root; }}
+        }}"
+    ));
+    // inputs are declared before lists and reads resolve, so order doesn't matter
+    ok(&format!(
+        "program {{
+            fn leaf() -> f64 {{ return 1.0; }}
+            fn root() -> f64 {{ return density(d); }}
+            unit a {{ main root; inputs [d]; }}
+            unit leaf_u {{ main leaf; }}
+            input d = leaf_u {GRID};
+        }}"
+    ));
     fails(
         &format!(
-            "program {{ fn leaf() -> f64 {{ return 1.0; }} fn r() -> f64 {{ return density(a.zz); }}
-              unit leaf_u {{ main leaf; }} unit a {{ main r; input d = leaf_u {GRID}; }} }}"
+            "program {{ fn leaf() -> f64 {{ return 1.0; }} fn r() -> f64 {{ return density(zz); }}
+              input d = leaf_u {GRID}; unit leaf_u {{ main leaf; }} unit a {{ main r; inputs [d]; }} }}"
         ),
-        "no input `zz`",
+        "unknown input `zz`",
     );
+    fails(
+        &format!(
+            "program {{ fn leaf() -> f64 {{ return 1.0; }} fn r() -> f64 {{ return 1.0; }}
+              input d = leaf_u {GRID}; unit leaf_u {{ main leaf; }} unit a {{ main r; inputs [e]; }} }}"
+        ),
+        "unknown input `e`",
+    );
+    // the old forms point to the new ones
+    fails(
+        &format!(
+            "program {{ fn leaf() -> f64 {{ return 1.0; }} fn r() -> f64 {{ return density(a.d); }}
+              input d = leaf_u {GRID}; unit leaf_u {{ main leaf; }} unit a {{ main r; inputs [d]; }} }}"
+        ),
+        "write `density(d)`",
+    );
+    fails(
+        &format!(
+            "program {{ fn leaf() -> f64 {{ return 1.0; }}
+              unit leaf_u {{ main leaf; }} unit a {{ main leaf; input d = leaf_u {GRID}; }} }}"
+        ),
+        "inputs are program items",
+    );
+    fails(
+        &format!(
+            "program {{ fn leaf() -> f64 {{ return 1.0; }} fn r() -> f64 {{ return 1.0; }}
+              input d = leaf_u {GRID}; unit leaf_u {{ main leaf; }}
+              unit a {{ main r; inputs [d]; inputs [d]; }} }}"
+        ),
+        "duplicate `inputs` list",
+    );
+}
+
+#[test]
+fn inputs_lists_keep_order_and_duplicates() {
+    let t = ok(&format!(
+        "program {{
+            fn leaf() -> f64 {{ return 1.0; }}
+            fn root() -> f64 {{ return density(b); }}
+            input a = leaf_u {GRID};
+            input b = leaf_u {GRID};
+            input unlisted = leaf_u {GRID};
+            unit leaf_u {{ main leaf; }}
+            unit u {{ main root; inputs [b, a, b]; }}
+        }}"
+    ));
+    let refs: Vec<_> = t.program.density_inputs.iter().map(|(r, _)| r).collect();
+    let ComputeUnit::DensityFunction { density_inputs, .. } =
+        t.program.compute_units.values().nth(1).unwrap();
+    assert_eq!(density_inputs, &vec![refs[1], refs[0], refs[1]]);
+    let text = print(&t.program);
+    assert!(text.contains("        inputs [b, a, b];\n    }"), "{text}");
+    assert!(text.contains("    input unlisted = leaf @dims"), "{text}");
+    // inputs print after functions and before units
+    let input_at = text.find("    input a = ").unwrap();
+    assert!(text.find("    fn root").unwrap() < input_at, "{text}");
+    assert!(input_at < text.find("    unit leaf").unwrap(), "{text}");
+    let back = load(&text, FileId(0), &NoEnv).unwrap();
+    assert!(isomorphic(&back.program, &t.program));
 }
 
 #[test]
@@ -988,9 +1044,10 @@ fn density_read_type_is_the_target_return_type() {
     let t = ok(&format!(
         "program {{
             fn leaf() -> vec3 {{ return vec3(1.0, 2.0, 3.0); }}
-            fn root() -> f64 {{ return density(a.d).x; }}
+            fn root() -> f64 {{ return density(d).x; }}
+            input d = leaf_u {GRID};
             unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input d = leaf_u {GRID}; }}
+            unit a {{ main root; inputs [d]; }}
         }}"
     ));
     let (_, root) = find_fn(&t, "root");
@@ -1008,16 +1065,14 @@ fn input_names() {
     let t = ok(&format!(
         "program {{
             fn leaf() -> f64 {{ return 1.0; }}
-            fn root(p: f64) -> f64 {{ vars {{ d: f64 }} let l: f64 = 1.0; return density(a.d); }}
+            fn root(p: f64) -> f64 {{ vars {{ d: f64 }} let l: f64 = 1.0; return density(d); }}
+            input d = leaf_u {GRID};
+            input %0 = leaf_u {GRID};
+            input e#4 = leaf_u {GRID};
+            input f##2 = leaf_u {GRID};
+            input f##3 = leaf_u {GRID};
             unit leaf_u {{ main leaf; }}
-            unit a {{
-                main root;
-                input d = leaf_u {GRID};
-                input %0 = leaf_u {GRID};
-                input e#4 = leaf_u {GRID};
-                input f##2 = leaf_u {GRID};
-                input f##3 = leaf_u {GRID};
-            }}
+            unit a {{ main root; inputs [d, %0, e#4, f##2, f##3]; }}
         }}"
     ));
     // no placeholder vars, and a var may share an input's label
@@ -1033,9 +1088,7 @@ fn input_names() {
     );
     assert!(root.variables.values().all(|v| v.t != VariableType::DensityInput));
     // input labels follow the host rule
-    let ComputeUnit::DensityFunction { density_inputs, .. } =
-        t.program.compute_units.values().nth(1).unwrap();
-    let names: Vec<_> = density_inputs.values().map(|d| d.name.clone()).collect();
+    let names: Vec<_> = t.program.density_inputs.values().map(|d| d.name.clone()).collect();
     assert_eq!(
         names,
         [
@@ -1057,8 +1110,9 @@ fn input_names() {
         &format!(
             "program {{
                 fn leaf() -> f64 {{ return 1.0; }}
+                input d = leaf_u {GRID};
+                input d = leaf_u {GRID};
                 unit leaf_u {{ main leaf; }}
-                unit a {{ main leaf; input d = leaf_u {GRID}; input d = leaf_u {GRID}; }}
             }}"
         ),
         "duplicate input label `d`",
@@ -1068,8 +1122,8 @@ fn input_names() {
         &format!(
             "program {{
                 fn leaf() -> f64 {{ vars {{ v: density }} return 1.0; }}
+                input d = leaf_u {GRID} @var(leaf.v);
                 unit leaf_u {{ main leaf; }}
-                unit a {{ main leaf; input d = leaf_u {GRID} @var(leaf.v); }}
             }}"
         ),
         "unknown attribute `@var`",
@@ -1782,15 +1836,14 @@ fn source_map_inputs() {
     let t = ok(&format!(
         "program {{
             fn leaf() -> f64 {{ return 1.0; }}
-            fn root() -> f64 {{ return density(a.d); }}
+            fn root() -> f64 {{ return density(d); }}
+            input d = leaf_u {GRID};
             unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input d = leaf_u {GRID}; }}
+            unit a {{ main root; inputs [d]; }}
         }}"
     ));
-    let (u, unit) = t.program.compute_units.iter().nth(1).unwrap();
-    let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
-    let (d, _) = density_inputs.iter().next().unwrap();
-    assert!(t.source_map.inputs.contains_key(&(u, d)));
+    let (d, _) = t.program.density_inputs.iter().next().unwrap();
+    assert!(t.source_map.inputs.contains_key(&d));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1884,15 +1937,14 @@ fn printing_is_total_for_unusual_programs() {
     let mut shared = func(Some("shared"));
     let leaf_u = p.compute_units.insert(ComputeUnit::DensityFunction {
         function: leaf_f,
-        density_inputs: Arena::new(),
+        density_inputs: vec![],
         permutation_table_inputs: vec![],
         host_inputs: vec![],
         helper_functions: vec![],
         constants: vec![],
         source_hash: 0,
     });
-    let mut inputs = Arena::new();
-    let d = inputs.insert(DensityInput {
+    let d = p.density_inputs.insert(DensityInput {
         name: Name::Named("dv".into()),
         density_function: leaf_u,
         scaled_origin: (1.0, 1.0, 1.0),
@@ -1920,11 +1972,7 @@ fn printing_is_total_for_unusual_programs() {
     for main in [shared_f, root_f] {
         p.compute_units.insert(ComputeUnit::DensityFunction {
             function: main,
-            density_inputs: if main == shared_f {
-                inputs.clone()
-            } else {
-                Arena::new()
-            },
+            density_inputs: if main == shared_f { vec![d] } else { vec![] },
             permutation_table_inputs: vec![],
             host_inputs: vec![],
             helper_functions: vec![shared_f],
@@ -1933,16 +1981,8 @@ fn printing_is_total_for_unusual_programs() {
         });
     }
     p.host_inputs.insert(HostInput::Dynamic);
-    // the input arena was cloned above, so `d` belongs to the first insert only; drop the copy
-    let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[leaf_u];
-    *density_inputs = inputs;
-    p.compute_units.iter().for_each(|_| {});
-    // remove the second copy so the ref is unique
-    let second = p.compute_units.iter().nth(1).unwrap().0;
-    let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[second];
-    *density_inputs = Arena::new();
     let text = print(&p);
-    assert!(text.contains("density(leaf.dv)"), "{text}");
+    assert!(text.contains("density(dv)"), "{text}");
     assert!(
         text.contains("ext `never registered`::<(extern Odd) -> [vec3; 3]>(shared())"),
         "{text}"
@@ -1991,9 +2031,10 @@ fn labels_api_matches_printed_text() {
     let t = ok(&format!(
         "program {{
             fn leaf() -> f64 {{ return 1.0; }}
-            fn root(a: f64) -> f64 {{ return density(a.d); }}
+            fn root(a: f64) -> f64 {{ return density(d); }}
+            input d = leaf_u {GRID};
             unit leaf_u {{ main leaf; }}
-            unit a {{ main root; input d = leaf_u {GRID}; }}
+            unit a {{ main root; inputs [d]; }}
             entry a {GRID};
         }}"
     ));
@@ -2008,6 +2049,6 @@ fn labels_api_matches_printed_text() {
         text.starts_with("fn root(a: f64) -> f64 @hash(0x0) {\n"),
         "{text}"
     );
-    assert!(text.contains("density(root.d)"), "{text}");
+    assert!(text.contains("density(d)"), "{text}");
     assert!(text.ends_with("}\n"));
 }

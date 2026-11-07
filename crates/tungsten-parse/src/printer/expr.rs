@@ -153,12 +153,7 @@ impl ExprPrinter<'_> {
                 out.push(')');
             }
             DensityVariable(d, idx) => {
-                let u = self.labels.input_unit(*d);
-                out.push_str(&format!(
-                    "density({}.{}",
-                    self.labels.unit(u),
-                    self.labels.input(*d)
-                ));
+                out.push_str(&format!("density({}", self.labels.input(*d)));
                 if let Some(i) = idx {
                     out.push_str(", ");
                     self.expr(i, out);

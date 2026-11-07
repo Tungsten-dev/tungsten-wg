@@ -9,7 +9,7 @@ use std::rc::Rc;
 use tungsten_interface::Interface;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
-    AmbientKind, Arena, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
+    AmbientKind, ComputeUnit, Constant, Expression, Function, Name, OptimizedProgram,
     PermutationTableInput, Ref, Var, VariableType,
 };
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
@@ -55,8 +55,6 @@ pub struct FunctionConverter<'a> {
     pub program: &'a OptimizedProgram,
     pub naming: &'a Interface,
     pub function: &'a Function,
-    /// Density inputs of the unit being converted; `None` for helper functions.
-    pub density_inputs: Option<&'a Arena<DensityInput>>,
     pub uniform: UniformVars,
     /// Helper functions referenced by the converted code, still to be generated.
     pub called: Vec<Ref<Function>>,
@@ -71,7 +69,6 @@ impl<'a> FunctionConverter<'a> {
         program: &'a OptimizedProgram,
         naming: &'a Interface,
         function: &'a Function,
-        density_inputs: Option<&'a Arena<DensityInput>>,
     ) -> Self {
         let uniform = UniformVars::new();
         let used_names = [&uniform.it, &uniform.config, &uniform.buffers, &uniform.auto_consts, &uniform.host_consts]
@@ -82,7 +79,6 @@ impl<'a> FunctionConverter<'a> {
             program,
             naming,
             function,
-            density_inputs,
             uniform,
             called: Vec::new(),
             used_constants: Vec::new(),
@@ -123,23 +119,6 @@ impl<'a> FunctionConverter<'a> {
         rcl_var
     }
 
-    /// The program's density input for `r`; helpers are shared between units, so every unit is searched.
-    pub fn find_density_input(&self, r: Ref<DensityInput>) -> &'a DensityInput {
-        if let Some(inputs) = self.density_inputs {
-            if inputs.contains(r) {
-                return &inputs[r];
-            }
-        }
-        let program: &'a OptimizedProgram = self.program;
-        for (_, cu) in program.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-            if density_inputs.contains(r) {
-                return &density_inputs[r];
-            }
-        }
-        panic!("density input does not belong to any compute unit");
-    }
-
     /// Return type of the unit's main function, i.e. the element type of its buffer.
     pub fn unit_return_type(&self, cu: Ref<ComputeUnit>) -> &'a VariableType {
         let program: &'a OptimizedProgram = self.program;
@@ -162,7 +141,7 @@ impl<'a> FunctionConverter<'a> {
             E::FunctionCall { function, .. } => self.program.functions[*function].return_type.clone(),
             E::ExternCall { return_type, .. } => return_type.clone(),
             E::DensityVariable(input, _) => {
-                self.unit_return_type(self.find_density_input(*input).density_function).clone()
+                self.unit_return_type(self.program.density_inputs[*input].density_function).clone()
             }
             E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
                 PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,

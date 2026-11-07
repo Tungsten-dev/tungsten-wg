@@ -49,10 +49,7 @@ fn mutate(p: &mut OptimizedProgram, other: &OptimizedProgram, kind: usize, k: us
             false
         }
         6 => {
-            if let Some(u) = nth(&p.compute_units, k) {
-                let ComputeUnit::DensityFunction { density_inputs, .. } = &mut p.compute_units[u];
-                remove_nth(density_inputs, k / 7);
-            }
+            remove_nth(&mut p.density_inputs, k);
             false
         }
         // Targeted removals of referenced entities.

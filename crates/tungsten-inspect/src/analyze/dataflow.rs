@@ -536,7 +536,7 @@ impl DagBuilder<'_> {
                 let info = self.density_read(*r);
                 *self
                     .density_reads
-                    .entry(format!("{}/{}", info.unit, info.input))
+                    .entry(info.input.clone())
                     .or_default() += 1;
                 match idx {
                     None => self.leaf(NodeKind::DensityRead(info), region),
@@ -634,12 +634,24 @@ impl DagBuilder<'_> {
 
     fn density_read(&self, r: Ref<tungsten_ir::model::DensityInput>) -> DensityReadInfo {
         let input = &self.ctx.inputs[&r];
-        let ComputeUnit::DensityFunction { density_inputs, .. } =
-            &self.ctx.program.compute_units[input.unit];
-        let di = &density_inputs[r];
+        let di = &self.ctx.program.density_inputs[r];
+        // The unit comes from the function being analyzed: the first of its units that lists
+        // the input, or else its first unit.
+        let owners = self.ctx.owners(self.f);
+        let lists = |cu: &Ref<ComputeUnit>| {
+            let ComputeUnit::DensityFunction { density_inputs, .. } =
+                &self.ctx.program.compute_units[*cu];
+            density_inputs.contains(&r)
+        };
+        let unit = owners
+            .iter()
+            .find(|cu| lists(cu))
+            .or(owners.first())
+            .map(|cu| self.ctx.unit_id(*cu))
+            .unwrap_or_default();
         DensityReadInfo {
             input: input.name.clone(),
-            unit: self.ctx.unit_id(input.unit),
+            unit,
             producer_unit: self.ctx.unit_id(di.density_function),
             producer_instance: self
                 .ctx

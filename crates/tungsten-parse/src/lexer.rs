@@ -88,7 +88,7 @@ keywords! {
     Repeat = "repeat", True = "true", False = "false", As = "as", New = "new", Extern = "extern",
     Ext = "ext", Mut = "mut", Dynamic = "dynamic", None = "none", Perlin = "perlin",
     Base3d = "base3d", Density = "density", Ambient = "ambient", Helpers = "helpers",
-    Tables = "tables", Hosts = "hosts", Consts = "consts", Inf = "inf", Nan = "nan",
+    Tables = "tables", Hosts = "hosts", Consts = "consts", Inputs = "inputs", Inf = "inf", Nan = "nan",
     InfF32 = "inf_f32", NanF32 = "nan_f32",
     Bool = "bool", I8 = "i8", I32 = "i32", I64 = "i64", F32 = "f32", F64 = "f64", Vec3 = "vec3",
     Pos3 = "pos3", PermTable = "perm_table",

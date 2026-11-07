@@ -73,6 +73,7 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
         constants: Arena::new(),
         host_inputs: Arena::new(),
         permutation_tables: Arena::new(),
+        density_inputs: Arena::new(),
     };
     let mut m = Remap::default();
 
@@ -97,6 +98,13 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
         order,
         Constant::clone,
     );
+    copy_arena(
+        &p.density_inputs,
+        &mut out.density_inputs,
+        &mut m.inputs,
+        order,
+        DensityInput::clone,
+    );
 
     // Functions: the nested variable arenas are shuffled too. The shared `m.vars` map covers all.
     let fn_order = {
@@ -117,22 +125,7 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
     let live: Vec<_> = p.compute_units.iter().collect();
     for i in unit_order {
         let (old, cu) = live[i];
-        let mut nu = cu.clone_raw();
-        let ComputeUnit::DensityFunction {
-            density_inputs: old_inputs,
-            ..
-        } = cu;
-        let mut inputs = Arena::new();
-        copy_arena(
-            old_inputs,
-            &mut inputs,
-            &mut m.inputs,
-            order,
-            DensityInput::clone,
-        );
-        let ComputeUnit::DensityFunction { density_inputs, .. } = &mut nu;
-        *density_inputs = inputs;
-        m.cus.insert(old, out.compute_units.insert(nu));
+        m.cus.insert(old, out.compute_units.insert(cu.clone()));
     }
 
     walk_program(&mut out, &mut m);
@@ -145,8 +138,8 @@ pub fn compact(p: &OptimizedProgram) -> OptimizedProgram {
     rebuild(p, &mut |n| (0..n).collect())
 }
 
-/// Shuffles the slot order of every arena (hosts, tables, consts, fns, vars of each fn, units,
-/// density inputs of each unit) and rewrites all refs. The program means the same afterwards.
+/// Shuffles the slot order of every arena (hosts, tables, consts, density inputs, fns, vars of
+/// each fn, units) and rewrites all refs. The program means the same afterwards.
 pub fn permute(p: &mut OptimizedProgram, seed: u64) {
     let mut state = seed;
     let mut next = move || {
@@ -271,12 +264,9 @@ fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
     for f in p.functions.values() {
         stmts(&f.body, &mut out);
     }
-    for u in p.compute_units.values() {
-        let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-        for d in density_inputs.values() {
-            triple(d.scaled_origin, &mut out);
-            triple(d.scaled_position, &mut out);
-        }
+    for d in p.density_inputs.values() {
+        triple(d.scaled_origin, &mut out);
+        triple(d.scaled_position, &mut out);
     }
     out
 }
@@ -305,19 +295,17 @@ fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
             f.vars.insert(r, (fi as u64) << 32 | vi as u64);
         }
     }
-    for (ui, (_, cu)) in c.compute_units.iter().enumerate() {
-        let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-        for (ii, (r, _)) in density_inputs.iter().enumerate() {
-            f.inputs.insert(r, (ui as u64) << 32 | ii as u64);
-        }
+    for (i, (r, _)) in c.density_inputs.iter().enumerate() {
+        f.inputs.insert(r, i as u64);
     }
     walk_program(&mut c, &mut f);
     let floats = float_bits(&c);
     let text = format!(
-        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
         c.entry_points,
         c.host_inputs.values().collect::<Vec<_>>(),
         c.permutation_tables.values().collect::<Vec<_>>(),
+        c.density_inputs.values().collect::<Vec<_>>(),
         c.constants.values().collect::<Vec<_>>(),
         c.functions.values().collect::<Vec<_>>(),
         c.compute_units.values().collect::<Vec<_>>(),

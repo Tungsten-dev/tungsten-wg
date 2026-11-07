@@ -31,17 +31,6 @@ pub fn unit_return_type(program: &opt::OptimizedProgram, cu: opt::Ref<opt::Compu
     &program.functions[*function].return_type
 }
 
-/// The program's density input for `r`; inputs live in the units, so every unit is searched.
-pub fn find_density_input(program: &opt::OptimizedProgram, r: opt::Ref<opt::DensityInput>) -> &opt::DensityInput {
-    for (_, cu) in program.compute_units.iter() {
-        let opt::ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-        if density_inputs.contains(r) {
-            return &density_inputs[r];
-        }
-    }
-    panic!("density input {:?} belongs to no compute unit", r)
-}
-
 /// Whether values of `t` are Java objects (references) rather than primitives.
 pub fn is_object(t: &VariableType) -> bool {
     !convert_type(t).is_primitive()

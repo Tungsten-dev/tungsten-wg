@@ -36,9 +36,10 @@ pub fn sources() -> Vec<String> {
     out.push(
         "program {
             fn leaf() -> f64 { let c: pos3 = ambient(pos3); return ((c.x + (10 * c.y)) as f64); }
-            fn top() -> f64 { return (density(t.d) + density(t.d, 1)); }
+            fn top() -> f64 { return (density(d) + density(d, 1)); }
+            input d = leaf_u @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
             unit leaf_u { main leaf; }
-            unit t { main top; input d = leaf_u @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+            unit t { main top; inputs [d]; }
             entry t @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
         }"
         .to_string(),

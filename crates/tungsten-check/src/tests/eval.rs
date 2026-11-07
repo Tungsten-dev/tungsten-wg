@@ -335,8 +335,9 @@ fn density_prog(input_dims: &str, entry_dims: &str, read: &str) -> String {
                 return (((c.x + (10 * c.y)) + (100 * c.z)) as f64);
             }}
             fn top() -> f64 {{ return {read}; }}
+            input d = leaf_u @dims({input_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
             unit leaf_u {{ main leaf; }}
-            unit t {{ main top; input d = leaf_u @dims({input_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }}
+            unit t {{ main top; inputs [d]; }}
             entry t @dims({entry_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
         }}"
     )
@@ -349,13 +350,13 @@ fn oks(xs: &[f64]) -> Vec<Result<Value, EvalError>> {
 #[test]
 fn density_unit_input() {
     // A (1,1,1) input is read at cell 0 from every reader cell.
-    let r = run(&density_prog("1, 1, 1", "2, 2, 1", "density(t.d)"));
+    let r = run(&density_prog("1, 1, 1", "2, 2, 1", "density(d)"));
     assert_eq!(r.entries[0], oks(&[0.0, 0.0, 0.0, 0.0]));
 }
 
 #[test]
 fn density_equal_dims() {
-    let r = run(&density_prog("2, 1, 2", "2, 1, 2", "density(t.d)"));
+    let r = run(&density_prog("2, 1, 2", "2, 1, 2", "density(d)"));
     assert_eq!(r.entries[0], oks(&[0.0, 1.0, 100.0, 101.0]));
 }
 
@@ -363,21 +364,21 @@ fn density_equal_dims() {
 fn density_different_dims() {
     // The reader's flat index into the input's buffer: reader (2,1,1) cell k reads buf[k]
     // of a (1,2,1) input, i.e. its cell decode(k) = (0,k,0).
-    let r = run(&density_prog("1, 2, 1", "2, 1, 1", "density(t.d)"));
+    let r = run(&density_prog("1, 2, 1", "2, 1, 1", "density(d)"));
     assert_eq!(r.entries[0], oks(&[0.0, 10.0]));
     // A larger reader grid: cells past the input's length are OutOfBounds.
-    let r = run(&density_prog("2, 1, 1", "3, 1, 1", "density(t.d)"));
+    let r = run(&density_prog("2, 1, 1", "3, 1, 1", "density(d)"));
     assert_eq!(r.entries[0], vec![Ok(f64v(0.0)), Ok(f64v(1.0)), Err(EvalError::OutOfBounds)]);
 }
 
 #[test]
 fn density_explicit_index() {
     // Corner reads at the grid edge: index 7 is the last cell of 2×2×2, 8 is out.
-    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(t.d, 7)"));
+    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(d, 7)"));
     assert_eq!(r.entries[0], oks(&[111.0]));
-    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(t.d, 8)"));
+    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(d, 8)"));
     assert_eq!(r.entries[0], vec![Err(EvalError::OutOfBounds)]);
-    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(t.d, -1)"));
+    let r = run(&density_prog("2, 2, 2", "1, 1, 1", "density(d, -1)"));
     assert_eq!(r.entries[0], vec![Err(EvalError::OutOfBounds)]);
 }
 
@@ -387,9 +388,9 @@ fn eager_input_prog(order: &str) -> String {
     let good = "input good = ok_u @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);";
     let bad = "input bad = bad_u @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);";
     let bad2 = "input bad2 = bad2_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);";
-    let inputs = match order {
-        "good_bad" => format!("{good} {bad}"),
-        _ => format!("{bad2} {bad}"),
+    let (inputs, list) = match order {
+        "good_bad" => (format!("{good} {bad}"), "good, bad"),
+        _ => (format!("{bad2} {bad}"), "bad2, bad"),
     };
     format!(
         "program {{
@@ -397,10 +398,11 @@ fn eager_input_prog(order: &str) -> String {
             fn badf() -> f64 {{ return ((1 / (ambient(pos3).x - 2)) as f64); }}
             fn bad2f() -> f64 {{ return ([1.0][1]); }}
             fn top() -> f64 {{ return 5.0; }}
+            {inputs}
             unit ok_u {{ main okf; }}
             unit bad_u {{ main badf; }}
             unit bad2_u {{ main bad2f; }}
-            unit t {{ main top; {inputs} }}
+            unit t {{ main top; inputs [{list}]; }}
             entry t @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
         }}"
     )

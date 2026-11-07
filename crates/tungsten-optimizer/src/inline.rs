@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -45,7 +44,7 @@ pub enum InlineRejection {
     EntryPoint,
     /// No compute unit reads it (and it isn't an entry point).
     Unused,
-    /// Total number of `DensityInput`s pointing at it, across all compute units.
+    /// Number of uses: one per compute unit and distinct input it lists that points at it.
     MultipleUses(usize),
     /// Its only reader is itself.
     SelfUse,
@@ -85,7 +84,7 @@ pub struct InlineRecord {
 struct InlinePlan {
     /// The one compute unit that reads the callee.
     caller: Ref<ComputeUnit>,
-    /// The caller's `DensityInput` that points at the callee.
+    /// The input, listed by the caller, that points at the callee.
     input: Ref<DensityInput>,
     /// The (single) function of the caller that reads `input`.
     site: Ref<Function>,
@@ -186,8 +185,7 @@ impl<'m> Planner<'m> {
         }
         let mut users = Vec::new();
         for (unit_ref, unit) in self.program.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
-            for (_, input) in density_inputs.iter() {
+            for input in self.listed_inputs(unit) {
                 if input.density_function == callee {
                     users.push(unit_ref);
                 }
@@ -199,6 +197,24 @@ impl<'m> Planner<'m> {
             [user] => Ok(user),
             _ => Err(InlineRejection::MultipleUses(users.len())),
         }
+    }
+
+    /// The distinct inputs `unit` lists, in list order. Stale refs are skipped. Unlisted inputs
+    /// never count as uses.
+    fn listed_inputs(&self, unit: &ComputeUnit) -> Vec<&'m DensityInput> {
+        let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
+        let mut seen: Vec<Ref<DensityInput>> = Vec::new();
+        let mut out = Vec::new();
+        for &r in density_inputs {
+            if seen.contains(&r) {
+                continue;
+            }
+            seen.push(r);
+            if let Some(i) = self.program.density_inputs.try_get(r) {
+                out.push(i);
+            }
+        }
+        out
     }
 
     /// The grid `unit` is consumed on. `None` if it has no consumers or they disagree.
@@ -214,8 +230,7 @@ impl<'m> Planner<'m> {
             }
         }
         for (_, u) in self.program.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-            for (_, i) in density_inputs.iter() {
+            for i in self.listed_inputs(u) {
                 if i.density_function == unit {
                     grids.push(GridInfo::of_input(i));
                 }
@@ -262,6 +277,7 @@ impl<'m> Planner<'m> {
         // The caller's single input that points at the callee (`sole_user` counted exactly one).
         let (input_ref, input) = density_inputs
             .iter()
+            .filter_map(|&r| Some((r, self.program.density_inputs.try_get(r)?)))
             .find(|(_, i)| i.density_function == callee)
             .expect("sole user has no input pointing at the callee");
 
@@ -347,7 +363,7 @@ impl<'m> Inliner<'m> {
         } = callee_unit;
 
         // --- Caller compute unit: absorb the callee's inputs and dependencies. ---
-        let remap: HashMap<Ref<DensityInput>, Ref<DensityInput>> = {
+        {
             let ComputeUnit::DensityFunction {
                 density_inputs,
                 permutation_table_inputs,
@@ -358,16 +374,11 @@ impl<'m> Inliner<'m> {
                 ..
             } = self.program.compute_units.get_mut(caller);
 
-            // The callee's density inputs live in an arena owned by the callee, so they get
-            // new refs in the caller's arena.
-            let mut remap = HashMap::new();
-            for (old, input) in callee_inputs.iter() {
-                remap.insert(old, density_inputs.insert(input.clone()));
-            }
-            // The caller no longer reads the callee as a density input.
-            density_inputs.remove(plan.input);
-
-            // These refs point into program-wide arenas, so they can be shared as they are.
+            // The caller no longer reads the callee as a density input. Every ref points into
+            // the program's arena, so the callee's inputs (and its body's reads of them) are
+            // shared as they are.
+            density_inputs.retain(|r| *r != plan.input);
+            extend_unique(density_inputs, callee_inputs.iter().copied());
             extend_unique(permutation_table_inputs, callee_perms.iter().copied());
             extend_unique(host_inputs, callee_hosts.iter().copied());
             extend_unique(constants, callee_consts.iter().copied());
@@ -382,21 +393,21 @@ impl<'m> Inliner<'m> {
             old_hash.hash(&mut h);
             callee_hash.hash(&mut h);
             *source_hash = h.finish();
+        }
 
-            remap
-        };
-
-        // --- Callee functions: point their density reads at the caller's arena. ---
-        // Refs not in `remap` (e.g. in a helper shared with another unit) are left untouched.
-        for f in std::iter::once(callee_fn).chain(callee_helpers.iter().copied()) {
-            let func = self.program.functions.get_mut(f);
-            visit_stmts_mut(&mut func.body, &mut |e| {
-                if let Expression::DensityVariable(r, _) = e {
-                    if let Some(new) = remap.get(&*r).copied() {
-                        *r = new;
-                    }
-                }
-            });
+        // --- Program inputs: drop the ones with the callee as source. ---
+        // The caller was the only unit listing `plan.input` (see `sole_user`), so every other
+        // input pointing at the callee is unlisted, and would dangle once the callee is removed.
+        let stale: Vec<Ref<DensityInput>> = self
+            .program
+            .density_inputs
+            .iter()
+            .filter(|(_, i)| i.density_function == callee)
+            .map(|(r, _)| r)
+            .collect();
+        debug_assert!(stale.contains(&plan.input));
+        for r in stale {
+            self.program.density_inputs.remove(r);
         }
 
         // --- Call site: replace the density read with a call to the (now helper) function. ---

@@ -89,6 +89,24 @@ pub(crate) fn program(i: &Inspection) -> (String, BTreeMap<String, usize>) {
         s.push('\n');
     }
 
+    for input in &i.inputs {
+        let unlisted = if input.listed_by.is_empty() {
+            "  // unlisted"
+        } else {
+            ""
+        };
+        let _ = writeln!(
+            s,
+            "input {} = {} @ {}{unlisted}",
+            input.name,
+            display(&input.producer),
+            grid_exact(&input.grid)
+        );
+    }
+    if !i.inputs.is_empty() {
+        s.push('\n');
+    }
+
     let mut lines = BTreeMap::new();
     let list = |ids: &[String]| {
         ids.iter()
@@ -103,18 +121,18 @@ pub(crate) fn program(i: &Inspection) -> (String, BTreeMap<String, usize>) {
         lines.insert(u.id.clone(), s.matches('\n').count() + 1);
         let _ = writeln!(s, "unit {} -> {} {{", u.display, u.return_type);
         if !u.inputs.is_empty() {
-            s.push_str("    inputs {\n");
-            for input in &u.inputs {
-                let idx = if input.indexed { "  // indexed" } else { "" };
-                let _ = writeln!(
-                    s,
-                    "        {} = {} @ {}{idx}",
-                    input.name,
-                    display(&input.producer),
-                    grid_exact(&input.grid)
-                );
-            }
-            s.push_str("    }\n");
+            let names: Vec<String> = u
+                .inputs
+                .iter()
+                .map(|input| {
+                    if input.indexed {
+                        format!("{} (indexed)", input.name)
+                    } else {
+                        input.name.clone()
+                    }
+                })
+                .collect();
+            let _ = writeln!(s, "    inputs {{ {} }}", names.join(", "));
         }
         for (label, ids) in [
             ("tables", &u.tables),

@@ -152,12 +152,6 @@ pub struct TestFile {
     pub cells: Option<CellSample>,
 }
 
-pub(crate) struct UnitInfo {
-    pub r: Ref<ComputeUnit>,
-    pub main: Ref<Function>,
-    pub helpers: Vec<Ref<Function>>,
-    pub inputs: HashMap<LabelKey, Ref<DensityInput>>,
-}
 
 pub(crate) struct Ctx<'a> {
     pub env: &'a dyn Env,
@@ -176,8 +170,8 @@ pub(crate) struct Ctx<'a> {
     pub consts: HashMap<LabelKey, Ref<Constant>>,
     pub fns: HashMap<LabelKey, Ref<Function>>,
     pub fn_vars: HashMap<Ref<Function>, HashMap<LabelKey, Ref<Var>>>,
-    pub units: HashMap<LabelKey, UnitInfo>,
-    pub unit_order: Vec<Ref<ComputeUnit>>,
+    pub units: HashMap<LabelKey, Ref<ComputeUnit>>,
+    pub inputs: HashMap<LabelKey, Ref<DensityInput>>,
     pub const_asts: HashMap<Ref<Constant>, ast::Expr>,
     pub const_types: HashMap<Ref<Constant>, Option<VariableType>>,
     pub entry_labels: Vec<String>,
@@ -199,6 +193,7 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
             constants: Arena::new(),
             host_inputs: Arena::new(),
             permutation_tables: Arena::new(),
+            density_inputs: Arena::new(),
         },
         map: SourceMap::default(),
         hosts: HashMap::new(),
@@ -207,7 +202,7 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
         fns: HashMap::new(),
         fn_vars: HashMap::new(),
         units: HashMap::new(),
-        unit_order: vec![],
+        inputs: HashMap::new(),
         const_asts: HashMap::new(),
         const_types: HashMap::new(),
         entry_labels: vec![],
@@ -296,8 +291,13 @@ impl<'a> Ctx<'a> {
         for u in &unit_items {
             self.declare_unit(u)?;
         }
+        for item in &file.program.items {
+            if let Item::Input(i) = item {
+                self.declare_input(i)?;
+            }
+        }
         for u in &unit_items {
-            self.declare_inputs(u)?;
+            self.resolve_inputs(u)?;
         }
         for item in &file.program.items {
             if let Item::Entry(e) = item {
@@ -403,11 +403,11 @@ impl<'a> Ctx<'a> {
     pub(crate) fn lookup_fn(&self, l: &Label) -> R<Ref<Function>> {
         Self::lookup(&self.fns, l, "function")
     }
-    pub(crate) fn lookup_unit(&self, l: &Label) -> R<&UnitInfo> {
-        match self.units.get(&l.key()) {
-            Some(u) => Ok(u),
-            None => err(l.span, format!("unknown unit `{}`", l.display())),
-        }
+    pub(crate) fn lookup_unit(&self, l: &Label) -> R<Ref<ComputeUnit>> {
+        Self::lookup(&self.units, l, "unit")
+    }
+    pub(crate) fn lookup_input(&self, l: &Label) -> R<Ref<DensityInput>> {
+        Self::lookup(&self.inputs, l, "input")
     }
 
     fn label_list<V: Copy>(
@@ -506,21 +506,14 @@ impl<'a> Ctx<'a> {
             .compute_units
             .insert(ComputeUnit::DensityFunction {
                 function: main,
-                density_inputs: Arena::new(),
+                density_inputs: vec![],
                 permutation_table_inputs: tables,
                 host_inputs: hosts,
-                helper_functions: helpers.clone(),
+                helper_functions: helpers,
                 constants: consts,
                 source_hash: u.hash.unwrap_or(0),
             });
-        let info = UnitInfo {
-            r,
-            main,
-            helpers,
-            inputs: HashMap::new(),
-        };
-        declare(&mut self.units, &u.label, info, "unit")?;
-        self.unit_order.push(r);
+        declare(&mut self.units, &u.label, r, "unit")?;
         self.map.units.insert(r, u.span);
         Ok(())
     }
@@ -549,38 +542,33 @@ impl<'a> Ctx<'a> {
         ))
     }
 
-    fn declare_inputs(&mut self, u: &ast::UnitItem) -> R<()> {
-        let unit = self.lookup_unit(&u.label)?.r;
-        for input in &u.inputs {
-            if self.units[&u.label.key()]
-                .inputs
-                .contains_key(&input.label.key())
-            {
-                return err(
-                    input.label.span,
-                    format!("duplicate input label `{}`", input.label.display()),
-                );
-            }
-            let target = self.lookup_unit(&input.target)?.r;
-            let (dimensions, scaled_origin, scaled_position) = self.grid(&input.grid)?;
-            let ComputeUnit::DensityFunction { density_inputs, .. } =
-                &mut self.prog.compute_units[unit];
-            let d = density_inputs.insert(DensityInput {
-                name: var_name(&input.label),
-                density_function: target,
-                scaled_origin,
-                scaled_position,
-                dimensions,
-            });
-            let info = self.units.get_mut(&u.label.key()).unwrap();
-            info.inputs.insert(input.label.key(), d);
-            self.map.inputs.insert((unit, d), input.span);
-        }
+    fn declare_input(&mut self, input: &ast::InputItem) -> R<()> {
+        let target = self.lookup_unit(&input.target)?;
+        let (dimensions, scaled_origin, scaled_position) = self.grid(&input.grid)?;
+        let r = self.prog.density_inputs.insert(DensityInput {
+            name: var_name(&input.label),
+            density_function: target,
+            scaled_origin,
+            scaled_position,
+            dimensions,
+        });
+        declare(&mut self.inputs, &input.label, r, "input")?;
+        self.map.inputs.insert(r, input.span);
+        Ok(())
+    }
+
+    /// A unit's `inputs` list, once every input is declared.
+    fn resolve_inputs(&mut self, u: &ast::UnitItem) -> R<()> {
+        let unit = self.lookup_unit(&u.label)?;
+        let list = Self::label_list(&self.inputs, u.inputs.as_deref(), "input")?;
+        let ComputeUnit::DensityFunction { density_inputs, .. } =
+            &mut self.prog.compute_units[unit];
+        *density_inputs = list;
         Ok(())
     }
 
     fn declare_entry(&mut self, e: &ast::EntryItem) -> R<()> {
-        let unit = self.lookup_unit(&e.unit)?.r;
+        let unit = self.lookup_unit(&e.unit)?;
         let (dimensions, scaled_origin, scaled_position) = self.grid(&e.grid)?;
         let label = e.label.as_ref().unwrap_or(&e.unit);
         let idx = self.prog.entry_points.len();

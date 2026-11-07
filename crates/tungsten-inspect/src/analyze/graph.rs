@@ -3,11 +3,56 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::Instance;
-use tungsten_ir::model::{ComputeUnit, Ref};
+use tungsten_ir::model::{ComputeUnit, DensityInput, OptimizedProgram, Ref};
 
 use super::schedule::EntrySchedule;
 use super::{Ctx, buffers, grid_of_input, grid_of_instance, inline, sort_ids, sort_named};
-use crate::model::{EdgeInfo, EntryInfo, InputInfo, InstanceInfo, SharedInstance, UnitInfo};
+use crate::model::{
+    EdgeInfo, EntryInfo, InputInfo, InstanceInfo, ProgramInputInfo, SharedInstance, UnitInfo,
+};
+
+/// The distinct inputs `cu` lists, in list order, with their values.
+fn listed<'p>(
+    program: &'p OptimizedProgram,
+    cu: &ComputeUnit,
+) -> Vec<(Ref<DensityInput>, &'p DensityInput)> {
+    let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
+    let mut out: Vec<(Ref<DensityInput>, &DensityInput)> = Vec::new();
+    for &r in density_inputs {
+        if !out.iter().any(|(x, _)| *x == r) {
+            out.push((r, &program.density_inputs[r]));
+        }
+    }
+    out
+}
+
+/// The program's inputs, in arena order, with the units that list them.
+pub(crate) fn inputs(ctx: &Ctx, units: &[UnitInfo]) -> Vec<ProgramInputInfo> {
+    let unit_displays: HashMap<String, String> = ctx
+        .units
+        .values()
+        .map(|n| (n.id.clone(), n.display.clone()))
+        .collect();
+    ctx.program
+        .density_inputs
+        .iter()
+        .map(|(r, di)| {
+            let name = ctx.inputs[&r].name.clone();
+            let mut listed_by: Vec<String> = units
+                .iter()
+                .filter(|u| u.inputs.iter().any(|i| i.name == name))
+                .map(|u| u.id.clone())
+                .collect();
+            sort_ids(&mut listed_by, &unit_displays);
+            ProgramInputInfo {
+                name,
+                producer: ctx.unit_id(di.density_function),
+                grid: grid_of_input(di),
+                listed_by,
+            }
+        })
+        .collect()
+}
 
 /// Every scheduled instance, with its input edges.
 pub(crate) fn instances(ctx: &Ctx) -> Vec<InstanceInfo> {
@@ -19,11 +64,10 @@ pub(crate) fn instances(ctx: &Ctx) -> Vec<InstanceInfo> {
         .instances()
         .iter()
         .map(|inst| {
-            let ComputeUnit::DensityFunction { density_inputs, .. } =
-                &ctx.program.compute_units[inst.cu];
+            let cu = &ctx.program.compute_units[inst.cu];
             let consumer_grid = grid_of_instance(inst);
-            let mut inputs: Vec<EdgeInfo> = density_inputs
-                .iter()
+            let mut inputs: Vec<EdgeInfo> = listed(ctx.program, cu)
+                .into_iter()
                 .map(|(r, di)| {
                     let input_grid = grid_of_input(di);
                     EdgeInfo {
@@ -32,7 +76,7 @@ pub(crate) fn instances(ctx: &Ctx) -> Vec<InstanceInfo> {
                         input_grid,
                         consumer_grid,
                         resampled: input_grid != consumer_grid,
-                        indexed: ctx.indexed_inputs.contains(&r),
+                        indexed: ctx.indexed_inputs.contains(&(inst.cu, r)),
                     }
                 })
                 .collect();
@@ -131,8 +175,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
     let mut reads: HashMap<Ref<ComputeUnit>, Vec<Ref<ComputeUnit>>> = HashMap::new();
     let mut read_by: HashMap<Ref<ComputeUnit>, Vec<Ref<ComputeUnit>>> = HashMap::new();
     for (r, cu) in ctx.program.compute_units.iter() {
-        let ComputeUnit::DensityFunction { density_inputs, .. } = cu;
-        for di in density_inputs.values() {
+        for (_, di) in listed(ctx.program, cu) {
             reads.entry(r).or_default().push(di.density_function);
             read_by.entry(di.density_function).or_default().push(r);
         }
@@ -160,7 +203,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
         .map(|(r, cu)| {
             let ComputeUnit::DensityFunction {
                 function,
-                density_inputs,
+                density_inputs: _,
                 permutation_table_inputs,
                 host_inputs,
                 helper_functions,
@@ -221,13 +264,13 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
                 reads: unit_reads,
                 read_by: unit_read_by,
                 depth: unit_depth(r, &reads, &mut depth, &mut HashSet::new()),
-                inputs: density_inputs
-                    .iter()
+                inputs: listed(ctx.program, cu)
+                    .into_iter()
                     .map(|(ir, di)| InputInfo {
                         name: ctx.inputs[&ir].name.clone(),
                         producer: ctx.unit_id(di.density_function),
                         grid: grid_of_input(di),
-                        indexed: ctx.indexed_inputs.contains(&ir),
+                        indexed: ctx.indexed_inputs.contains(&(r, ir)),
                     })
                     .collect(),
                 tables,

@@ -5,7 +5,7 @@ expressions (holders for `Ref(true)` on primitives). Shared by expression.rs, st
 
 use std::collections::{HashMap, HashSet};
 
-use super::types::{convert_type, find_density_input, unit_return_type};
+use super::types::{convert_type, unit_return_type};
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
 use tungsten_interface::Interface;
 use tungsten_interface::naming::{NamingRules, java_sanitize};
@@ -114,7 +114,7 @@ impl<'a> FunctionConverter<'a> {
             E::FunctionCall { function, .. } => self.program.functions[*function].return_type.clone(),
             E::ExternCall { return_type, .. } => return_type.clone(),
             E::DensityVariable(input, _) => {
-                unit_return_type(self.program, find_density_input(self.program, *input).density_function).clone()
+                unit_return_type(self.program, self.program.density_inputs[*input].density_function).clone()
             }
             E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
                 PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,

@@ -104,7 +104,8 @@ fn build(cx: &mut Ctx, name: &str, ast: &File) -> R<Lib> {
             Item::Const(c) => add(&mut lib.consts, own(c, name), |c| &c.label)?,
             Item::Host(HostItem { span, .. })
             | Item::Table(TableItem { span, .. })
-            | Item::Unit(UnitItem { span, .. }) => {
+            | Item::Unit(UnitItem { span, .. })
+            | Item::Input(InputItem { span, .. }) => {
                 return Err(Diagnostic::elab(
                     *span,
                     "a library may only contain `fn`, `const` and `use`",

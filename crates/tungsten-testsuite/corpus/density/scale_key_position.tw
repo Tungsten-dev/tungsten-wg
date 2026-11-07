@@ -10,10 +10,11 @@ program {
     fn top_main() -> f64 {
         return (density(a) + density(b));
     }
+    input a = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input b = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
     unit top {
         main top_main;
-        input a = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-        input b = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
+        inputs [a, b];
     }
     entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }

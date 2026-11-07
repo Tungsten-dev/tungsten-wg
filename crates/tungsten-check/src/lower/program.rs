@@ -4,9 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_core as core;
-use tungsten_core::{ConstId, FnId, HostId, LocalId, TableId, UnitId};
+use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
-    ComputeUnit, EntryPoint, Function, HostInput, Name, OptimizedProgram, PermutationTableInput,
+    ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram, PermutationTableInput,
     VariableType,
 };
 
@@ -107,15 +107,11 @@ fn build_ids(p: &OptimizedProgram) -> LowerMap {
         m.tables.push(r, name);
         m.table_idents.push(t.clone());
     }
-    for (_, u) in p.compute_units.iter() {
-        let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-        for (r, d) in density_inputs.iter() {
-            let i = m.inputs.len();
-            let name = name_str(&d.name)
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("#{i}"));
-            m.inputs.push(r, name);
-        }
+    for (i, (r, d)) in p.density_inputs.iter().enumerate() {
+        let name = name_str(&d.name)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("#{i}"));
+        m.inputs.push(r, name);
     }
     m
 }
@@ -162,6 +158,11 @@ impl<'p, 'r> Ctx<'p, 'r> {
     pub(super) fn table_ref(&mut self, r: tungsten_ir::Ref<PermutationTableInput>) -> TableId {
         let id = self.map.tables.id(r);
         self.id_or_dangling(id, EntityKind::PermutationTable, TableId(0))
+    }
+
+    fn input_ref(&mut self, r: tungsten_ir::Ref<DensityInput>) -> InputId {
+        let id = self.map.inputs.id(r);
+        self.id_or_dangling(id, EntityKind::DensityInput, InputId(0))
     }
 
     fn unit_ref(&mut self, r: tungsten_ir::Ref<ComputeUnit>) -> UnitId {
@@ -305,7 +306,8 @@ impl<'p, 'r> Ctx<'p, 'r> {
             let main = self.at(Step::Main, |cx| cx.fn_ref(*function));
             let inputs = density_inputs
                 .iter()
-                .filter_map(|(r, _)| self.map.inputs.id(r))
+                .enumerate()
+                .map(|(i, &r)| self.at(Step::List { list: "inputs", index: i }, |cx| cx.input_ref(r)))
                 .collect();
             let tables = permutation_table_inputs
                 .iter()
@@ -342,25 +344,20 @@ impl<'p, 'r> Ctx<'p, 'r> {
     fn inputs(&mut self) -> Vec<core::InputDecl> {
         let p = self.p;
         let mut out = vec![];
-        for (_, unit) in p.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
-            for (r, d) in density_inputs.iter() {
-                let Some(id) = self.map.inputs.id(r) else {
-                    continue;
-                };
-                let name = self.map.inputs.name(id).unwrap_or_default().to_string();
-                self.enter(Item::Input {
-                    id: Some(id),
-                    name,
-                });
-                let source = self.at(Step::Source, |cx| cx.unit_ref(d.density_function));
-                out.push(core::InputDecl {
-                    source,
-                    dims: dims(d.dimensions),
-                    origin_scale: f64x3(d.scaled_origin),
-                    position_scale: f64x3(d.scaled_position),
-                });
-            }
+        for (i, (_, d)) in p.density_inputs.iter().enumerate() {
+            let id = InputId(i);
+            let name = self.map.inputs.name(id).unwrap_or_default().to_string();
+            self.enter(Item::Input {
+                id: Some(id),
+                name,
+            });
+            let source = self.at(Step::Source, |cx| cx.unit_ref(d.density_function));
+            out.push(core::InputDecl {
+                source,
+                dims: dims(d.dimensions),
+                origin_scale: f64x3(d.scaled_origin),
+                position_scale: f64x3(d.scaled_position),
+            });
         }
         out
     }

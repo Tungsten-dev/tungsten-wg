@@ -64,6 +64,18 @@ pub fn print(p: &OptimizedProgram) -> String {
     for (f, _) in p.functions.iter() {
         sections.push(function_text(p, &labels, f, 1));
     }
+
+    let mut s = String::new();
+    for (d, input) in p.density_inputs.iter() {
+        s.push_str(&format!(
+            "    input {} = {}{};\n",
+            labels.input(d),
+            labels.unit(input.density_function),
+            grid_text(input.dimensions, input.scaled_origin, input.scaled_position),
+        ));
+    }
+    sections.push(s);
+
     for (u, _) in p.compute_units.iter() {
         sections.push(unit_text(p, &labels, u));
     }
@@ -152,14 +164,10 @@ fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> Stri
         "consts",
         constants.iter().map(|c| labels.constant(*c)).collect(),
     ));
-    for (d, input) in density_inputs.iter() {
-        s.push_str(&format!(
-            "        input {} = {}{};\n",
-            labels.input(d),
-            labels.unit(input.density_function),
-            grid_text(input.dimensions, input.scaled_origin, input.scaled_position),
-        ));
-    }
+    s.push_str(&list(
+        "inputs",
+        density_inputs.iter().map(|d| labels.input(*d)).collect(),
+    ));
     s.push_str("    }");
     s
 }

@@ -48,26 +48,21 @@ fn locals() {
     assert_eq!(names, ["a", "b", "t", "u"]);
 }
 
-/// Inputs: units in order, then each unit's arena in order. A shared helper's density read
-/// names exactly the input it refers to, and only the unit that lists it.
+/// Inputs: the program arena in order, and each unit's list in list order. A helper's density
+/// read names exactly the input it refers to, and only the unit that lists it.
 #[test]
 fn inputs_across_units() {
     let src = "program {
         fn leaf() -> f64 { return 1.0; }
-        fn shared() -> f64 { return density(b.y); }
+        fn shared() -> f64 { return density(z); }
         fn amain() -> f64 { return (density(x) + density(y)); }
         fn bmain() -> f64 { return shared(); }
+        input x = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        input y = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        input z = leaf_u @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
         unit leaf_u { main leaf; }
-        unit a {
-            main amain;
-            input x = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-            input y = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-        }
-        unit b {
-            main bmain;
-            helpers [shared];
-            input y = leaf_u @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-        }
+        unit a { main amain; inputs [x, y]; }
+        unit b { main bmain; helpers [shared]; inputs [z]; }
         entry e = a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     }";
     let l = ok(&load(src), &registry());
@@ -95,7 +90,26 @@ fn inputs_across_units() {
     );
     assert!(pr.units.iter().enumerate().all(|(u, unit)| unit.inputs.contains(&InputId(2)) == (u == b.0)));
     let names: Vec<&str> = l.map.inputs.iter().map(|(_, _, n)| n).collect();
-    assert_eq!(names, ["x", "y", "y"]);
+    assert_eq!(names, ["x", "y", "z"]);
+}
+
+/// A unit's input ids follow its list, not the arena: `inputs [y, x, y]` lowers as is.
+#[test]
+fn input_list_order() {
+    let src = "program {
+        fn leaf() -> f64 { return 1.0; }
+        fn amain() -> f64 { return density(x); }
+        input x = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        input y = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        input unlisted = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        unit leaf_u { main leaf; }
+        unit a { main amain; inputs [y, x, y]; }
+        entry e = a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }";
+    let l = ok(&load(src), &registry());
+    let a = l.map.units.iter().find(|(_, _, m)| *m == "amain").unwrap().0;
+    assert_eq!(l.program.units[a.0].inputs, vec![InputId(1), InputId(0), InputId(1)]);
+    assert_eq!(l.program.inputs.len(), 3);
 }
 
 /// Holes vanish: ids stay dense.

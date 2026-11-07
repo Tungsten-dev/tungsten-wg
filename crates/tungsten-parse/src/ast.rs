@@ -85,6 +85,7 @@ pub enum Item {
     Const(ConstItem),
     Fn(FnItem),
     Unit(UnitItem),
+    Input(InputItem),
     Entry(Box<EntryItem>),
 }
 
@@ -157,7 +158,7 @@ pub struct UnitItem {
     pub tables: Option<Vec<Label>>,
     pub hosts: Option<Vec<Label>>,
     pub consts: Option<Vec<Label>>,
-    pub inputs: Vec<InputItem>,
+    pub inputs: Option<Vec<Label>>,
 }
 
 #[derive(Debug, Clone)]
@@ -341,7 +342,6 @@ pub enum ExprKind {
     Host(Label),
     Table(Label),
     Density {
-        unit: Option<Label>,
         input: Label,
         index: Option<Box<Expr>>,
     },

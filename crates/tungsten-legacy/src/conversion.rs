@@ -6,11 +6,12 @@
 //!
 //! * Every SPMT `DensityFunction` becomes one `ComputeUnit` plus one `Function` (its body and variables).
 //! * Every SPMT `Function` becomes one `Function`.
-//! * Variables are owned by the `Function` they are declared in (parameters, `variables`,
-//!   and the vars of density inputs). Host-input vars and constant vars are NOT variables
-//!   in the new model: uses of them become `HostInput(..)` / `Constant(..)` expressions.
-//! * Permutation tables and host inputs are deduplicated program-wide. Density inputs are
-//!   deduplicated per compute unit by their target (matching `add_density_input`).
+//! * Variables are owned by the `Function` they are declared in (parameters and `variables`).
+//!   Host-input vars, constant vars and density-input vars are NOT variables in the new model:
+//!   uses of them become `HostInput(..)` / `Constant(..)` / `DensityVariable(..)` expressions.
+//! * Permutation tables and host inputs are deduplicated program-wide. Density inputs go into the
+//!   program's arena and the unit's list, deduplicated per compute unit by their target (matching
+//!   `add_density_input`); nothing merges them across units.
 //! * Inputs, permutation tables and helper functions that are used but not declared
 //!   are registered on first use, so the produced lists always match the bodies.
 //! * Variable lookup is strict: a variable that is used but never declared is an error, except
@@ -154,8 +155,8 @@ struct Scope<'m> {
 
     density_map: HashMap<old::Var<'m>, Ref<new::DensityInput>>,
     density_direct_map: Vec<(old::DensityInput<'m>, Ref<new::DensityInput>)>,
-    // Lists that end up on the `ComputeUnit`.
-    density_inputs: Arena<new::DensityInput>,
+    // Lists that end up on the `ComputeUnit`. Inputs live in the program's arena.
+    density_inputs: Vec<Ref<new::DensityInput>>,
     perm_tables: Vec<Ref<new::PermutationTableInput>>,
     helpers: Vec<Ref<new::Function>>,
 }
@@ -170,7 +171,7 @@ impl<'m> Scope<'m> {
             host_map: HashMap::new(),
             const_map: HashMap::new(),
             density_map: HashMap::new(),
-            density_inputs: Arena::new(),
+            density_inputs: Vec::new(),
             density_direct_map: Vec::new(),
             perm_tables: Vec::new(),
             helpers: Vec::new(),
@@ -313,6 +314,7 @@ impl<'m> Converter<'m> {
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
                 permutation_tables: Arena::new(),
+                density_inputs: Arena::new(),
             },
             compute_units: HashMap::new(),
             functions: HashMap::new(),
@@ -342,7 +344,7 @@ impl<'m> Converter<'m> {
             .compute_units
             .insert(new::ComputeUnit::DensityFunction {
                 function: function_ref,
-                density_inputs: Arena::new(),
+                density_inputs: vec![],
                 permutation_table_inputs: vec![],
                 host_inputs: vec![],
                 helper_functions: vec![],
@@ -580,13 +582,14 @@ impl<'m> Converter<'m> {
         }
 
         let target = self.density_function(di.density_function)?;
-        let r = scope.density_inputs.insert(new::DensityInput {
+        let r = self.program.density_inputs.insert(new::DensityInput {
             name: di.var.name.clone(),
             density_function: target,
             scaled_origin: di.scaled_origin,
             scaled_position: di.scaled_position,
             dimensions: di.dimensions,
         });
+        scope.density_inputs.push(r);
 
         scope.density_map.insert(di.var, r);
         // scope.density_by_target.insert(di.density_function, r);

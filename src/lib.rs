@@ -132,6 +132,7 @@ mod check_tests {
             constants: Arena::new(),
             host_inputs: Arena::new(),
             permutation_tables: Arena::new(),
+            density_inputs: Arena::new(),
         };
         let main = p.functions.insert(Function {
             canonical_name: Some("main".into()),
@@ -144,7 +145,7 @@ mod check_tests {
         });
         let unit = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: main,
-            density_inputs: Arena::new(),
+            density_inputs: vec![],
             permutation_table_inputs: vec![],
             host_inputs: vec![],
             helper_functions: vec![],
@@ -162,7 +163,7 @@ mod check_tests {
             let mut other: Arena<ComputeUnit> = Arena::new();
             let foreign = other.insert(ComputeUnit::DensityFunction {
                 function: main,
-                density_inputs: Arena::new(),
+                density_inputs: vec![],
                 permutation_table_inputs: vec![],
                 host_inputs: vec![],
                 helper_functions: vec![],

@@ -13,7 +13,7 @@ use tungsten_ir::model::{
 };
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
 
-use super::types::{device_type, find_density_input, unit_return_type};
+use super::types::{device_type, unit_return_type};
 use crate::backend::CudaConfig;
 use crate::model as cuda;
 
@@ -114,7 +114,7 @@ impl<'a> FunctionConverter<'a> {
             E::FunctionCall { function, .. } => self.program.functions[*function].return_type.clone(),
             E::ExternCall { return_type, .. } => return_type.clone(),
             E::DensityVariable(input, _) => {
-                unit_return_type(self.program, find_density_input(self.program, *input).density_function).clone()
+                unit_return_type(self.program, self.program.density_inputs[*input].density_function).clone()
             }
             E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
                 PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,

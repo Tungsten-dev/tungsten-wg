@@ -37,15 +37,10 @@ impl<'a> Deriver<'a> {
     }
 
     fn density_return(&self, d: Ref<DensityInput>) -> Option<VariableType> {
-        self.p.compute_units.iter().find_map(|(_, u)| {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-            if !density_inputs.contains(d) {
-                return None;
-            }
-            let ComputeUnit::DensityFunction { function, .. } =
-                &self.p.compute_units[density_inputs[d].density_function];
-            Some(self.p.functions[*function].return_type.clone())
-        })
+        let input = self.p.density_inputs.try_get(d)?;
+        let ComputeUnit::DensityFunction { function, .. } =
+            self.p.compute_units.try_get(input.density_function)?;
+        Some(self.p.functions.try_get(*function)?.return_type.clone())
     }
 
     /// The type the parser derives for `e`. `f` is the enclosing function (`None` in constants).

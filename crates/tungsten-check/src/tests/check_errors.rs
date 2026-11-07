@@ -252,10 +252,11 @@ fn const_not_listed() {
 fn input_not_listed() {
     let src = prog(
         "fn leaf() -> f64 { return 1.0; }
-         fn a_main() -> f64 { return density(a.d); }
-         fn b_main() -> f64 { return (density(a.d) + density(a.d)); }
+         fn a_main() -> f64 { return density(d); }
+         fn b_main() -> f64 { return (density(d) + density(d)); }
+         input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
          unit leaf_u { main leaf; }
-         unit a { main a_main; input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+         unit a { main a_main; inputs [d]; }
          unit b { main b_main; }
          entry b @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);",
     );
@@ -271,11 +272,12 @@ fn input_not_listed() {
 fn input_read_by_shared_helper() {
     let src = prog(
         "fn leaf() -> f64 { return 1.0; }
-         fn g() -> f64 { return density(a.d); }
+         fn g() -> f64 { return density(d); }
          fn a_main() -> f64 { return g(); }
          fn b_main() -> f64 { return g(); }
+         input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
          unit leaf_u { main leaf; }
-         unit a { main a_main; helpers [g]; input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+         unit a { main a_main; helpers [g]; inputs [d]; }
          unit b { main b_main; helpers [g]; }
          entry b @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);",
     );
@@ -285,24 +287,22 @@ fn input_read_by_shared_helper() {
     );
 }
 
-/// The same shape in core, with `b` listing the input too: accepted. Text can't express this
-/// until the arena move (milestone 3), so the program is edited after lowering.
+/// The same shape with `b` listing the input too: accepted.
 #[test]
 fn input_listed_by_two_units() {
     let src = prog(
         "fn leaf() -> f64 { return 1.0; }
-         fn g() -> f64 { return density(a.d); }
+         fn g() -> f64 { return density(d); }
          fn a_main() -> f64 { return g(); }
          fn b_main() -> f64 { return g(); }
+         input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
          unit leaf_u { main leaf; }
-         unit a { main a_main; helpers [g]; input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
-         unit b { main b_main; helpers [g]; }
+         unit a { main a_main; helpers [g]; inputs [d]; }
+         unit b { main b_main; helpers [g]; inputs [d]; }
+         entry a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
          entry b @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);",
     );
-    let mut l = crate::lower(&load(&src), &registry()).unwrap();
-    let b = l.program.units.iter().position(|u| u.inputs.is_empty() && u.helpers.len() == 1).unwrap();
-    l.program.units[b].inputs.push(InputId(0));
-    assert!(check(&l.program).is_ok());
+    prepare(&load(&src), &registry()).unwrap();
 }
 
 // --- grids and cycles ----------------------------------------------------------------------
@@ -346,8 +346,9 @@ fn cycles() {
     assert_eq!(e.to_string(), "program: dependency cycle through const `c`");
     // A unit reading its own output through an input.
     let src = prog(
-        "fn m() -> f64 { return density(mu.d); }
-         unit mu { main m; input d = mu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+        "fn m() -> f64 { return density(d); }
+         input d = mu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+         unit mu { main m; inputs [d]; }
          entry mu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);",
     );
     assert_eq!(cerrs_src(&src), ["program: dependency cycle through fn `m`, input `d`, unit `m`"]);

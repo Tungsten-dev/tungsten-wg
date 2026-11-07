@@ -32,6 +32,7 @@ impl<'a> Ctx<'a> {
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
                 permutation_tables: Arena::new(),
+                density_inputs: Arena::new(),
             },
             source_map: Default::default(),
             entry_labels: std::mem::take(&mut self.entry_labels),

@@ -16,7 +16,6 @@ pub struct Labels {
     tables: HashMap<Ref<PermutationTableInput>, String>,
     vars: HashMap<(Ref<Function>, Ref<Var>), String>,
     inputs: HashMap<Ref<DensityInput>, String>,
-    input_units: HashMap<Ref<DensityInput>, Ref<ComputeUnit>>,
     entries: Vec<String>,
 }
 
@@ -146,18 +145,9 @@ impl Labels {
             l.units.insert(r, s);
         }
 
-        // inputs: per unit, by the host rule
-        for (_, u) in p.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = u;
-            for (r, s) in name_labels(density_inputs.iter().map(|(r, d)| (r, Some(&d.name)))) {
-                l.inputs.insert(r, s);
-            }
-        }
-        for (u, unit) in p.compute_units.iter() {
-            let ComputeUnit::DensityFunction { density_inputs, .. } = unit;
-            for (d, _) in density_inputs.iter() {
-                l.input_units.insert(d, u);
-            }
+        // inputs: program-wide, by the host rule
+        for (r, s) in name_labels(p.density_inputs.iter().map(|(r, d)| (r, Some(&d.name)))) {
+            l.inputs.insert(r, s);
         }
 
         // entries
@@ -185,7 +175,7 @@ impl Labels {
         constant(constants: Constant) "a constant that is not in the program";
         host(hosts: HostInput) "a host input that is not in the program";
         table(tables: PermutationTableInput) "a permutation table that is not in the program";
-        input(inputs: DensityInput) "a density input that is in no unit";
+        input(inputs: DensityInput) "a density input that is not in the program";
     }
 
     pub fn var(&self, f: Ref<Function>, v: Ref<Var>) -> &str {
@@ -195,13 +185,6 @@ impl Labels {
                 self.function(f)
             )
         })
-    }
-    /// The unit that owns the input.
-    pub fn input_unit(&self, d: Ref<DensityInput>) -> Ref<ComputeUnit> {
-        *self
-            .input_units
-            .get(&d)
-            .unwrap_or_else(|| panic!("dangling Ref: a density input that is in no unit"))
     }
     pub fn entry(&self, i: usize) -> &str {
         &self.entries[i]

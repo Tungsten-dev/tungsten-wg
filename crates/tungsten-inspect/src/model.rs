@@ -20,6 +20,8 @@ pub struct Inspection {
     pub summary: Summary,
     pub entries: Vec<EntryInfo>,
     pub units: Vec<UnitInfo>,
+    /// The program's density inputs, in arena order.
+    pub inputs: Vec<ProgramInputInfo>,
     pub instances: Vec<InstanceInfo>,
     pub functions: Vec<FunctionInfo>,
     pub constants: Vec<ConstantInfo>,
@@ -144,12 +146,24 @@ pub struct UnitInfo {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct InputInfo {
-    /// Local name of the input, unique within its unit.
+    /// Name of the input, unique within the program.
     pub name: String,
     pub producer: String,
     pub grid: Grid,
-    /// Some read of it (in any function) carries an index.
+    /// Some read of it in this unit's main function or helpers carries an index.
     pub indexed: bool,
+}
+
+/// One input of the program's arena.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProgramInputInfo {
+    /// Unique within the program.
+    pub name: String,
+    pub producer: String,
+    pub grid: Grid,
+    /// Units that list it, sorted. Empty for an unlisted (inert) input.
+    pub listed_by: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -411,9 +425,10 @@ pub enum NodeKind {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DensityReadInfo {
-    /// Local name of the input in its unit.
+    /// Name of the input, unique within the program.
     pub input: String,
-    /// The unit whose input this is (for helpers, not necessarily the function's own unit).
+    /// The unit the function is analyzed for: its own unit, or for a helper the first unit
+    /// that has it as a helper and lists the input. Empty if no unit runs the function.
     pub unit: String,
     pub producer_unit: String,
     /// `None` when the producer instance isn't scheduled (unreachable code).
@@ -449,7 +464,7 @@ pub struct DagSummary {
     /// Nodes that would exist without CSE.
     pub nodes_before_cse: usize,
     pub nodes_after_cse: usize,
-    /// Reads per density input (`<unit id>/<input>`), indexed or not, before CSE.
+    /// Reads per density input (by name), indexed or not, before CSE.
     pub density_reads: BTreeMap<String, usize>,
     /// Calls per helper id, before CSE.
     pub helper_calls: BTreeMap<String, usize>,
