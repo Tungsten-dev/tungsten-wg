@@ -841,6 +841,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+name = "tungsten-builder"
+version = "0.2.0"
+dependencies = [
+ "thiserror",
+ "tungsten-check",
+ "tungsten-interface",
+ "tungsten-ir",
+ "tungsten-optimizer",
+ "tungsten-parse",
+ "tungsten-rust",
+ "tungsten-testsuite",
+]
+
+[[package]]
 name = "tungsten-check"
 version = "0.2.0"
 dependencies = [
@@ -980,6 +994,7 @@ name = "tungsten-wg"
 version = "0.2.0"
 dependencies = [
  "thiserror",
+ "tungsten-builder",
  "tungsten-check",
  "tungsten-codegen",
  "tungsten-cuda",

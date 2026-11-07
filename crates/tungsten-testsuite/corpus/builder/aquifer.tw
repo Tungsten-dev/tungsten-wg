@@ -1,0 +1,46 @@
+// Twin of the builder's `aquifer` slice (builder spec §10): helpers with parameters, a static and
+// a record host, a constant array, and a body from several blocks. For the single cell,
+// x = 0, y = start_y and the three offset pairs (0,0), (-2,-1), (-1,-1) give
+// pack(c * 4 + b, y, oz) = 250, -551 and -151 with b = 2, y = 5: -452, plus 1 if a > 1.
+program {
+    host start_y: i32;
+    host splitter: extern Pair;
+    const surface_sample_offsets = [0, 0, -2, -1, -1, -1];
+
+    fn cell_to_block(c: i32, r: i32) -> i32 {
+        return ((c * 4) + r);
+    }
+    fn pack(x: i32, y: i32, z: i32) -> i64 {
+        return ((((x * 100) + (y * 10)) + z) as i64);
+    }
+    fn aquifer_random() -> i64 @hosts(start_y, splitter) {
+        vars { x: i32, y: i32, k: i32, acc: i64, ox#4: i32, oz#5: i32 }
+        x = ambient(pos3).x;
+        y = (host(start_y) + ambient(pos3).y);
+        acc = 0L;
+        k = 0;
+        while (k < 3) {
+            ox#4 = const(surface_sample_offsets)[(k * 2)];
+            oz#5 = const(surface_sample_offsets)[((k * 2) + 1)];
+            acc = (acc + pack(cell_to_block((x + ox#4), host(splitter).b), y, oz#5));
+            k = (k + 1);
+        }
+        if (host(splitter).a > 1.0) {
+            acc = (acc + 1L);
+        }
+        return acc;
+    }
+
+    unit aquifer_random {
+        main aquifer_random;
+        helpers [cell_to_block, pack];
+        hosts [start_y, splitter];
+        consts [surface_sample_offsets];
+    }
+
+    entry aquifer_random @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "wet" origin(0, 0, 0) seed(1) host(start_y = 5, splitter = new Pair { a: 1.5, b: 2 })
+@expect "wet" aquifer_random = [-451L]
+@case "dry" origin(0, 0, 0) seed(1) host(start_y = 5, splitter = new Pair { a: 0.5, b: 2 })
+@expect "dry" aquifer_random = [-452L]

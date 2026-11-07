@@ -1,0 +1,35 @@
+// Units, helpers and constants that share a name get distinct generated names (builder spec §6).
+program {
+    const c#0 = 1.0;
+    const c#1 = 2.0;
+
+    fn h#0() -> f64 {
+        return const(c#0);
+    }
+    fn h#1() -> f64 {
+        return const(c#1);
+    }
+    fn u#2() -> f64 {
+        return h#0();
+    }
+    fn u#3() -> f64 {
+        return h#1();
+    }
+
+    unit a {
+        main u#2;
+        helpers [h#0];
+        consts [c#0];
+    }
+    unit b {
+        main u#3;
+        helpers [h#1];
+        consts [c#1];
+    }
+
+    entry a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" a[0, 0, 0] = 1.0
+@expect "c" b[0, 0, 0] = 2.0

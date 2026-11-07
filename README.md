@@ -21,6 +21,7 @@ The project is a Cargo workspace of small crates. Each one owns a single part of
 <!-- TODO: add dependency diagram (draw.io) -->
 
 - tungsten-ir: the OptimizedProgram model (compute units, functions, statements, arenas).
+- tungsten-builder: builds OptimizedPrograms from Rust, for frontends. Expressions are typed as they are built, every mistake is collected, and unit lists are derived from the bodies.
 - tungsten-optimizer: passes over the IR. Right now that is inlining.
 - tungsten-interface: the contract between the compiler and the backends (Interface, NamingRules, the codegen traits and the Backend trait).
 - tungsten-codegen: language-agnostic building blocks, like the pretty printer.
@@ -57,10 +58,17 @@ tungsten-wg = { git = "https://github.com/Tungsten-dev/tungsten-wg" }
 ## Usage
 
 ```rust
+use tungsten_wg::builder::prelude::*;
 use tungsten_wg::{RustBackend, RustConfig, RustOutput};
 
-// Build an OptimizedProgram, or lower a legacy SPMT program to one
-let mut program = /* ... */;
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+// Build an OptimizedProgram (see crates/tungsten-builder/README.md)
+let mut pb = ProgramBuilder::new();
+let mut f = FnBuilder::new("height", F64);
+f.ret(pos3().y().cast(F64) * 0.5);
+let unit = pb.finish_unit(f);
+pb.entry(unit, Grid::new((16, 1, 16)));
+let mut program = pb.build()?; // every mistake at once, with its file and line
 
 // Optimization is explicit and happens before compile
 tungsten_wg::optimizer::perform_inline(&mut program);
@@ -73,6 +81,8 @@ tungsten_wg::compile(&program, &mut [&mut rust])?;
 
 // Read the result from the backend itself
 let out: &RustOutput = rust.output().unwrap();
+# Ok(())
+# }
 ```
 
 For every backend, compile builds an Interface using that backend's naming rules and then calls generate. If a backend fails, you get a CompileError::Backend with the backend's name and the underlying error. Compilation stops at the first failure, and backends that already ran keep their output.

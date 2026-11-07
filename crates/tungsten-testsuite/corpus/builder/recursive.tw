@@ -1,0 +1,39 @@
+// Twin of the builder's `recursive` slice (builder spec §10): nested cached units, a memoized
+// input read twice, and an if/else lowered into both branches.
+// cached_1 = x, cached_0 = 2x, main = 2x + (if x - 1 > 0 { 2x } else { 3 }).
+program {
+    fn cached_1() -> f64 {
+        return (ambient(pos3).x as f64);
+    }
+    fn cached_0() -> f64 {
+        return (density(%0) * 2.0);
+    }
+    fn `main`() -> f64 {
+        vars { r#0: f64 }
+        if (((ambient(pos3).x as f64) + -1.0) > 0.0) {
+            r#0 = density(%1);
+        } else {
+            r#0 = 3.0;
+        }
+        return (density(%1) + r#0);
+    }
+
+    input %0 = c1 @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input %1 = c0 @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    unit c1 {
+        main cached_1;
+    }
+    unit c0 {
+        main cached_0;
+        inputs [%0];
+    }
+    unit m {
+        main `main`;
+        inputs [%1];
+    }
+
+    entry m @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" m = [3.0, 5.0, 8.0, 12.0]

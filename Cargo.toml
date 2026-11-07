@@ -15,6 +15,7 @@ exclude = [
 
 [workspace]
 members = [
+    "crates/tungsten-builder",
     "crates/tungsten-check",
     "crates/tungsten-codegen",
     "crates/tungsten-core",
@@ -53,6 +54,7 @@ insta = "1"
 # Pinned together with VERUS_TAG in scripts/verify.sh (the script checks it).
 vstd = "=0.0.0-2026-10-25-0158"
 tungsten-ir = { path = "crates/tungsten-ir" }
+tungsten-builder = { path = "crates/tungsten-builder" }
 tungsten-codegen = { path = "crates/tungsten-codegen" }
 tungsten-interface = { path = "crates/tungsten-interface" }
 tungsten-optimizer = { path = "crates/tungsten-optimizer" }
@@ -64,6 +66,7 @@ tungsten-inspect = { path = "crates/tungsten-inspect" }
 tungsten-parse = { path = "crates/tungsten-parse" }
 tungsten-core = { path = "crates/tungsten-core" }
 tungsten-check = { path = "crates/tungsten-check" }
+tungsten-testsuite = { path = "crates/tungsten-testsuite" }
 
 [features]
 default = ["rust"]
@@ -77,6 +80,7 @@ check = ["dep:tungsten-check"]
 [dependencies]
 thiserror.workspace = true
 tungsten-ir.workspace = true
+tungsten-builder.workspace = true
 tungsten-codegen.workspace = true
 tungsten-interface.workspace = true
 tungsten-optimizer.workspace = true

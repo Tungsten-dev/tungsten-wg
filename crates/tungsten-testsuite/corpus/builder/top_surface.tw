@@ -1,0 +1,49 @@
+// Twin of the builder's `top_surface` slice (builder spec §10): a flat unit scans a layered input
+// from the top with `while` and `break`. Layer y of column x holds x - y + 0.5, positive for
+// y <= x. The upper bound 7 gives i = floor(7 / 2) * 2 = 6, so the scan starts at layer 3 and
+// stops at layer x: the result is 2x.
+program {
+    fn density3d() -> f64 {
+        return (((ambient(pos3).x - ambient(pos3).y) as f64) + 0.5);
+    }
+    fn upper() -> f64 {
+        return 7.0;
+    }
+    fn find_top_surface() -> f64 {
+        vars { %0: i32, %1: i32, %2: f64 }
+        %0 = ((ext floor((density(%1) / 2.0)) as i32) * 2);
+        if (%0 <= 0) {
+            %0 = 0;
+        } else {
+            %1 = (%0 / 2);
+            %0 = 0;
+            while (%1 >= 0) {
+                if (density(%0, (ambient(pos3).x + ((%1 - 0) * 3))) > 0.0) {
+                    %0 = (%1 * 2);
+                    break;
+                }
+                %1 = (%1 - 1);
+            }
+        }
+        %2 = (%0 as f64);
+        return %2;
+    }
+
+    input %0 = density3d @dims(3, 4, 1) @origin_scale(1, 1, 1) @position_scale(1, 2, 1);
+    input %1 = upper @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    unit density3d {
+        main density3d;
+    }
+    unit upper {
+        main upper;
+    }
+    unit find_top_surface {
+        main find_top_surface;
+        inputs [%1, %0];
+    }
+
+    entry find_top_surface @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" find_top_surface = [0.0, 2.0, 4.0]

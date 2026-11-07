@@ -11,6 +11,7 @@ tungsten-wg (facade, repo root)
 ├── tungsten-java ──┤            ▲
 ├── tungsten-inspect┘            │
 ├── tungsten-optimizer ──────────┴──────────► tungsten-ir
+├── tungsten-builder ─────────────────────────► tungsten-ir
 ├── tungsten-legacy ──► tungsten-ir, tungsten-codegen
 └── tungsten-codegen   (no tungsten deps)
 ```
@@ -18,6 +19,7 @@ tungsten-wg (facade, repo root)
 | Crate | Responsibility |
 | --- | --- |
 | `tungsten-ir` | The `OptimizedProgram` model (compute units, functions, statements, arenas). Leaf crate. |
+| `tungsten-builder` | Builds `OptimizedProgram`s from Rust for frontends: `ProgramBuilder`, `FnBuilder`, typed `Expr` with collected errors, derived unit lists, `body!`/`build!`, `extern_fns!`/`record_decls!`. The replacement for the legacy builder. |
 | `tungsten-optimizer` | Passes over the IR. Currently inlining (`perform_inline` returns `InlineStats`); `fuse` is a stub and not exported. |
 | `tungsten-interface` | The backend-agnostic contract: `Interface` (names and wave schedule), `NamingRules`, `DeviceCodegen`, `OrchestrationCodegen`, `Backend`. |
 | `tungsten-codegen` | Language-agnostic building blocks (`Printer`, `Interned`). Leaf crate. |
@@ -31,6 +33,7 @@ tungsten-wg (facade, repo root)
 - `tungsten-ir` and `tungsten-codegen` are leaves. No cycles.
 - Backends depend on `ir`, `interface` and `codegen`. They never depend on `optimizer`: optimization is the caller's decision.
 - Only the facade depends on everything.
+- `tungsten-builder` depends only on `ir`, and only the facade depends on the builder. Backends and passes never see it.
 - Nothing outside `tungsten-legacy` may depend on it. The new pipeline must keep building when it is removed.
 - Known exception: `tungsten-cuda` and `tungsten-java` depend on `tungsten-rust` for shared helpers (type derivation, constant dependencies, auto-const specs). Moving those into a neutral crate would remove the exception.
 
@@ -61,6 +64,7 @@ let out: &RustOutput = rust.output().unwrap();
 | Facade | Root stays the `tungsten-wg` package (not a virtual workspace). | A virtual workspace: it would break the published name, the `tungsten_wg` lib name and `tungsten-mc-compile`'s dependency. |
 | Legacy SPMT | Lives in its own crate and lowers to the IR through `conversion`. The facade re-exports it as `tungsten_wg::spmt`. | Keeping it in the facade or in the IR crate: the IR would be coupled to a model that is being phased out. Delete the crate once `tungsten-mc-compile` builds the IR directly. |
 | Legacy pipeline | The old wave orchestration and `transform_*` codegen were not migrated. `Interface::waves()` replaced wave orchestration. | Porting them: they consumed the legacy SPMT/wave DAG. The old `compile(&SPMT, &CompilerConfig)` API is removed. |
+| Program construction | `tungsten-builder`: an owned `FnBuilder` per function plus `&mut ProgramBuilder`, typed `Expr` with poison-and-collect errors, lists always derived, equal inputs merged. See `specs/builder.md` §11. | `Rc<RefCell>` builders (borrow panics, `!Send`), panicking on type errors (one error per run), hand-written lists (transitive helpers become frontend bookkeeping). |
 | Errors | One `thiserror` enum per crate (`BackendError`, ...); the facade's `CompileError` wraps them. User-reachable paths return errors instead of `unwrap`/`panic!`. | |
 
 ## Conventions

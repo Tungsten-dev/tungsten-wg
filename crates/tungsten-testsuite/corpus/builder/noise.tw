@@ -1,0 +1,54 @@
+// Twin of the builder's `noise` slice (builder spec §10): octave loops, two tables per octave, and
+// one noise lowered both as a unit and as a helper. Tables are only read, `perm_get(t, 7) -
+// perm_get(t, 263)` being 0 for any permutation, so each term is `x * freq * amp`:
+// (0.25 + 0.5 + 0.5 + 1.0) * 2 = 4.5 per unit of x, with x = origin.x + pos3.x.
+program {
+    table t0 = perlin("n", "octave_-1", 0);
+    table t1 = perlin("n", "octave_-1", 1);
+    table t2 = perlin("n", "octave_1", 0);
+    table t3 = perlin("n", "octave_1", 1);
+
+    fn noise_density() -> f64 {
+        vars { rpos3: vec3, n: f64 }
+        rpos3 = (ambient(origin) + ambient(pos3));
+        n = 0.0;
+        n = ((n + ((rpos3 * vec3(0.5, 0.5, 0.5)).x * 0.5)) + ((ext perm_get(table(t0), 7) - ext perm_get(table(t0), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(1.0, 1.0, 1.0)).x * 0.5)) + ((ext perm_get(table(t1), 7) - ext perm_get(table(t1), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(2.0, 2.0, 2.0)).x * 0.25)) + ((ext perm_get(table(t2), 7) - ext perm_get(table(t2), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(4.0, 4.0, 4.0)).x * 0.25)) + ((ext perm_get(table(t3), 7) - ext perm_get(table(t3), 263)) as f64));
+        return (n * 2.0);
+    }
+
+    fn noise_fn(rpos3: vec3) -> f64 {
+        vars { n: f64 }
+        n = 0.0;
+        n = ((n + ((rpos3 * vec3(0.5, 0.5, 0.5)).x * 0.5)) + ((ext perm_get(table(t0), 7) - ext perm_get(table(t0), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(1.0, 1.0, 1.0)).x * 0.5)) + ((ext perm_get(table(t1), 7) - ext perm_get(table(t1), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(2.0, 2.0, 2.0)).x * 0.25)) + ((ext perm_get(table(t2), 7) - ext perm_get(table(t2), 263)) as f64));
+        n = ((n + ((rpos3 * vec3(4.0, 4.0, 4.0)).x * 0.25)) + ((ext perm_get(table(t3), 7) - ext perm_get(table(t3), 263)) as f64));
+        return (n * 2.0);
+    }
+
+    fn calls_noise() -> f64 {
+        return noise_fn(vec3((ambient(pos3).x as f64), 0.0, 0.0));
+    }
+
+    unit noise_density {
+        main noise_density;
+        tables [t0, t1, t2, t3];
+    }
+    unit calls_noise {
+        main calls_noise;
+        helpers [noise_fn];
+        tables [t0, t1, t2, t3];
+    }
+
+    entry noise_density @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry calls_noise @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "zero" origin(0, 0, 0) seed(1)
+@expect "zero" noise_density = [0.0, 4.5, 9.0, 13.5]
+@expect "zero" calls_noise = [0.0, 4.5, 9.0, 13.5]
+@case "shifted" origin(8, 0, 0) seed(7)
+@expect "shifted" noise_density = [36.0, 40.5, 45.0, 49.5]
+@expect "shifted" calls_noise = [0.0, 4.5, 9.0, 13.5]
