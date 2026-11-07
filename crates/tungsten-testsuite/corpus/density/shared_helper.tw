@@ -1,0 +1,39 @@
+// Two units list one input, and a helper shared by both reads it (program-level-inputs §2).
+program {
+    fn base_main() -> i32 {
+        return ((ambient(pos3).x * 10) + ambient(pos3).y);
+    }
+    unit base {
+        main base_main;
+    }
+
+    input b = base @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn shared() -> i32 {
+        return density(b);
+    }
+
+    fn left_main() -> i32 {
+        return shared();
+    }
+    unit left {
+        main left_main;
+        helpers [shared];
+        inputs [b];
+    }
+
+    fn right_main() -> i32 {
+        return (shared() + density(b));
+    }
+    unit right {
+        main right_main;
+        helpers [shared];
+        inputs [b];
+    }
+
+    entry left @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry right @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" left = [0, 10, 20, 30]
+@expect "c" right = [0, 20, 40, 60]

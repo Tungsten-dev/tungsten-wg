@@ -415,6 +415,29 @@ fn eager_input_failure() {
     assert_eq!(r.failures, vec![Failure::Input { id: InputId(1), cell: 2, error: EvalError::DivByZero }]);
 }
 
+/// One failing input listed by two units (`a` reads it through a helper, `b` directly): both
+/// fail, and the input is built and reported once, with memo on or off.
+#[test]
+fn shared_input_failure() {
+    let src = "program {
+        fn badf() -> f64 { return ((1 / (ambient(pos3).x - 2)) as f64); }
+        unit bad_u { main badf; }
+        input d = bad_u @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        fn g() -> f64 { return density(d); }
+        fn a_main() -> f64 { return g(); }
+        fn b_main() -> f64 { return (density(d) + 1.0); }
+        unit a { main a_main; helpers [g]; inputs [d]; }
+        unit b { main b_main; inputs [d]; }
+        entry a @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        entry b @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }";
+    for memo in [true, false] {
+        let r = run_with(src, &[], EvalOptions { memo, ..EvalOptions::default() });
+        assert_eq!(r.entries, vec![vec![Err(EvalError::DivByZero); 4], vec![Err(EvalError::DivByZero); 2]]);
+        assert_eq!(r.failures, vec![Failure::Input { id: InputId(0), cell: 2, error: EvalError::DivByZero }]);
+    }
+}
+
 #[test]
 fn canonical_input_error() {
     // Two failing inputs: the lowest InputId's error wins, and both are listed once.

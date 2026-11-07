@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1–3 implemented; milestones 4–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
+Status: design agreed. Milestones 1–4 implemented; milestones 5–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
 which already assume this design.
 
 ## 1. Summary
@@ -413,6 +413,20 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
   accesses. Its 1,719 errors are the same before and after this milestone and have nothing to do with inputs
   (`vec3 * f64`, extern annotations, helpers that aren't listed), so the frontend or core typing has to fix them
   first. `tungsten-parse/SPEC.md` and `TESTING.md` §8 still describe nested inputs until milestone 6.
+- **Milestone 4.** No backend fix was needed: the shared-helper reads pass on Rust, Java and CUDA, original and
+  inlined. The new corpus is `density/shared_{helper,dims,failing,eager,unlisted,duplicates,inline_listed,
+  inline_unlisted}` and `reject/input_{not_listed,shared_helper_one_lister,unlisted,cycle_shared_helper}`. A corpus
+  file can check only values, and `error(...)` only the first failing cell of a case, so three things are Rust
+  tests: `tungsten-check`'s `shared_input_failure` (both readers fail and the input is reported once, memo on and
+  off); `tungsten-testsuite/tests/inline_shared.rs` (`MultipleUses(2)`, a duplicate listing counted once, one listing
+  of an absorbed input that the caller already lists, the callee's unlisted input removed, an unlisted input as no
+  use). For eagerness, `shared_eager` puts the unit that lists but doesn't read the input first, so the case's error
+  comes from it. **Mutation checks**, done once, each reverted: dropping the `InputNotListed` test in
+  `check/scope.rs` fails the three `InputNotListed` reject files and `check_errors::input_not_listed` and
+  `input_read_by_shared_helper`; making `sole_user` count each input once fails `shared_{helper,dims,failing}`
+  `::inline` and `::rust::inlined`, and two `inline_shared` tests; keeping the callee's unlisted inputs fails
+  `shared_inline_unlisted::inline` and `inline_shared::unlisted_input_of_callee_is_removed`. The backend trial
+  passes there, since plain `compile` doesn't validate (§6.3).
 
 ## 10. Open and deferred
 

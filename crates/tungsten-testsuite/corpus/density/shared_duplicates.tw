@@ -1,0 +1,38 @@
+// `inputs [a, a]` means the same as `inputs [a]`. Each base has one reader, so both are inlined
+// (a duplicate listing counts once).
+program {
+    fn base_main() -> i32 {
+        return (ambient(pos3).x * 10);
+    }
+    unit base {
+        main base_main;
+    }
+    unit base2 {
+        main base_main;
+    }
+
+    input a = base @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input c = base2 @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn twice_main() -> i32 {
+        return (density(a) + 1);
+    }
+    unit twice {
+        main twice_main;
+        inputs [a, a];
+    }
+
+    fn once_main() -> i32 {
+        return (density(c) + 1);
+    }
+    unit once {
+        main once_main;
+        inputs [c];
+    }
+
+    entry twice @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry once @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" twice = [1, 11, 21, 31]
+@expect "c" once = [1, 11, 21, 31]

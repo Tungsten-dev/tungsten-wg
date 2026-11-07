@@ -1,0 +1,34 @@
+// `mid` is inlined into `top`, and both list `x`: `top` ends with one listing of `x`. `leaf`
+// stays, since it's read on a (1,1,1) grid (`GridMismatch`).
+program {
+    fn leaf_main() -> i32 {
+        return 3;
+    }
+    unit leaf {
+        main leaf_main;
+    }
+
+    input x = leaf @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn mid_main() -> i32 {
+        return (density(x) * ambient(pos3).x);
+    }
+    unit mid {
+        main mid_main;
+        inputs [x];
+    }
+
+    input m = mid @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn top_main() -> i32 {
+        return (density(m) + density(x));
+    }
+    unit top {
+        main top_main;
+        inputs [x, m];
+    }
+
+    entry top @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" top = [3, 6, 9, 12]

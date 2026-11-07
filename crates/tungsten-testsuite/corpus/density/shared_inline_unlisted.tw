@@ -1,0 +1,25 @@
+// An unlisted input whose source is `mid` doesn't block inlining `mid`, and leaves the program
+// with it.
+program {
+    fn mid_main() -> i32 {
+        return (ambient(pos3).x + 5);
+    }
+    unit mid {
+        main mid_main;
+    }
+
+    input m = mid @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input stale = mid @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn top_main() -> i32 {
+        return (density(m) * 2);
+    }
+    unit top {
+        main top_main;
+        inputs [m];
+    }
+
+    entry top @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" top = [10, 12, 14, 16]

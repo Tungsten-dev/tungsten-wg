@@ -1,0 +1,359 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                0,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                1,
+            ),
+            inputs: [
+                InputId(
+                    0,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [],
+            ret: I32,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Field {
+                            base: Ambient(
+                                Pos3,
+                            ),
+                            sel: Pos3(
+                                X,
+                            ),
+                            ty: I32,
+                        },
+                        right: Lit(
+                            I32(
+                                5,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: I32,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Multiply,
+                        left: Density {
+                            input: InputId(
+                                0,
+                            ),
+                            index: None,
+                        },
+                        right: Lit(
+                            I32(
+                                2,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [],
+    tables: [],
+    inputs: [
+        InputDecl {
+            source: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 4,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+        InputDecl {
+            source: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    entries: [
+        Entry {
+            unit: UnitId(
+                1,
+            ),
+            dims: Dims {
+                x: 4,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                PermTable,
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Sampler,
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

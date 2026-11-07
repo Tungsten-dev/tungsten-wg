@@ -1,0 +1,15 @@
+// A helper shared by `a` and `b` reads `d`, which only `a` lists. The error names `b`
+// (`tungsten-check`'s `input_read_by_shared_helper`).
+program {
+    fn leaf() -> i32 { return 1; }
+    unit leaf_u { main leaf; }
+    input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn g() -> i32 { return density(d); }
+    fn a_main() -> i32 { return g(); }
+    unit a { main a_main; helpers [g]; inputs [d]; }
+    fn b_main() -> i32 { return g(); }
+    unit b { main b_main; helpers [g]; }
+    entry a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@expect reject(InputNotListed)
