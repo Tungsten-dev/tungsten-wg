@@ -73,10 +73,8 @@ java = ["dep:tungsten-java"]
 inspect = ["dep:tungsten-inspect"]
 cuda = ["dep:tungsten-cuda"]
 parse = ["dep:tungsten-parse"]
-check = ["dep:tungsten-check"]
 
 [dependencies]
-thiserror.workspace = true
 tungsten-ir.workspace = true
 tungsten-builder.workspace = true
 tungsten-codegen.workspace = true
@@ -87,7 +85,7 @@ tungsten-java = { workspace = true, optional = true }
 tungsten-inspect = { workspace = true, optional = true }
 tungsten-cuda = { workspace = true, optional = true }
 tungsten-parse = { workspace = true, optional = true }
-tungsten-check = { workspace = true, optional = true }
+tungsten-check.workspace = true
 
 [lib]
 name = "tungsten_wg"

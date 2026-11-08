@@ -1,22 +1,22 @@
 //! Smoke test: a small program, as `.tw` text, exercising the Java-specific lowerings.
 //! Set `TUNGSTEN_JAVA_OUT=<dir>` to also write the generated Java (and RCL) there, e.g. to run javac on it.
 
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::naming::java_sanitize;
+use tungsten_interface::{Backend, CompileError, Compiler, Interface};
 use tungsten_ir::model::OptimizedProgram;
 use tungsten_parse::{FileId, NoEnv, load};
 use tungsten_rust::backend::{RustBackend, RustConfig};
 
-use crate::backend::{JavaBackend, JavaConfig};
+use crate::backend::{JavaBackend, JavaCompile, JavaConfig};
 
 fn program(src: &str) -> OptimizedProgram {
     load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program
 }
 
 fn java(program: &OptimizedProgram) -> String {
-    let mut backend = JavaBackend::new(JavaConfig::default());
-    let interface = Interface::build(program, backend.naming_rules());
-    backend.generate(program, &interface).unwrap();
-    backend.output().expect("java output").source.clone()
+    let backend = JavaBackend::new(JavaConfig::default());
+    let interface = Interface::build(program, &backend.naming_rules());
+    backend.generate(program, &interface).unwrap().source
 }
 
 const SMALL: &str = r#"
@@ -92,10 +92,10 @@ fn generates_java_for_small_program() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("GeneratedWorldgen.java"), &java).unwrap();
         // The Rust output for the same program, to compare against.
-        let mut rust = RustBackend::new(RustConfig::default());
-        let rust_interface = Interface::build(&program, rust.naming_rules());
-        rust.generate(&program, &rust_interface).unwrap();
-        std::fs::write(dir.join("../../rcl_new.rs"), &rust.output().unwrap().full_source).unwrap();
+        let rust = RustBackend::new(RustConfig::default());
+        let rust_interface = Interface::build(&program, &rust.naming_rules());
+        let rust_out = rust.generate(&program, &rust_interface).unwrap();
+        std::fs::write(dir.join("../../rcl_new.rs"), &rust_out.full_source).unwrap();
     }
 
     for expected in [
@@ -185,4 +185,35 @@ fn ambients() {
         assert!(java.contains(e), "missing `{e}` in:\n{java}");
     }
     assert!(!java.contains("Vec3 origin"), "{java}");
+}
+
+fn empty_registry() -> tungsten_check::Registry {
+    tungsten_check::RegistryBuilder::new().build().unwrap()
+}
+
+#[test]
+fn compiler_matches_low_level_path() {
+    let registry = empty_registry();
+    let out = Compiler::new(program(BYTES), registry, JavaBackend::new(JavaConfig::default()))
+        .compile()
+        .unwrap();
+    assert_eq!(out.source, java(&program(BYTES)));
+}
+
+#[test]
+fn every_setter_sets_its_field() {
+    let registry = empty_registry();
+    let c = Compiler::new(program(BYTES), registry, JavaBackend::new(JavaConfig::default()))
+        .package("p.q")
+        .class_name("x y")
+        .runtime_package("rt");
+    let config = c.backend().config();
+    assert_eq!(
+        (config.package.as_str(), config.class_name.as_str(), config.runtime_package.as_str()),
+        ("p.q", "x y", "rt")
+    );
+    // The sanitized class name is reserved in the naming rules.
+    assert!(c.backend().naming_rules().used_set().contains(&java_sanitize("x y")));
+    // Sanitizing is a warning, so it only fails the compile under `deny_warnings`.
+    assert!(matches!(c.deny_warnings().compile(), Err(CompileError::Warnings { .. })));
 }

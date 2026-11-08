@@ -1,8 +1,9 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use tungsten_interface::naming::NamingRules;
-use tungsten_interface::{Backend, BackendError, Interface};
+use tungsten_interface::{Backend, BackendError, Compiler, Interface};
 use tungsten_ir::model::OptimizedProgram;
 
 use crate::model::Inspection;
@@ -105,7 +106,6 @@ impl InspectOutput {
 #[derive(Debug)]
 pub struct InspectBackend {
     config: InspectConfig,
-    output: Option<InspectOutput>,
     naming_rules: NamingRules,
 }
 
@@ -113,33 +113,48 @@ impl InspectBackend {
     pub fn new(config: InspectConfig) -> Self {
         Self {
             config,
-            output: None,
             naming_rules: NamingRules::inspect(),
         }
     }
 
-    /// The output, or `None` before a successful [`Backend::generate`].
-    pub fn output(&self) -> Option<&InspectOutput> {
-        self.output.as_ref()
+    pub fn config(&self) -> &InspectConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut InspectConfig {
+        &mut self.config
     }
 }
 
 impl Backend for InspectBackend {
+    type Output = InspectOutput;
+
     fn name(&self) -> &str {
         "inspect"
     }
 
     fn generate(
-        &mut self,
+        &self,
         program: &OptimizedProgram,
         interface: &Interface,
-    ) -> Result<(), BackendError> {
-        self.output = Some(run(program, interface, &self.config));
-        Ok(())
+    ) -> Result<InspectOutput, BackendError> {
+        Ok(run(program, interface, &self.config))
     }
 
-    fn naming_rules(&self) -> &NamingRules {
-        &self.naming_rules
+    fn naming_rules(&self) -> Cow<'_, NamingRules> {
+        Cow::Borrowed(&self.naming_rules)
+    }
+}
+
+/// Inspect settings on [`Compiler`]. Each one sets the matching [`InspectConfig`] field.
+pub trait InspectCompile: Sized {
+    fn views(self, v: Views) -> Self;
+}
+
+impl InspectCompile for Compiler<InspectBackend> {
+    fn views(mut self, v: Views) -> Self {
+        self.backend_mut().config_mut().views = v;
+        self
     }
 }
 

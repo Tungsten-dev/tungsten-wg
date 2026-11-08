@@ -100,7 +100,7 @@ Nothing panics on an ill-typed expression or a misused handle. A local of anothe
 handle from another `ProgramBuilder`, is `ForeignHandle`.
 
 The builder doesn't check flow (missing returns, unassigned reads, `break` placement), grids, or
-externs and records against a registry. `tungsten_wg::compile_checked` does that. What the builder
+externs and records against a registry. `Compiler::compile` does that. What the builder
 guarantees is that every ref is valid and every list matches the bodies, so a built program always
 lowers past `DanglingRef`.
 
@@ -158,7 +158,7 @@ Each signature is written once and gives both a typed call function and a declar
 
 ```rust
 # use tungsten_wg::builder::prelude::*;
-# use tungsten_wg::{RustBackend, RustConfig};
+# use tungsten_wg::{Compiler, RustBackend, RustConfig};
 extern_fns! {
     group surface_externs;
     floor(x: F64): F64,
@@ -176,15 +176,14 @@ record_decls! {
 # let u = pb.finish_unit(f);
 # pb.entry(u, Grid::new((1, 1, 1)));
 # let program = pb.build()?;
-# let mut rust = RustBackend::new(RustConfig::default());
 let registry = tungsten_wg::registry_from([surface_externs(), records()])?;
-tungsten_wg::compile_checked(&program, &registry, &mut [&mut rust])?;
+let out = Compiler::new(program, registry, RustBackend::new(RustConfig::default())).compile()?;
 # Ok(())
 # }
 ```
 
 Generated call functions check their arguments' types. There is deliberately no untyped extern
-call. `registry_from` (facade, `check` feature) drops identical declarations, so groups can
+call. `registry_from` (facade) drops identical declarations, so groups can
 overlap, and leaves conflicts for the registry to report.
 
 ## Tests

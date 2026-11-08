@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tungsten_interface::naming::{NamingRules, entry_method_names, sanitize_name};
+use tungsten_interface::naming::{entry_method_names, sanitize_name};
 use tungsten_interface::{Backend, Interface};
 use tungsten_ir::model::{HostInput, OptimizedProgram};
 use tungsten_ir::VariableType;
@@ -185,11 +185,10 @@ pub fn generate_test(program: &OptimizedProgram, env: &TestEnv) -> Result<String
     let io = TestIo::from_program(program)?;
     io.check_encodable()?;
     catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
-        let rules = NamingRules::rust();
+        let backend = RustBackend::new(RustConfig::default());
+        let rules = backend.naming_rules();
         let interface = Interface::build(program, &rules);
-        let mut backend = RustBackend::new(RustConfig::default());
-        backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
-        let out = backend.output().ok_or("backend produced no output")?;
+        let out = backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
         let names = entry_method_names(program, &rules, HashSet::from(["new".to_string()]));
         let driver = driver_source(program, &interface, &names, &io, env)?;
         Ok(format!(

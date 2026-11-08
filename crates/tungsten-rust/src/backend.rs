@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use tungsten_interface::naming::NamingRules;
-use tungsten_interface::{Backend, BackendError, Interface, OrchestrationCodegen};
+use tungsten_interface::{Backend, BackendError, Compiler, Interface, OrchestrationCodegen};
 use tungsten_ir::model::OptimizedProgram;
 
 use crate::RCLCodegen;
@@ -27,7 +29,7 @@ impl RustConfig {
     }
 }
 
-/// Generated Rust source, available after [`Backend::generate`].
+/// Generated Rust source, returned by [`Backend::generate`] and `Compiler::compile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustOutput {
     /// The density module (`density_function` by default).
@@ -42,7 +44,6 @@ pub struct RustOutput {
 #[derive(Debug)]
 pub struct RustBackend {
     config: RustConfig,
-    output: Option<RustOutput>,
     naming_rules: NamingRules,
 }
 
@@ -50,27 +51,31 @@ impl RustBackend {
     pub fn new(config: RustConfig) -> Self {
         Self {
             config,
-            output: None,
             naming_rules: NamingRules::rust(),
         }
     }
 
-    /// The generated code, or `None` before a successful [`Backend::generate`].
-    pub fn output(&self) -> Option<&RustOutput> {
-        self.output.as_ref()
+    pub fn config(&self) -> &RustConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut RustConfig {
+        &mut self.config
     }
 }
 
 impl Backend for RustBackend {
+    type Output = RustOutput;
+
     fn name(&self) -> &str {
         "rust"
     }
 
     fn generate(
-        &mut self,
+        &self,
         program: &OptimizedProgram,
         interface: &Interface,
-    ) -> Result<(), BackendError> {
+    ) -> Result<RustOutput, BackendError> {
         // The arena only lives for this call; the output is stored as finished strings.
         let arena = bumpalo::Bump::new();
         let device = RCLCodegen::new(program, &arena, interface);
@@ -85,15 +90,32 @@ impl Backend for RustBackend {
         let density_module = orchestration.density_module();
         let orchestration_module = orchestration.orchestration_module();
         let full_source = format!("{}\n\n{}", density_module, orchestration_module);
-        self.output = Some(RustOutput {
+        Ok(RustOutput {
             density_module,
             orchestration_module,
             full_source,
-        });
-        Ok(())
+        })
     }
 
-    fn naming_rules(&self) -> &NamingRules {
-        &self.naming_rules
+    fn naming_rules(&self) -> Cow<'_, NamingRules> {
+        Cow::Borrowed(&self.naming_rules)
+    }
+}
+
+/// Rust settings on [`Compiler`]. Each one sets the matching [`RustConfig`] field.
+pub trait RustCompile: Sized {
+    fn density_module_name(self, n: impl Into<String>) -> Self;
+    fn orchestration_module_name(self, n: impl Into<String>) -> Self;
+}
+
+impl RustCompile for Compiler<RustBackend> {
+    fn density_module_name(mut self, n: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().density_module_name = n.into();
+        self
+    }
+
+    fn orchestration_module_name(mut self, n: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().orchestration_module_name = n.into();
+        self
     }
 }

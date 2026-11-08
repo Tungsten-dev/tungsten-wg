@@ -4,6 +4,7 @@ waves they run) and fixes the names of everything generated code refers to: kern
 host inputs and auto consts. Computed once so callers and callees agree.
 */
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use tungsten_ir::model::{
@@ -11,9 +12,11 @@ use tungsten_ir::model::{
     PermutationTableInput, Ref,
 };
 
+pub mod compiler;
 pub mod naming;
 pub mod scale;
 
+pub use compiler::{CompileError, Compiler, Inline, Passes};
 pub use scale::Scale;
 
 use naming::{auto_const_field_name, host_field_name, unique, unit_base_name};
@@ -106,26 +109,49 @@ pub trait OrchestrationCodegen<'a> {
     fn output(&self) -> String;
 }
 
-/// A code generator for one target language. Backends are independent: each one reads the
-/// shared `Interface` and stores its own output.
+/// A code generator for one target language. A backend is a stateless value holding its config:
+/// `generate` returns the output and stores nothing.
 pub trait Backend {
+    /// What a successful compile returns, e.g. `RustOutput`.
+    type Output;
+
     /// Short stable identifier, e.g. "rust" or "cuda". Used in errors.
     fn name(&self) -> &str;
 
-    /// Generate everything for `program`. Results are stored in `self`.
+    /// Naming rules for the current config. Computed on call, so config edits made after `new`
+    /// are respected.
+    fn naming_rules(&self) -> Cow<'_, NamingRules>;
+
+    /// Checks the current config. [`Compiler::compile`] calls it before anything else.
+    fn validate(&self) -> Result<(), BackendError> {
+        Ok(())
+    }
+
+    /// The passes this backend wants by default, given its current config.
+    fn default_passes(&self) -> Passes {
+        Passes::default()
+    }
+
+    /// Generates everything for `program`. Stores nothing in `self`.
     fn generate(
-        &mut self,
+        &self,
         program: &OptimizedProgram,
         interface: &Interface,
-    ) -> Result<(), BackendError>;
+    ) -> Result<Self::Output, BackendError>;
 
-    fn naming_rules(&self) -> &NamingRules;
+    /// Non-fatal diagnostics in an output. Read by [`Compiler::deny_warnings`].
+    fn warnings(_output: &Self::Output) -> &[String] {
+        &[]
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum BackendError {
     #[error("code generation failed: {0}")]
     Codegen(String),
+    #[error("invalid backend configuration: {0}")]
+    InvalidConfig(String),
 }
 
 /// Schedule and names shared by the device and orchestration sides of a code generator.

@@ -881,6 +881,7 @@ dependencies = [
 name = "tungsten-cuda"
 version = "0.2.0"
 dependencies = [
+ "tungsten-check",
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
@@ -894,6 +895,7 @@ version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tungsten-check",
  "tungsten-interface",
  "tungsten-ir",
  "tungsten-optimizer",
@@ -905,7 +907,9 @@ name = "tungsten-interface"
 version = "0.2.0"
 dependencies = [
  "thiserror",
+ "tungsten-check",
  "tungsten-ir",
+ "tungsten-optimizer",
 ]
 
 [[package]]
@@ -916,6 +920,7 @@ version = "0.2.0"
 name = "tungsten-java"
 version = "0.2.0"
 dependencies = [
+ "tungsten-check",
  "tungsten-interface",
  "tungsten-ir",
  "tungsten-parse",
@@ -948,6 +953,7 @@ version = "0.2.0"
 dependencies = [
  "bumpalo",
  "md5",
+ "tungsten-check",
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
@@ -979,7 +985,6 @@ dependencies = [
 name = "tungsten-wg"
 version = "0.2.0"
 dependencies = [
- "thiserror",
  "tungsten-builder",
  "tungsten-check",
  "tungsten-codegen",

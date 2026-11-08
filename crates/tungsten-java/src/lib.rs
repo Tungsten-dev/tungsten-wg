@@ -41,7 +41,7 @@ pub mod size;
 pub mod statement;
 pub mod types;
 
-pub use backend::{JavaBackend, JavaConfig, JavaOutput};
+pub use backend::{JavaBackend, JavaCompile, JavaConfig, JavaOutput};
 pub use orchestration::TransformJavaOrchestration;
 
 /// Names of runtime and generated classes that the generated code refers to by name.

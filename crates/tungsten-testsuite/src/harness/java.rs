@@ -239,12 +239,11 @@ pub fn generate_test(program: &OptimizedProgram, env: &TestEnv, id: &str) -> Res
     io.check_encodable()?;
     catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
         let config = JavaConfig { package: id.to_string(), class_name: "Gen".into(), runtime_package: "tungsten.runtime".into() };
-        let mut backend = config.to_backend();
-        let interface = Interface::build(program, backend.naming_rules());
-        backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
-        let out = backend.output().ok_or("backend produced no output")?;
+        let backend = config.to_backend();
         let rules = backend.naming_rules();
-        let names = entry_method_names(program, rules, rules.used_set());
+        let interface = Interface::build(program, &rules);
+        let out = backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
+        let names = entry_method_names(program, &rules, rules.used_set());
         let driver = driver_source(program, &interface, id, &names, &io, env)?;
         Ok(format!("{MARKER}Gen.java\n{}\n{MARKER}Driver.java\n{}", out.source, driver))
     }))

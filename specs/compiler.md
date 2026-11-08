@@ -1,6 +1,6 @@
 # `Compiler<B>`: one backend per compile, typed output
 
-Status: design agreed, not implemented. This is a breaking change to the `tungsten-wg` facade and the `Backend` trait in
+Status: design agreed. Implemented (see Implementation notes). The READMEs and `docs/redesign.md` are updated. This is a breaking change to the `tungsten-wg` facade and the `Backend` trait in
 `tungsten-interface`, so it ships in v0.3. It lands right after milestone 5 of `specs/program-level-inputs.md` and before
 `specs/auto-consts.md`. `tungsten-interface` gains `Compiler` and dependencies on the optimizer and the checker. It
 revises `docs/redesign.md` (§8).
@@ -27,7 +27,7 @@ use tungsten_wg::{Compiler, Passes, Inline};
 use tungsten_wg::{CudaBackend, CudaConfig, CudaCompile};
 use tungsten_wg::cuda::Profile;
 
-let out: CudaOutput = Compiler::new(program, &registry, CudaBackend::new(CudaConfig::default()))
+let out: CudaOutput = Compiler::new(program, registry, CudaBackend::new(CudaConfig::default()))
     .passes(Passes::default().inline(Inline::All))
     .profile(Profile::Tolerance)        // CudaCompile, only on Compiler<CudaBackend>
     .block_size(256)
@@ -198,16 +198,16 @@ after this change, because the multi-backend slice was its only user.
 
 ```rust
 // tungsten-interface/compiler.rs
-pub struct Compiler<'r, B: Backend> {
+pub struct Compiler<B: Backend> {
     program: OptimizedProgram,
-    registry: &'r check::Registry,
+    registry: Arc<check::Registry>,
     backend: B,
     passes: Option<Passes>,          // None = backend.default_passes()
     deny_warnings: bool,
 }
 
-impl<'r, B: Backend> Compiler<'r, B> {
-    pub fn new(program: OptimizedProgram, registry: &'r check::Registry, backend: B) -> Self;
+impl<B: Backend> Compiler<B> {
+    pub fn new(program: OptimizedProgram, registry: impl Into<Arc<check::Registry>>, backend: B) -> Self;
 
     pub fn passes(self, passes: Passes) -> Self;   // replaces the backend's defaults entirely
     pub fn deny_warnings(self) -> Self;
@@ -222,7 +222,7 @@ impl<'r, B: Backend> Compiler<'r, B> {
 ### 4.1 Pipeline of `compile`
 
 1. `backend.validate()`. On failure: `CompileError::Backend { name, source: InvalidConfig(..) }`. Nothing else runs.
-2. `check::prepare(&program, registry)`. On failure: `CompileError::Invalid`.
+2. `check::prepare(&program, &registry)`. On failure: `CompileError::Invalid`.
 3. `passes = self.passes.unwrap_or_else(|| backend.default_passes())`. Then run them in a fixed order. Today the only
    pass is: `Inline::All` → `optimizer::perform_inline(&mut program)`, and `Inline::None` does nothing.
 4. If at least one pass changed the program: `check::prepare` again. On failure:
@@ -283,8 +283,8 @@ next to a check or codegen run, and it rules out one backend seeing another's pa
 ### 4.6 Several targets
 
 ```rust
-let rust = Compiler::new(program.clone(), &registry, RustBackend::new(RustConfig::default())).compile()?;
-let cuda = Compiler::new(program, &registry, CudaBackend::new(cfg)).profile(Profile::Tolerance).compile()?;
+let rust = Compiler::new(program.clone(), registry.clone(), RustBackend::new(RustConfig::default())).compile()?;
+let cuda = Compiler::new(program, registry, CudaBackend::new(cfg)).profile(Profile::Tolerance).compile()?;
 ```
 
 Each target is checked on its own, so a frontend pays for one check per target. The cost on vanilla-sized programs is
@@ -401,7 +401,7 @@ checker rejects.
     `InvalidAfterPasses` (behind `cfg(test)`, through an injectable pass hook, or by checking with a program the
     inliner provably changes plus a registry that only the inlined form violates. Pick whichever is less invasive
     when implementing).
-- **Default equivalence**: for each backend, `Compiler::new(p, &registry, b).compile()` gives output byte-identical to the
+- **Default equivalence**: for each backend, `Compiler::new(p, registry, b).compile()` gives output byte-identical to the
   low-level path on the existing backend test programs. Those programs get a registry that declares what they use.
 - **Ext traits**: in each backend crate, one test calls every setter and checks the config field (this catches the
   inherent-method shadowing from §5). CUDA: `.block_size(7)` → `InvalidConfig` rather than a panic. Java:
@@ -444,7 +444,7 @@ It stays on its pin, and nothing in this repo builds it. When it moves to v0.3:
 
 - It must pass the checker first, since there is no unchecked `Compiler`. Vanilla currently fails `check::prepare` with
   1,719 errors, none about inputs (`specs/program-level-inputs.md`, milestone 3 notes). A port has to fix those.
-- `compile_java` becomes `Compiler::new(optimized, &registry, JavaBackend::new(cfg))
+- `compile_java` becomes `Compiler::new(optimized, registry, JavaBackend::new(cfg))
   .passes(Passes::default().inline(Inline::All)).compile()`, which removes its manual `perform_inline` and the `.output().cloned().ok_or(..)` dance.
 - `do_compile` (four backends) becomes four `Compiler`s over clones of the converted program, with the CUDA one using
   `.profile(Profile::Tolerance)`.
@@ -484,3 +484,25 @@ It stays on its pin, and nothing in this repo builds it. When it moves to v0.3:
 - **Unmeasured:** the cost of the mandatory check on vanilla-sized programs.
 - **A testsuite mode** that compiles the corpus through `Compiler` with `Inline::All`, for end-to-end differential
   testing of backend × inliner.
+
+## Implementation notes
+
+- **Dependency-rule test.** §7 says no backend source may mention `tungsten_optimizer::` except `tungsten-inspect`'s
+  `InlineStats` import. Inspect reads more of the optimizer than that (`explain_inline`, `GridInfo`, `InlineVerdict`,
+  and others), so the test (`tests/dependency_rules.rs`) is `backends_never_run_passes`: Rust, Java and CUDA sources
+  (outside `tests.rs`) must not mention `tungsten_optimizer` at all, and Inspect's must not mention `perform_inline`.
+  The manifest check also covers `tungsten-core` and `tungsten-ir`.
+- **`InvalidAfterPasses` test.** Uses a `#[cfg(test)]` field on `Compiler` that runs one extra pass after the real ones.
+  There is no test that proves the re-check is skipped when nothing changed; it only checks that an unchanged program
+  still compiles.
+- **Setters.** `buffer_bounds` is not added, since it comes with `specs/workers.md`. `Passes::inline` and
+  `CudaConfig::validate` are public.
+- **Naming rules** are computed per call for Java and CUDA (`Cow::Owned`), and held in the struct for Rust and Inspect.
+- **Testsuite.** The Rust harness now takes its rules from `backend.naming_rules()`. The CUDA harness calls
+  `backend.validate()` itself, as §6 says a low-level caller should.
+- **Equivalence tests** run on `BYTES` for Rust, Java and CUDA, because the other test programs use externs that an
+  empty registry rejects. The backend crates gained a `tungsten-check` dev-dependency for the registry.
+- **Removed.** The `check` feature of `tungsten-wg`, and its `thiserror` dependency.
+- **Registry ownership.** `Compiler` owns its registry as an `Arc<Registry>`, taken as `impl Into<Arc<Registry>>`. A frontend
+  passes an owned `Registry`, or shares one `Arc` between the `Compiler`s of several targets (§4.6) with `.clone()`.
+  The spec's borrowed `&'r Registry` and the `Compiler<'r, B>` lifetime are gone.

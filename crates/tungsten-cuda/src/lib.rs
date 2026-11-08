@@ -45,7 +45,7 @@ pub mod orchestration;
 pub mod statement;
 pub mod types;
 
-pub use backend::{CudaBackend, CudaConfig, CudaOutput, InlinePolicy, Profile};
+pub use backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePolicy, Profile};
 pub use orchestration::TransformCudaOrchestration;
 
 /// Runtime types the generated code refers to by name.

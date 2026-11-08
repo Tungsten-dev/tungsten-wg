@@ -1,9 +1,9 @@
 //! Smoke tests: small programs, written as `.tw` text, exercising the Rust lowerings.
 
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::{Backend, Compiler, Interface};
 use tungsten_parse::{FileId, NoEnv, load};
 
-use crate::backend::{RustBackend, RustConfig, RustOutput};
+use crate::backend::{RustBackend, RustCompile, RustConfig, RustOutput};
 
 /// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
 const BYTES: &str = r#"
@@ -38,10 +38,9 @@ program {
 
 fn generate(src: &str) -> RustOutput {
     let program = load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
-    let mut backend = RustBackend::new(RustConfig::default());
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
-    backend.output().expect("rust output").clone()
+    let backend = RustBackend::new(RustConfig::default());
+    let interface = Interface::build(&program, &backend.naming_rules());
+    backend.generate(&program, &interface).unwrap()
 }
 
 fn assert_contains(text: &str, expected: &[&str]) {
@@ -76,4 +75,33 @@ fn ambients() {
         "p.pos.x",
     ]);
     assert!(!output.full_source.contains("let mut origin"), "{}", output.full_source);
+}
+
+fn empty_registry() -> tungsten_check::Registry {
+    tungsten_check::RegistryBuilder::new().build().unwrap()
+}
+
+/// `Compiler` with default passes generates exactly what the low-level path does.
+#[test]
+fn compiler_matches_low_level_path() {
+    let program = load(BYTES, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
+    let registry = empty_registry();
+    let out = Compiler::new(program, registry, RustBackend::new(RustConfig::default()))
+        .compile()
+        .unwrap();
+    assert_eq!(out, generate(BYTES));
+}
+
+/// Calls every setter. This also catches a setter that an inherent `Compiler` method shadows.
+#[test]
+fn every_setter_sets_its_field() {
+    let program = load(BYTES, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
+    let registry = empty_registry();
+    let c = Compiler::new(program, registry, RustBackend::new(RustConfig::default()))
+        .density_module_name("d")
+        .orchestration_module_name("o");
+    assert_eq!(c.backend().config().density_module_name, "d");
+    assert_eq!(c.backend().config().orchestration_module_name, "o");
+    let out = c.compile().unwrap();
+    assert!(!out.orchestration_module.is_empty());
 }

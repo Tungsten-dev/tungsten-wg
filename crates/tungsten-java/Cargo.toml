@@ -14,3 +14,4 @@ tungsten-rust.workspace = true
 
 [dev-dependencies]
 tungsten-parse.workspace = true
+tungsten-check.workspace = true

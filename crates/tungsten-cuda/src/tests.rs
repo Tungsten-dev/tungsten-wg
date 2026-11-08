@@ -1,10 +1,10 @@
 //! Smoke tests: small programs, as `.tw` text, exercising the CUDA-specific lowerings.
 //! Set `TUNGSTEN_CUDA_OUT=<dir>` to also write the generated files there, e.g. to run nvcc on them.
 
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::{Backend, BackendError, CompileError, Compiler, Interface};
 use tungsten_parse::{FileId, NoEnv, load};
 
-use crate::backend::{CudaBackend, CudaConfig, CudaOutput};
+use crate::backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePolicy, Profile};
 
 const SMALL: &str = r#"
 program {
@@ -112,10 +112,9 @@ program {
 
 fn generate(src: &str, config: CudaConfig) -> CudaOutput {
     let program = load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
-    let mut backend = CudaBackend::new(config);
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
-    backend.output().expect("cuda output").clone()
+    let backend = CudaBackend::new(config);
+    let interface = Interface::build(&program, &backend.naming_rules());
+    backend.generate(&program, &interface).unwrap()
 }
 
 fn write_out(output: &CudaOutput, subdir: &str) {
@@ -260,9 +259,12 @@ fn program_without_inputs_or_entries() {
 }
 
 #[test]
-#[should_panic(expected = "block_size")]
-fn rejects_invalid_block_size() {
-    CudaBackend::new(CudaConfig { block_size: 100, ..CudaConfig::default() });
+fn rejects_invalid_config() {
+    let err = |config| CudaBackend::new(config).validate().unwrap_err().to_string();
+    assert!(err(CudaConfig { block_size: 100, ..CudaConfig::default() }).contains("block_size"));
+    assert!(err(CudaConfig { namespace: "1x".into(), ..CudaConfig::default() }).contains("namespace"));
+    assert!(err(CudaConfig { host_consts_ring: 0, ..CudaConfig::default() }).contains("host_consts_ring"));
+    assert!(CudaBackend::new(CudaConfig::default()).validate().is_ok());
 }
 
 #[test]
@@ -294,4 +296,51 @@ fn ambients() {
         "p.pos.x",
     ]);
     assert!(!output.density_source.contains("double3 origin_1"), "{}", output.density_source);
+}
+
+fn empty_registry() -> tungsten_check::Registry {
+    tungsten_check::RegistryBuilder::new().build().unwrap()
+}
+
+fn compiler(r: tungsten_check::Registry) -> Compiler<CudaBackend> {
+    let program = load(BYTES, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
+    Compiler::new(program, r, CudaBackend::new(CudaConfig::default()))
+}
+
+#[test]
+fn compiler_matches_low_level_path() {
+    let registry = empty_registry();
+    let out = compiler(registry).compile().unwrap();
+    assert_eq!(out, generate(BYTES, CudaConfig::default()));
+}
+
+#[test]
+fn every_setter_sets_its_field() {
+    let registry = empty_registry();
+    let c = compiler(registry)
+        .profile(Profile::Tolerance)
+        .block_size(256)
+        .host_consts_ring(4)
+        .debug_checks(true)
+        .inline_policy(InlinePolicy::Force)
+        .namespace("ns");
+    let config = c.backend().config();
+    assert_eq!(config.profile, Profile::Tolerance);
+    assert_eq!((config.block_size, config.host_consts_ring), (256, 4));
+    assert!(config.debug_checks);
+    assert_eq!(config.inline_policy, InlinePolicy::Force);
+    assert_eq!(config.namespace, "ns");
+    // The namespace is picked up by the naming rules, which are computed at compile time.
+    assert!(c.backend().naming_rules().used_set().contains("ns"));
+    c.compile().unwrap();
+}
+
+#[test]
+fn invalid_setter_value_is_an_error_not_a_panic() {
+    let registry = empty_registry();
+    let r = compiler(registry).block_size(7).compile();
+    assert!(matches!(
+        r,
+        Err(CompileError::Backend { source: BackendError::InvalidConfig(_), .. })
+    ));
 }

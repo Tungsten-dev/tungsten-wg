@@ -1,12 +1,12 @@
 //! Smoke test: a small program, as `.tw` text, covering sharing, resampling, indexed reads, loops,
 //! constants, host inputs and tables. Set `TUNGSTEN_INSPECT_OUT=<dir>` to write the tree there.
 
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::{Backend, Compiler, Interface};
 use tungsten_ir::model::OptimizedProgram;
 use tungsten_optimizer::{explain_inline, perform_inline};
 use tungsten_parse::{FileId, NoEnv, load};
 
-use crate::backend::{InspectBackend, InspectConfig, inspect};
+use crate::backend::{InspectBackend, InspectCompile, InspectConfig, Views, inspect};
 use crate::diff::diff;
 use crate::model::{Inspection, Verdict};
 
@@ -103,11 +103,11 @@ fn inspects_small_program() {
     let config = InspectConfig::default();
 
     let out = inspect(&program, &config);
-    let mut backend = InspectBackend::new(config.clone());
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
+    let backend = InspectBackend::new(config.clone());
+    let interface = Interface::build(&program, &backend.naming_rules());
+    let generated = backend.generate(&program, &interface).unwrap();
     assert_eq!(
-        backend.output().unwrap().files,
+        generated.files,
         out.files,
         "backend and inspect() differ"
     );
@@ -319,4 +319,19 @@ fn byte_buffers_and_literals() {
         .expect("unit function")
         .ir;
     assert!(ir.contains("127b"), "missing byte literal in:\n{ir}");
+}
+
+#[test]
+fn compiler_matches_inspect_and_views_setter_works() {
+    let registry = tungsten_check::RegistryBuilder::new().build().unwrap();
+    let src = "program { fn `minecraft:one`() -> f64 { return 1.0; } unit one { main `minecraft:one`; } entry one @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }";
+    let p = program(src);
+    let mut views = Views::default();
+    views.ir_text = false;
+    let c = Compiler::new(p.clone(), registry, InspectBackend::new(InspectConfig::default()))
+        .views(views.clone());
+    assert_eq!(c.backend().config().views, views);
+    let out = c.compile().unwrap();
+    let expected = inspect(&p, &InspectConfig { views, ..InspectConfig::default() });
+    assert_eq!(out.files, expected.files);
 }

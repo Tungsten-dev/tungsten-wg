@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use tungsten_interface::naming::{NamingRules, cuda_sanitize};
-use tungsten_interface::{Backend, BackendError, Interface, OrchestrationCodegen};
+use tungsten_interface::{Backend, BackendError, Compiler, Interface, OrchestrationCodegen};
 use tungsten_ir::model::OptimizedProgram;
 
 use crate::{CudaCodegen, TransformCudaOrchestration};
@@ -67,7 +69,8 @@ pub enum InlinePolicy {
     Never,
 }
 
-/// Configuration of the CUDA backend. Invalid values panic in [`CudaBackend::new`].
+/// Configuration of the CUDA backend. Invalid values are reported by [`CudaConfig::validate`],
+/// which `Compiler::compile` calls before anything else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CudaConfig {
     /// Namespace of all generated C++ code. Device code goes in `<namespace>::dev`.
@@ -128,35 +131,42 @@ impl CudaConfig {
         }
     }
 
-    /// Panics on values the generated code can't work with.
-    fn validate(&self) {
+    /// Rejects values the generated code can't work with.
+    pub fn validate(&self) -> Result<(), BackendError> {
+        let invalid = |msg: String| Err(BackendError::InvalidConfig(msg));
         let identifier = |s: &str| {
             !s.is_empty()
                 && !s.starts_with(|c: char| c.is_ascii_digit())
                 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         };
-        assert!(
-            identifier(&self.namespace) && cuda_sanitize(&self.namespace) == self.namespace,
-            "CudaConfig::namespace `{}` is not a valid C++ identifier",
-            self.namespace
-        );
-        if let Some(prefix) = &self.kernel_prefix {
-            assert!(
-                prefix.is_empty() || identifier(prefix),
-                "CudaConfig::kernel_prefix `{}` is not a valid identifier prefix",
-                prefix
-            );
+        if !(identifier(&self.namespace) && cuda_sanitize(&self.namespace) == self.namespace) {
+            return invalid(format!(
+                "CudaConfig::namespace `{}` is not a valid C++ identifier",
+                self.namespace
+            ));
         }
-        assert!(
-            self.block_size.is_power_of_two() && (32..=1024).contains(&self.block_size),
-            "CudaConfig::block_size must be a power of two in 32..=1024, got {}",
-            self.block_size
-        );
-        assert!(self.host_consts_ring >= 1, "CudaConfig::host_consts_ring must be at least 1");
+        if let Some(prefix) = &self.kernel_prefix {
+            if !(prefix.is_empty() || identifier(prefix)) {
+                return invalid(format!(
+                    "CudaConfig::kernel_prefix `{}` is not a valid identifier prefix",
+                    prefix
+                ));
+            }
+        }
+        if !(self.block_size.is_power_of_two() && (32..=1024).contains(&self.block_size)) {
+            return invalid(format!(
+                "CudaConfig::block_size must be a power of two in 32..=1024, got {}",
+                self.block_size
+            ));
+        }
+        if self.host_consts_ring < 1 {
+            return invalid("CudaConfig::host_consts_ring must be at least 1".to_string());
+        }
+        Ok(())
     }
 }
 
-/// Generated CUDA sources, available after [`Backend::generate`].
+/// Generated CUDA sources, returned by [`Backend::generate`] and `Compiler::compile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CudaOutput {
     /// `orchestration.h`: CUDA-free public API.
@@ -189,45 +199,41 @@ impl CudaOutput {
 #[derive(Debug)]
 pub struct CudaBackend {
     config: CudaConfig,
-    output: Option<CudaOutput>,
-    /// Reserves the namespace and kernel prefix so no generated name collides with them.
-    naming_rules: NamingRules,
 }
 
 impl CudaBackend {
     pub fn new(config: CudaConfig) -> Self {
-        config.validate();
-        let mut reserved = vec![config.namespace.clone()];
-        let prefix = config.effective_kernel_prefix();
-        if !prefix.is_empty() {
-            reserved.push(prefix);
-        }
-        let naming_rules = NamingRules::cuda().with_reserved(reserved);
-        Self { config, output: None, naming_rules }
-    }
-
-    /// The generated code, or `None` before a successful [`Backend::generate`].
-    pub fn output(&self) -> Option<&CudaOutput> {
-        self.output.as_ref()
+        Self { config }
     }
 
     pub fn config(&self) -> &CudaConfig {
         &self.config
     }
+
+    pub fn config_mut(&mut self) -> &mut CudaConfig {
+        &mut self.config
+    }
 }
 
 impl Backend for CudaBackend {
+    type Output = CudaOutput;
+
     fn name(&self) -> &str {
         "cuda"
     }
 
-    fn generate(&mut self, program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
-        let device = CudaCodegen::new(program, interface, &self.naming_rules, &self.config);
-        let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &self.naming_rules);
+    fn validate(&self) -> Result<(), BackendError> {
+        self.config.validate()
+    }
+
+    fn generate(&self, program: &OptimizedProgram, interface: &Interface) -> Result<CudaOutput, BackendError> {
+        let naming_rules = self.naming_rules();
+        let device = CudaCodegen::new(program, interface, &naming_rules, &self.config);
+        let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &naming_rules);
         orchestration.convert_program(program, interface);
         let files = orchestration.files();
         let c = &self.config;
-        self.output = Some(CudaOutput {
+        Ok(CudaOutput {
             public_header: files.public_header,
             interface_header: files.interface_header,
             density_source: files.density_source,
@@ -239,11 +245,64 @@ impl Backend for CudaBackend {
                 c.density_source_name.clone(),
                 c.orchestration_source_name.clone(),
             ],
-        });
-        Ok(())
+        })
     }
 
-    fn naming_rules(&self) -> &NamingRules {
-        &self.naming_rules
+    /// `cuda()` with the namespace and kernel prefix reserved, so no generated name collides.
+    fn naming_rules(&self) -> Cow<'_, NamingRules> {
+        let mut reserved = vec![self.config.namespace.clone()];
+        let prefix = self.config.effective_kernel_prefix();
+        if !prefix.is_empty() {
+            reserved.push(prefix);
+        }
+        Cow::Owned(NamingRules::cuda().with_reserved(reserved))
+    }
+
+    fn warnings(output: &CudaOutput) -> &[String] {
+        &output.warnings
+    }
+}
+
+/// CUDA settings on [`Compiler`]. Each one sets the matching [`CudaConfig`] field; invalid
+/// values are reported by `compile`.
+pub trait CudaCompile: Sized {
+    fn profile(self, p: Profile) -> Self;
+    fn block_size(self, n: u32) -> Self;
+    fn host_consts_ring(self, n: u32) -> Self;
+    fn debug_checks(self, on: bool) -> Self;
+    /// The emitted qualifier, not the IR inliner.
+    fn inline_policy(self, p: InlinePolicy) -> Self;
+    fn namespace(self, ns: impl Into<String>) -> Self;
+}
+
+impl CudaCompile for Compiler<CudaBackend> {
+    fn profile(mut self, p: Profile) -> Self {
+        self.backend_mut().config_mut().profile = p;
+        self
+    }
+
+    fn block_size(mut self, n: u32) -> Self {
+        self.backend_mut().config_mut().block_size = n;
+        self
+    }
+
+    fn host_consts_ring(mut self, n: u32) -> Self {
+        self.backend_mut().config_mut().host_consts_ring = n;
+        self
+    }
+
+    fn debug_checks(mut self, on: bool) -> Self {
+        self.backend_mut().config_mut().debug_checks = on;
+        self
+    }
+
+    fn inline_policy(mut self, p: InlinePolicy) -> Self {
+        self.backend_mut().config_mut().inline_policy = p;
+        self
+    }
+
+    fn namespace(mut self, ns: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().namespace = ns.into();
+        self
     }
 }

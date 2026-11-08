@@ -24,7 +24,7 @@ New pieces:
   in this crate is proven, and everything outside it is tested.
 - `tungsten-check`: plain Rust, unverified. The registry, the lowering from
   `OptimizedProgram` to the core IR, and the entry points `tungsten_check::{prepare, evaluate}`
-  (lower → check → evaluate). User-facing through the facade's `check` feature. See its
+  (lower → check → evaluate). User-facing through the facade's `check` module and `Compiler`. See its
   `README.md`.
 - `tungsten-testsuite` (`publish = false`): the harness, the test corpus, the extern registry,
   the prelude, and minimal test runtimes for Rust, Java and CUDA.

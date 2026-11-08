@@ -12,10 +12,9 @@ use tungsten_ir::{ComputeUnit, isomorphic};
 use tungsten_rust::backend::{RustBackend, RustConfig};
 
 fn rust(p: &OptimizedProgram) -> String {
-    let mut b = RustBackend::new(RustConfig::default());
-    let i = Interface::build(p, b.naming_rules());
-    b.generate(p, &i).unwrap();
-    b.output().unwrap().full_source.clone()
+    let b = RustBackend::new(RustConfig::default());
+    let i = Interface::build(p, &b.naming_rules());
+    b.generate(p, &i).unwrap().full_source
 }
 
 #[test]

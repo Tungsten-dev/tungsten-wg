@@ -204,14 +204,14 @@ pub fn generate_test(program: &OptimizedProgram, env: &TestEnv, id: &str) -> Res
     io.check_encodable()?;
     catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
         let config = CudaConfig { namespace: id.to_string(), ..CudaConfig::default() };
-        let mut backend = config.to_backend();
-        let interface = Interface::build(program, backend.naming_rules());
-        backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
-        let out = backend.output().ok_or("backend produced no output")?;
+        let backend = config.to_backend();
+        backend.validate().map_err(|e| format!("invalid config: {e}"))?;
         let rules = backend.naming_rules();
+        let interface = Interface::build(program, &rules);
+        let out = backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
         let mut used = rules.used_set();
         used.extend(["create", "sync", "query", "profile", "required_flags", "impl_"].map(String::from));
-        let bases = entry_base_names(program, rules, used);
+        let bases = entry_base_names(program, &rules, used);
         let driver = driver_source(program, &interface, id, &bases, &io, env)?;
         let mut blob = String::new();
         for (name, text) in out.files() {

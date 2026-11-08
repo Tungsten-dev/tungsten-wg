@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use tungsten_interface::naming::{NamingRules, java_sanitize};
-use tungsten_interface::{Backend, BackendError, Interface, OrchestrationCodegen};
+use tungsten_interface::{Backend, BackendError, Compiler, Interface, OrchestrationCodegen};
 use tungsten_ir::model::OptimizedProgram;
 
 use crate::{JavaCodegen, TransformJavaOrchestration};
@@ -30,7 +32,7 @@ impl JavaConfig {
     }
 }
 
-/// Generated Java source, available after [`Backend::generate`].
+/// Generated Java source, returned by [`Backend::generate`] and `Compiler::compile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaOutput {
     /// The single compilation unit.
@@ -43,39 +45,37 @@ pub struct JavaOutput {
 #[derive(Debug)]
 pub struct JavaBackend {
     config: JavaConfig,
-    output: Option<JavaOutput>,
-    /// Reserves the generated class name so no member collides with it.
-    naming_rules: NamingRules,
 }
 
 impl JavaBackend {
     pub fn new(config: JavaConfig) -> Self {
-        let naming_rules = NamingRules::java().with_reserved([java_sanitize(&config.class_name)]);
-        Self {
-            config,
-            output: None,
-            naming_rules,
-        }
+        Self { config }
     }
 
-    /// The generated code, or `None` before a successful [`Backend::generate`].
-    pub fn output(&self) -> Option<&JavaOutput> {
-        self.output.as_ref()
+    pub fn config(&self) -> &JavaConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut JavaConfig {
+        &mut self.config
     }
 }
 
 impl Backend for JavaBackend {
+    type Output = JavaOutput;
+
     fn name(&self) -> &str {
         "java"
     }
 
     fn generate(
-        &mut self,
+        &self,
         program: &OptimizedProgram,
         interface: &Interface,
-    ) -> Result<(), BackendError> {
+    ) -> Result<JavaOutput, BackendError> {
         let class_name = java_sanitize(&self.config.class_name);
-        let device = JavaCodegen::new(program, interface, &self.naming_rules, &class_name);
+        let naming_rules = self.naming_rules();
+        let device = JavaCodegen::new(program, interface, &naming_rules, &class_name);
         let mut orchestration = TransformJavaOrchestration::new(
             device,
             &self.config.package,
@@ -84,14 +84,42 @@ impl Backend for JavaBackend {
         );
         orchestration.convert_program(program, interface);
 
-        self.output = Some(JavaOutput {
+        Ok(JavaOutput {
             source: orchestration.output(),
             warnings: orchestration.warnings(),
-        });
-        Ok(())
+        })
     }
 
-    fn naming_rules(&self) -> &NamingRules {
-        &self.naming_rules
+    /// `java()` with the sanitized class name reserved, so no member collides with it.
+    fn naming_rules(&self) -> Cow<'_, NamingRules> {
+        Cow::Owned(NamingRules::java().with_reserved([java_sanitize(&self.config.class_name)]))
+    }
+
+    fn warnings(output: &JavaOutput) -> &[String] {
+        &output.warnings
+    }
+}
+
+/// Java settings on [`Compiler`]. Each one sets the matching [`JavaConfig`] field.
+pub trait JavaCompile: Sized {
+    fn package(self, p: impl Into<String>) -> Self;
+    fn class_name(self, c: impl Into<String>) -> Self;
+    fn runtime_package(self, p: impl Into<String>) -> Self;
+}
+
+impl JavaCompile for Compiler<JavaBackend> {
+    fn package(mut self, p: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().package = p.into();
+        self
+    }
+
+    fn class_name(mut self, c: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().class_name = c.into();
+        self
+    }
+
+    fn runtime_package(mut self, p: impl Into<String>) -> Self {
+        self.backend_mut().config_mut().runtime_package = p.into();
+        self
     }
 }

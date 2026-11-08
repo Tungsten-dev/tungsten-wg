@@ -26,6 +26,8 @@ mod render;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{ElementSizes, InspectBackend, InspectConfig, InspectOutput, Views, inspect};
+pub use backend::{
+    ElementSizes, InspectBackend, InspectCompile, InspectConfig, InspectOutput, Views, inspect,
+};
 pub use diff::diff;
 pub use model::Inspection;

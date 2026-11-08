@@ -11,4 +11,6 @@ path = "lib.rs"
 
 [dependencies]
 tungsten-ir.workspace = true
+tungsten-optimizer.workspace = true
+tungsten-check.workspace = true
 thiserror.workspace = true
