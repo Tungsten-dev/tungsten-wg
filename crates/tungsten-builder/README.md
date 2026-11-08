@@ -137,7 +137,9 @@ gives deterministic ones. `source_hash` defaults to 0.
 
 `build!(f, { … })` appends to `f`, and `body!(f, { … })` returns a `Block` for `f.append`. `f`
 must be a variable name: each nested block is a closure whose parameter shadows it, so code inside
-a block can use `f` and other `&mut` values, such as the program builder.
+a block can use `f` and other `&mut` values, such as the program builder. Without the macros,
+capture each branch with `f.block` and join them with `f.if_blocks(cond, then, other)` when both
+branches need `&mut ProgramBuilder`.
 
 | Form | Means |
 | --- | --- |

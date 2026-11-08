@@ -1,8 +1,8 @@
 # Orchestration and workers: a thread-safe global, single-entry per-thread workers
 
 Status: design agreed, not implemented. This is a breaking change to the generated code of every backend, so it ships
-in v0.3. It lands **last** in v0.3, after `specs/compiler.md`, `specs/auto-consts.md`, `specs/density-mappings.md` and
-`specs/refinement.md`. It restates their creation and refine APIs on the new types (§9).
+in v0.3. It lands after `specs/compiler.md` and `specs/auto-consts.md`, and before `specs/density-mappings.md` and
+`specs/refinement.md`, whose backend work targets workers directly.
 
 ## 1. Summary
 
@@ -96,21 +96,20 @@ impl Orchestration {
     // one factory per entry
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct FinalDensityHostConsts { pub blend: f64 /* only this entry's hosts */ }
+impl Default for FinalDensityHostConsts { /* generated, see §5.2 */ }
 
 pub struct FinalDensityWorker {
     orch: Orchestration,                               // keeps autoconsts alive; 'static
     buffers: InternalBuffers,                          // one Box<[T]> per element type (§4.2)
     hosts: HostConsts,                                 // private program-wide copy (§4.4)
-    origin: Vec3,                                      // only with refinements (§9)
 }
 
 impl FinalDensityWorker {
     pub const LEN: usize = 98304;
     pub const DIMS: (i32, i32, i32) = (16, 384, 16);
     pub fn run(&mut self, origin: Vec3, host_consts: &FinalDensityHostConsts) -> &[f64; 98304];
-    pub fn refine_step(&mut self, offset: Pos3, host_consts: &FinalDensityHostConsts) -> &[f64; 98304];
 }
 
 const _: () = { fn s<T: Send + Sync>() {} fn w<T: Send>() {} fn a() { s::<Orchestration>(); w::<FinalDensityWorker>(); } };
@@ -140,7 +139,6 @@ public final class Gen {
     /** Not thread-safe: one per thread. */
     public static final class FinalDensityWorker {
         public double[] run(int x, int y, int z, FinalDensityHostConsts hc);
-        public double[] refine_step(int ox, int oy, int oz, FinalDensityHostConsts hc);
     }
     static final class AutoConsts { ... }                   // package-private now
     static final class HostConsts { ... }                   // package-private, program-wide
@@ -179,7 +177,6 @@ public:
     static constexpr int len = 98304;
     static constexpr int dims[3] = {16, 384, 16};
     Status enqueue(Vec3 origin, const FinalDensityHostConsts& hc);
-    Status enqueue_refine_step(Pos3 offset, const FinalDensityHostConsts& hc);
     /// Valid after sync() (or query() returning success), until the next enqueue*.
     const double* result() const;
     Status sync();
@@ -198,8 +195,8 @@ private:
 
 ### 4.1 Worker closure
 
-For entry `e`, the **worker schedule** is `waves_for(e)` (which, per `specs/refinement.md` §4.5, already includes what
-its refinements need) plus the rerun-only instances of `e`'s refinements. The worker's instances are that schedule's
+For entry `e`, the **worker schedule** is `waves_for(&target)`, where `target` is the instance `e` computes. It's exposed
+as `Interface::worker_schedule(e)`, and `specs/refinement.md` §6.1 extends it. The worker's instances are that schedule's
 instances in `instances()` order. Nothing else gets a slot.
 
 ### 4.2 Layout
@@ -253,7 +250,7 @@ A function in no worker schedule (dead code) is still emitted with its parameter
 
 ```rust
 impl Interface {
-    /// Static hosts read by any unit in the entry's worker schedule (incl. refinement `with` units), arena order.
+    /// Static hosts read by any unit in the entry's worker schedule, arena order.
     pub fn entry_hosts(&self, entry: usize) -> &[Ref<HostInput>];
 }
 ```
@@ -288,8 +285,12 @@ differential suite runs `PerBuffer` (§8).
 
 - `InternalBuffers` is `struct { <pool>: Box<[T]>, .. }` with one field per pool type used by **any** worker (one
   program-wide type, so the density code is shared). A worker fills the pools it doesn't use with empty slices.
-- Allocation: `vec![T::default(); len].into_boxed_slice()`. **Runtime contract:** a record type used as a unit output or
-  host is `Copy + Default`. This replaces `make_boxed`'s zeroing, which was UB for records with niches (D10).
+- Allocation: `vec![<zero>; len].into_boxed_slice()`. `<zero>` is generated from the type: `0`, `false` and zero `Vec3`
+  and `Pos3` for those types, `[<zero>; N]` for arrays and `R::default()` for records. Rust implements `Default` only for
+  arrays of up to 32 elements, so `HostConsts` and `<Base>HostConsts` get a generated `impl Default` from the same
+  values. **Runtime contract:** a record type used as a unit output or host is `Copy + Default`. This replaces
+  `make_boxed`'s zeroing, which was UB for records with niches (D10).
+- `AutoConsts` is built as one struct literal in `Orchestration::new`, with each initializer called in arena order.
 - Kernels: `fn <kernel>(origin, buffers: &mut InternalBuffers, out_off, off_.., auto_constants, host_consts)`. Per cell:
   `let r = density(.., &*buffers, off_..); buffers.<pool>[out_off + idx] = r;`. These are sequential borrows, as today.
 - Density functions take `buffers: &InternalBuffers`.
@@ -345,7 +346,6 @@ Each backend's extension trait gains `fn buffer_bounds(self, b: BufferBounds) ->
 | An instance shared by two entries | One kernel and one density function. Each worker passes its own offsets |
 | A pool type used by no instance of a worker | Empty slice or array. Never indexed |
 | `run` returns, then `run` again | Rust: the borrow prevents holding the old view. Java/CUDA: the old result is overwritten, as today |
-| `refine_*` before `run` on that worker | Unspecified values. Precondition, as in `specs/refinement.md` §6.3 |
 | Rust runtime handle type not `Sync` | Compile error at the generated static assertion |
 | Rust record without `Default` | Compile error in `InternalBuffers::new` / `HostConsts` |
 | CUDA worker created on the wrong device | `create_*_worker` returns `cudaErrorInvalidDevice` |
@@ -373,12 +373,12 @@ All through `TESTING.md` and `docs/testing-policy.md`.
 | Shared helper reads | Corpus: a helper reading an input, called from two units in different entries (offset pass-through) |
 | Pools | Corpus: one entry mixing `f64`, `i32`, `bool` and a record unit output, so there are several pools, and a record-typed entry |
 | Host consts | Corpus: two entries with disjoint and overlapping hosts, so each `<Base>HostConsts` has only its own. The harness binds only those. An entry with no hosts |
-| Refinement | The refinement corpus runs on workers. A test that creates a second worker of another entry between `run` and `refine` and checks the first worker's march is unaffected (the old §6.3 caveat no longer applies) |
 | Concurrency | Rust (`tungsten-testsuite/tests/`): N threads, each with its own worker from one `Orchestration`, on distinct origins. Results equal a sequential run. Java: the same with an `ExecutorService`. CUDA: two workers on two host threads, behind the CUDA milestone gate |
 | Bounds modes | Rust: an out-of-range read program (an existing `@knownfail`-free OOB corpus case or a new one) fails under `PerBuffer`, compiles under `Slab` and `Unchecked` (not run, since UB). Java `Unchecked` output equals `Slab` output. CUDA: `None` + `debug_checks` emits `TW_CHECK_INDEX`, and `None` alone doesn't |
-| Interface | `worker(e)`: entry at pool 0, offset 0. Only closure instances get slots. Determinism (build twice, compare). `input_params` is transitive and in arena order. `entry_hosts` includes refinement `with` units |
+| Interface | `worker(e)`: entry at pool 0, offset 0. Only closure instances get slots. Determinism (build twice, compare). `input_params` is transitive and in arena order |
 | Static assertion | A Rust trybuild-style or `compile_fail` doctest: a runtime handle type with `Cell` fails at the assertion |
 | Rust records | The test runtime's records derive `Default`. A record without it fails to compile with a clear error |
+| Large arrays | Corpus: a unit output and a host of type `[f64; 33]` compile and match the interpreter |
 | Java limits | A synthetic function reading > 255 inputs gives `BackendError::Codegen` |
 | Naming | Entry names that collide after CamelCasing (`a_b`, `aB`) get unique worker types. An entry named `orchestration` doesn't clash |
 
@@ -389,28 +389,18 @@ All through `TESTING.md` and `docs/testing-policy.md`.
    is green on Rust.
 3. **Java.** The same. Java harness moves.
 4. **CUDA.** Per-worker layout and slab, `Shared` device autoconsts, worker streams. CUDA harness moves.
-5. **Refinement on workers** (if refinement has landed by then, otherwise folded into it), plus concurrency tests.
-6. **Docs.** README usage, `docs/redesign.md`, generated-code docs, and the amendments in §9.
+5. **Concurrency tests.**
+6. **Docs.** README usage, `docs/redesign.md` (usage example, the Rust runtime contract: `Copy + Default` records,
+   `Send + Sync` handles) and generated-code docs. Lands with the documentation of the other v0.3 specs.
 
 Each milestone keeps the corpus green on the backends it touches. Backends not yet moved keep the old API until their
 milestone, so the harnesses are moved per backend.
 
-## 9. Amendments to other specs
+## 9. Effects on other specs
 
-Applied when this lands:
-
-- **`specs/auto-consts.md` §5.1:** the creation calls become `Orchestration::new(..)` (Rust),
-  `Orchestration.create(..)` (Java) and `Orchestration::create(.., std::shared_ptr<Orchestration>&)` (CUDA). `auto_param`
-  names stay unique against the creation code's names. `AutoConsts.create` is no longer public, and §7's JNI row changes
-  to `Orchestration.create(long seed)`.
-- **`specs/refinement.md` §6.2:** refine calls become worker methods. Rust: `refine_<name>(&mut self, offset: Pos3,
-  &<Base>HostConsts)`. Java: `refine_<name>(int ox, int oy, int oz, <Base>HostConsts)`. CUDA:
-  `enqueue_refine_<name>(Pos3, const <Base>HostConsts&)`. The stored origin is a worker field.
-  `refinement_method_names` drops the `<entry>_` prefix and is unique within the worker.
-- **`specs/refinement.md` §6.3:** remove the caveat about another entry overwriting shared buffers. Workers are
-  single-entry, so it can't happen. "Refine after orchestrate" becomes "refine after `run` on the same worker".
-- **`specs/compiler.md` §5:** add `buffer_bounds` to `RustCompile`, `JavaCompile` and `CudaCompile`.
-- **`docs/redesign.md`:** usage example and the Rust runtime contract (`Copy + Default` records, `Send + Sync` handles).
+Written into those specs: the creation API in `specs/auto-consts.md` §5.1, the `buffer_bounds` setters in
+`specs/compiler.md` §5, and lerp helpers on pools in `specs/density-mappings.md` §5.2. `specs/refinement.md` §6 adds its
+refine calls to the workers defined here.
 
 ## 10. Extension points for triggered stages
 
@@ -452,14 +442,14 @@ Not designed here. These fix what the later spec can rely on, so it doesn't need
 | D7 | Per-input scalar offset parameters, derived transitively from bodies | No indirection, and offsets fold and inline. Shared helpers just pass them through | Offset table indexed by input id (one load per read, an extra uniform param) |
 | D8 | `BufferBounds::{PerBuffer, Slab, Unchecked}` as a backend option. Rust/Java default `PerBuffer`. CUDA follows `debug_checks` unless set | Keeps today's failure behaviour by default and lets frontends trade safety for speed | Slab-only checks (silent neighbour reads); no unchecked mode |
 | D9 | Workers aren't `Clone`. The Orchestration is | Creation is cheap. Prevents accidentally duplicating frozen refinement state | Clone workers (fork a march: no current need) |
-| D10 | Rust records are `Copy + Default`, and buffers are built with `Default` | Safe. Removes `make_boxed`'s zeroing UB | Keeping zeroed memory |
+| D10 | Rust records are `Copy + Default`, and buffers and host structs use generated zero values | Safe. Removes `make_boxed`'s zeroing UB, and works for arrays longer than 32 | Keeping zeroed memory; `#[derive(Default)]` and `T::default()`, which stop at 32 elements |
 | D11 | Thread safety by documented contract plus a Rust static assertion | A clear error at the generated code for a non-`Sync` runtime | Contract only (indirect errors) |
 | D12 | Java `run` returns the pool array, with the entry output at offset 0 | No copy per call | Copy into a result array (768 KB per call for big entries); returning a view (API change, slower reads) |
 | D13 | Triggered-stage misses are computed by the requesting worker | No shared worker to contend on. Fits per-thread resources | A dedicated locked internal worker (today's `Mutex<Orchestration>` contention) |
 | D14 | `HostConsts` per entry in the API, copied into a private program-wide struct | Callers see only the hosts their entry uses, and the density code is shared | Per-host scalar params (signature growth, records by reference); per-entry struct with duplicated code |
 | D15 | CUDA worker owns a stream, slab, pinned ring and result buffer. The Orchestration owns the device autoconsts | Same model as today, per worker. One device copy of the autoconsts | Caller-supplied streams (more misuse, CUDA types leak into the API) |
 | D16 | Java `AutoConsts` becomes package-private, wrapped by `Orchestration` | One shape across backends | Keeping it public alongside |
-| D17 | Lands last in v0.3, with amendments to auto-consts and refinement | Restates creation and refine once, on the final types | Landing earlier and amending specs not yet implemented |
+| D17 | Lands before density-mappings and refinement | v0.3 ships as one release, so their lerp helpers and refine calls are written once, on workers | Landing last: both would be written on the old `Orchestration` and rewritten |
 | D18 | `specs/workers.md` | Root `SPEC.md` holds the testsuite design | Overwriting or appending to `SPEC.md` |
 
 Decided without an interview question, and easy to revisit: pools are keyed by the IR type; there's an empty

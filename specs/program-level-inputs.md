@@ -1,7 +1,9 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1–4 implemented; milestones 5–6 not implemented. Lands before `specs/density-mappings.md` and `specs/refinement.md`,
-which already assume this design.
+Status: design agreed. Milestones 1–4 implemented; milestones 5–6 not implemented. Milestone 5 lands first among the
+remaining v0.3 work, in this order: this spec's milestone 5, `specs/compiler.md`, `specs/auto-consts.md`,
+`specs/workers.md`, `specs/density-mappings.md`, `specs/refinement.md`, then the documentation of all of them. v0.3 is
+released as one piece, so no intermediate state needs compatibility or workarounds.
 
 ## 1. Summary
 
@@ -124,9 +126,8 @@ pub struct DensityInput {
 `DensityInput.var` existed only to supply a name, so it goes away along with the placeholder variables. No
 function's `variables` holds one any more.
 
-`VariableType::DensityInput` has to survive until milestone 5, because `tungsten-legacy/src/model.rs` re-exports
-the IR's `VariableType`, and the legacy builder and `tungsten-mc-compile` use this variant for legacy vars. Until
-then, no valid IR program uses it:
+`VariableType::DensityInput` stays until milestone 5 only because `tungsten-legacy` re-exports the IR's
+`VariableType`. No valid IR program uses it:
 
 - Lowering keeps rejecting it with `DensityInputType`.
 - Backends keep their arms for it.
@@ -262,8 +263,7 @@ Conversion stays working through milestones 2–4, so vanilla can still be compi
 
 ### 6.8 Removing `tungsten-legacy`
 
-**Prerequisite.** `tungsten-mc-compile` is pinned to a tag on the last commit with `tungsten-legacy`, taken after
-milestone 4 (`specs/builder.md` §8). It uses `tungsten_wg::spmt` and the re-exported macros in about 14 source files,
+**Prerequisite.** `tungsten-mc-compile` is pinned to v0.2 (`specs/builder.md` §8). It uses `tungsten_wg::spmt` and the re-exported macros in about 14 source files,
 including `compile.rs` (`spmt::conversion::convert`), `main.rs` (`spmt::pretty`, `spmt::dag`) and the 5,000+ lines in
 `transform_spmt/`, plus 35 macro uses. Its dependency on this repo is a path today, so without the pin it stops
 compiling when milestone 5 lands. Porting it isn't a prerequisite.
@@ -289,7 +289,7 @@ Rust's `transformer.rs` mentions `spmt` only in a commented-out import, so that 
 | L2 snapshots | The only diff is removed `owner` lines. Corpus files keep their inputs in today's order, so ids don't move |
 | Protocol goldens | No change |
 | `tungsten-mc-compile`, milestones 1–4 | Compiles unchanged, as it uses only the legacy model and builds no `OptimizedProgram` literal |
-| `tungsten-mc-compile`, milestone 5 | Needs the §6.8 pin. `tungsten_wg::spmt` and the macros are a breaking API removal, so this needs a version bump |
+| `tungsten-mc-compile`, milestone 5 | Needs the §6.8 pin |
 
 ## 8. Testing
 
@@ -329,7 +329,11 @@ fixtures and the `gen_program` generator in `tungsten-parse/tests/common/mod.rs`
   commit before this work and after it, with inlining off, on all backends. They must be identical.
   This goes through legacy conversion, so it must happen at milestone 3, before the deletion.
 - **Vanilla.** `check::prepare` accepts the vanilla overworld, inlined and not inlined.
-- **Baseline for a later frontend port.** The §6.8 tag can regenerate vanilla's code, not inlined, on all backends. A
+- **Vanilla mapping scan, done once before density-mappings milestone 2 and recorded.** Using the frontend on v0.2, which
+  still converts vanilla, list every un-indexed read whose reader dims differ from the input's dims and whose input isn't `(1,1,1)`. Each one would
+  be a `MappingDimsMismatch` under `specs/density-mappings.md` §4.2. `check::prepare` can't be used for this, because
+  vanilla doesn't pass it yet (milestone 3 notes).
+- **Baseline for a later frontend port.** The frontend on v0.2 can regenerate vanilla's code, not inlined, on all backends. A
   port compares against that output to show that its IR means the same as conversion's (`specs/builder.md` §9).
 - **After deletion.** `cargo tree` shows no `tungsten-legacy`, `cargo test` passes for the workspace with every feature, and
   `scripts/verify.sh` passes. Corpus results and L2 snapshots don't change at milestone 5.
@@ -354,11 +358,11 @@ Each lands green.
    byte comparison happen here.
 4. **Sharing.** New corpus and mutation checks, with any backend fixes they turn up. `tungsten-builder` lands after
    milestone 3 and before milestone 5, on its own milestones (`specs/builder.md` §10).
-5. **Remove legacy.** §6.8. First tag the last commit with legacy and pin the frontend to it.
+5. **Remove legacy.** §6.8. The frontend is on v0.2 by then.
 6. **Documentation.** `SEMANTICS.md` §9, `CHECK.md` (wf table, §6(e), error table), `tungsten-core/README.md`,
    `tungsten-check/README.md`, `tungsten-parse/SPEC.md` (§2, §4, §5, §6.1, §14), `TESTING.md` §8, `docs/redesign.md`
    (layout, dependency rule, decisions), the root `README.md` (workspace layout, usage) and `PAPER.md` where it
-   describes the current state. Milestones 1–4 can ship their documentation early if milestone 5 waits a long time.
+   describes the current state. This lands with the documentation of the other v0.3 specs, after all their code.
 
 ## 9. Decisions
 
@@ -367,7 +371,7 @@ Each lands green.
 | Meaning of program level | Shared inputs, with core dropping `owner` | Shared with core unchanged: lowering splits inputs per unit, IR and core stop matching 1:1, and shared-helper reads stay rejected. Storage move only: no new capability |
 | Core change | Accepted, unlike the other two specs' stance | `owner` isn't used by `exec` and no proof depends on it, so the cost is one `verify.sh` run and the checker edits |
 | `var` | Replaced by `name: Name` | Keeping it: a shared input's var would point into an arbitrary function's arena |
-| Removing legacy | In this spec, as the last code milestone, with the frontend pinned to the last legacy tag | Before this work: no vanilla path for the byte comparison. After these specs: density-mappings and refinement would have to extend or work around a crate about to go. Waiting for the frontend port: it has no owner or date, and would block both later specs |
+| Removing legacy | In this spec, as the last code milestone, with the frontend pinned to v0.2 | Before this work: no vanilla path for the byte comparison. After these specs: density-mappings and refinement would have to extend or work around a crate about to go. Waiting for the frontend port: it has no owner or date, and would block both later specs |
 | `VariableType::DensityInput` | Deleted with legacy at milestone 5 | Own enum in legacy in the meantime: type translation at each conversion site, for a crate about to be deleted |
 | Compatibility | Byte-identical unless inlined | Byte-identical everywhere: keeps arena slot-reuse behaviour in the inliner permanently. Values only: gives up the byte comparison |
 | Text format | Top-level `input` and a unit `inputs` list | Nested sugar as well: two forms for one thing |

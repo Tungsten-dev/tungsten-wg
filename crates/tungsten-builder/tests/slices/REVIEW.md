@@ -29,8 +29,7 @@ The builder reports these where they're written. They're the kind of finding §9
    closures borrow the same value mutably, so the method form can't lower into both branches.
    `build!`'s `if`/`else` works, because it builds each branch with `block` in turn and then joins
    them with two hidden methods (`__condition`, `__if`). Lowering code that doesn't use the macro
-   has no way to do the same. **Proposed:** a public `if_blocks(cond, then: Block, other: Block)`.
-   Not added yet, as it's an API decision.
+   had no way to do the same. **Fixed:** the public `if_blocks(cond, then: Block, other: Block)`.
 2. **Mixed-type call arguments need `.into()`.** `helper.call([a, b])` takes an array of `Expr`, so
    arguments of different handle types must each be converted (`pack.call([x, y.into(),
    oz.into()])`). Generated extern functions don't have this problem, as they take

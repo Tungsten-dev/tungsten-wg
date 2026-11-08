@@ -1,8 +1,9 @@
 # `Compiler<B>`: one backend per compile, typed output
 
 Status: design agreed, not implemented. This is a breaking change to the `tungsten-wg` facade and the `Backend` trait in
-`tungsten-interface`, so it ships in v0.3. `tungsten-interface` gains `Compiler` and dependencies on the optimizer and
-(optionally) the checker. It revises `docs/redesign.md` (§8).
+`tungsten-interface`, so it ships in v0.3. It lands right after milestone 5 of `specs/program-level-inputs.md` and before
+`specs/auto-consts.md`. `tungsten-interface` gains `Compiler` and dependencies on the optimizer and the checker. It
+revises `docs/redesign.md` (§8).
 
 ## 1. Summary
 
@@ -15,8 +16,8 @@ tungsten_wg::compile(&program, &mut [&mut rust])?;
 let out: &RustOutput = rust.output().unwrap();
 ```
 
-From v0.3, each compile uses exactly one backend. Compilation goes through a builder that is generic over the backend,
-and it returns that backend's own output type. Backends can now make compile choices: a backend proposes which
+From v0.3, each compile uses exactly one backend and one registry, so every compile is checked. Compilation goes through
+a builder that is generic over the backend, and it returns that backend's own output type. Backends can now make compile choices: a backend proposes which
 optimization passes to run, and the frontend can override that. Backend-specific settings are exposed as extension
 traits on `Compiler<ThatBackend>`. Each backend crate defines its own extension trait, so built-in and custom backends
 work the same way.
@@ -26,9 +27,8 @@ use tungsten_wg::{Compiler, Passes, Inline};
 use tungsten_wg::{CudaBackend, CudaConfig, CudaCompile};
 use tungsten_wg::cuda::Profile;
 
-let out: CudaOutput = Compiler::new(program, CudaBackend::new(CudaConfig::default()))
-    .registry(&registry)                // feature "check"
-    .passes(Passes { inline: Inline::All, ..Passes::default() })
+let out: CudaOutput = Compiler::new(program, &registry, CudaBackend::new(CudaConfig::default()))
+    .passes(Passes::default().inline(Inline::All))
     .profile(Profile::Tolerance)        // CudaCompile, only on Compiler<CudaBackend>
     .block_size(256)
     .deny_warnings()
@@ -44,9 +44,10 @@ let out: CudaOutput = Compiler::new(program, CudaBackend::new(CudaConfig::defaul
 - Custom backends, defined in a crate outside this workspace, are as capable as built-in ones. They get the builder,
   passes, checking, `deny_warnings` and their own extension traits, with no change to this repo.
 - Invalid backend configuration is reported as an error, never as a panic.
+- An invalid program never reaches a backend through `Compiler`. There is no unchecked `Compiler`.
 - `.deny_warnings()` works the same way for every backend.
-- No behaviour change by default. With default passes (`Inline::None`), `compile()` generates exactly what
-  `compile(&p, &mut [&mut b])` generates today.
+- With default passes (`Inline::None`), `compile()` on a valid program generates exactly what the low-level path (§6)
+  generates.
 
 ### Non-goals
 
@@ -65,7 +66,7 @@ let out: CudaOutput = Compiler::new(program, CudaBackend::new(CudaConfig::defaul
 |---|---|---|
 | `Backend` trait, `BackendError`, `Interface` | `tungsten-interface` | The trait changes (§3) |
 | `Passes`, `Inline` | `tungsten-interface` | Returned by `Backend::default_passes`. Plain data |
-| `Compiler<B>`, `CompileError` | `tungsten-interface` (`compiler.rs`) | Uses `Interface::build`, the optimizer and (feature `check`) tungsten-check. Depends on no backend |
+| `Compiler<B>`, `CompileError` | `tungsten-interface` (`compiler.rs`) | Uses `Interface::build`, the optimizer and tungsten-check. Depends on no backend |
 | `RustCompile`, `JavaCompile`, `CudaCompile`, `InspectCompile` | each backend crate, next to its config | Thin setters, implemented directly on `Compiler<'_, XBackend>` (§5) |
 | Backend structs and configs | each backend crate | Lose `output` and `output()`. Gain `validate`, `default_passes`, and `config()`/`config_mut()` |
 | Re-exports | `tungsten-wg` | `Compiler`, `CompileError` and the rest from `tungsten-interface`, plus each backend's extension trait. It adds no code of its own |
@@ -79,7 +80,7 @@ uses every other item in the crate, so they stay together (D6).
 ```text
 tungsten-ir ← tungsten-optimizer ─┐
 tungsten-core ← tungsten-check ───┼─ tungsten-interface ← tungsten-{rust,java,cuda,inspect} ← tungsten-wg
-            (check: optional)     │          ↑
+                                  │          ↑
 tungsten-ir ──────────────────────┘   custom backends
 ```
 
@@ -98,17 +99,16 @@ optimizer transitively, through `tungsten-interface`, but must not call it. (`tu
 
 ### 2.3 Features
 
-`tungsten-interface` gets one feature, `check`, which turns on `tungsten-check`, `Compiler::registry` and the
-`Invalid*` error variants. It is off by default. `tungsten-wg`'s `check` feature forwards to
-`tungsten-interface/check`. Backend crates never turn it on themselves. Cargo unifies features, so a frontend that
-enables `check` gets `.registry()` on every `Compiler`, and building any backend with `check` on also builds
-`tungsten-core`/`vstd`.
+There is no `check` feature. `tungsten-check` is an ordinary dependency of `tungsten-interface`, and `tungsten-wg`
+always re-exports it as `check`, along with `registry_from`. Every build therefore compiles `tungsten-core` and `vstd`.
 
 ### 2.4 Facade
 
 ```rust
 // tungsten-wg/src/lib.rs
 pub use tungsten_interface::{Backend, BackendError, Compiler, CompileError, Passes, Inline};
+pub use tungsten_check as check;
+pub use tungsten_interface as interface;
 
 #[cfg(feature = "cuda")]
 pub use tungsten_cuda as cuda;
@@ -160,6 +160,11 @@ pub struct Passes {
     pub inline: Inline,
 }
 
+impl Passes {
+    /// Sets the inlining pass. `Passes` is `#[non_exhaustive]`, so other crates can't use a struct expression.
+    pub fn inline(self, inline: Inline) -> Self;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Inline {
@@ -195,18 +200,15 @@ after this change, because the multi-backend slice was its only user.
 // tungsten-interface/compiler.rs
 pub struct Compiler<'r, B: Backend> {
     program: OptimizedProgram,
+    registry: &'r check::Registry,
     backend: B,
     passes: Option<Passes>,          // None = backend.default_passes()
     deny_warnings: bool,
-    #[cfg(feature = "check")]
-    registry: Option<&'r check::Registry>,
 }
 
 impl<'r, B: Backend> Compiler<'r, B> {
-    pub fn new(program: OptimizedProgram, backend: B) -> Self;
+    pub fn new(program: OptimizedProgram, registry: &'r check::Registry, backend: B) -> Self;
 
-    #[cfg(feature = "check")]
-    pub fn registry(self, registry: &'r check::Registry) -> Self;
     pub fn passes(self, passes: Passes) -> Self;   // replaces the backend's defaults entirely
     pub fn deny_warnings(self) -> Self;
 
@@ -217,15 +219,13 @@ impl<'r, B: Backend> Compiler<'r, B> {
 }
 ```
 
-Without the `check` feature, the `'r` lifetime is held by a `PhantomData`.
-
 ### 4.1 Pipeline of `compile`
 
 1. `backend.validate()`. On failure: `CompileError::Backend { name, source: InvalidConfig(..) }`. Nothing else runs.
-2. If a registry is set: `check::prepare(&program, registry)`. On failure: `CompileError::Invalid`.
+2. `check::prepare(&program, registry)`. On failure: `CompileError::Invalid`.
 3. `passes = self.passes.unwrap_or_else(|| backend.default_passes())`. Then run them in a fixed order. Today the only
    pass is: `Inline::All` → `optimizer::perform_inline(&mut program)`, and `Inline::None` does nothing.
-4. If a registry is set and at least one pass changed the program: `check::prepare` again. On failure:
+4. If at least one pass changed the program: `check::prepare` again. On failure:
    `CompileError::InvalidAfterPasses`. That means a bug in a pass, not in the frontend.
 5. `Interface::build(&program, &backend.naming_rules())`.
 6. `backend.generate(&program, &interface)`. On failure: `CompileError::Backend { name, source }`.
@@ -244,10 +244,8 @@ yes/no answer.
 pub enum CompileError {
     #[error("backend `{name}` failed")]
     Backend { name: String, #[source] source: BackendError },
-    #[cfg(feature = "check")]
     #[error("program is invalid")]
     Invalid(#[source] check::Invalid),
-    #[cfg(feature = "check")]
     #[error("program became invalid after optimization passes (compiler bug)")]
     InvalidAfterPasses(#[source] check::Invalid),
     #[error("backend `{name}` produced {} warning(s) and warnings are denied", warnings.len())]
@@ -278,19 +276,19 @@ next to a check or codegen run, and it rules out one backend seeing another's pa
 | Ext setter makes the config invalid, e.g. `.block_size(7)` | `compile` returns `Backend { InvalidConfig }` from step 1, with no panic |
 | Ext setter changes a naming field, e.g. `.namespace("x")` | Picked up, since `naming_rules()` is computed in step 5 |
 | `deny_warnings` and Java sanitizes the class name | `Warnings`. That's correct, since sanitizing is a warning today |
-| Registry set, passes change nothing | Checked once (step 4 is skipped) |
-| No registry | Steps 2 and 4 are skipped, and an invalid program behaves as under plain `compile` today (e.g. a cycle panics in `arrange_waves`) |
+| Passes change nothing | Checked once (step 4 is skipped) |
+| Program with an extern or record the registry doesn't declare | `CompileError::Invalid`. Every extern and record a program uses must be declared |
 | Backend panics in `generate` | Unwinds into the caller, as today |
 
 ### 4.6 Several targets
 
 ```rust
-let rust = Compiler::new(program.clone(), RustBackend::new(RustConfig::default())).compile()?;
-let cuda = Compiler::new(program, CudaBackend::new(cfg)).profile(Profile::Tolerance).compile()?;
+let rust = Compiler::new(program.clone(), &registry, RustBackend::new(RustConfig::default())).compile()?;
+let cuda = Compiler::new(program, &registry, CudaBackend::new(cfg)).profile(Profile::Tolerance).compile()?;
 ```
 
-Each target is checked on its own. A frontend that wants to check only once omits `.registry()` on the later compiles,
-or calls `check::prepare` itself.
+Each target is checked on its own, so a frontend pays for one check per target. The cost on vanilla-sized programs is
+unmeasured (§11).
 
 ## 5. Extension traits
 
@@ -327,15 +325,18 @@ pub trait CudaCompile: Sized {
     fn debug_checks(self, on: bool) -> Self;
     fn inline_policy(self, p: InlinePolicy) -> Self;   // emitted __forceinline__, not the IR inliner
     fn namespace(self, ns: impl Into<String>) -> Self;
+    fn buffer_bounds(self, b: BufferBounds) -> Self;   // added by specs/workers.md
 }
 pub trait JavaCompile: Sized {
     fn package(self, p: impl Into<String>) -> Self;
     fn class_name(self, c: impl Into<String>) -> Self;
     fn runtime_package(self, p: impl Into<String>) -> Self;
+    fn buffer_bounds(self, b: BufferBounds) -> Self;   // added by specs/workers.md
 }
 pub trait RustCompile: Sized {
     fn density_module_name(self, n: impl Into<String>) -> Self;
     fn orchestration_module_name(self, n: impl Into<String>) -> Self;
+    fn buffer_bounds(self, b: BufferBounds) -> Self;   // added by specs/workers.md
 }
 pub trait InspectCompile: Sized {
     fn views(self, v: Views) -> Self;
@@ -348,8 +349,8 @@ Nothing in `tungsten-interface` or `tungsten-wg` changes.
 
 Name clashes:
 
-- Setter names must not collide with `Compiler`'s inherent methods (`new`, `registry`, `passes`, `deny_warnings`,
-  `backend`, `backend_mut`, `compile`). Rust silently picks the inherent method, so each backend crate has a test
+- Setter names must not collide with `Compiler`'s inherent methods (`new`, `passes`, `deny_warnings`, `backend`,
+  `backend_mut`, `compile`). Rust silently picks the inherent method, so each backend crate has a test
   that calls every setter and checks that the field changed (§7). Adding a new inherent method to `Compiler` is
   therefore a potentially breaking change for custom backends, and it's noted in the changelog.
 - Two extension traits that share a method name (e.g. a `namespace` on both CUDA and a custom backend) don't
@@ -382,12 +383,16 @@ foreign trait for `Compiler`, so the trait and its impl must live in the same cr
 need the `Interface` after generation use it, e.g. the testsuite driver, which reads buffer and kernel names. It skips
 validation, passes, the check and `deny_warnings`. Callers that want validation call `b.validate()` themselves.
 
+This is the only unchecked way to generate code, and an invalid program behaves as it did under the old `compile`
+(for example, a cycle panics in `arrange_waves`). It's for tools and tests, not frontends.
+`tungsten_inspect::inspect(&program, &config)` likewise doesn't check, so a frontend can still inspect a program the
+checker rejects.
+
 ## 7. Testing
 
 - **`Compiler` unit tests** in `tungsten-interface` (replacing `check_tests` in `tungsten-wg/src/lib.rs`), with a test `Counting`
-  backend whose `validate`, `default_passes` and `warnings` can be configured. Registry tests run under
-  `--features check`:
-  - an invalid program with a registry runs no `generate` (the test that exists today, ported);
+  backend whose `validate`, `default_passes` and `warnings` can be configured:
+  - an invalid program runs no `generate` (the test that exists today, ported);
   - a valid program runs `generate` exactly once and returns its output;
   - `validate` failing stops before the check and before `generate`;
   - `.passes()` overrides `default_passes`, including an override to `Inline::None`;
@@ -396,8 +401,8 @@ validation, passes, the check and `deny_warnings`. Callers that want validation 
     `InvalidAfterPasses` (behind `cfg(test)`, through an injectable pass hook, or by checking with a program the
     inliner provably changes plus a registry that only the inlined form violates. Pick whichever is less invasive
     when implementing).
-- **Default equivalence**: for each backend, `Compiler::new(p, b).compile()` gives output byte-identical to the
-  low-level path on the existing backend test programs. This guards the "no behaviour change" goal.
+- **Default equivalence**: for each backend, `Compiler::new(p, &registry, b).compile()` gives output byte-identical to the
+  low-level path on the existing backend test programs. Those programs get a registry that declares what they use.
 - **Ext traits**: in each backend crate, one test calls every setter and checks the config field (this catches the
   inherent-method shadowing from §5). CUDA: `.block_size(7)` → `InvalidConfig` rather than a panic. Java:
   `.class_name("x y")` is reflected in the reserved naming rules.
@@ -405,9 +410,10 @@ validation, passes, the check and `deny_warnings`. Callers that want validation 
   crate, so it is a real downstream crate. It defines a backend and a local extension trait implemented for
   `Compiler<'_, ItsBackend>`, then compiles with a setter, `.passes()` and `.deny_warnings()`. If this stops
   compiling, the custom-backend goal is broken.
-- **Dependency rule**: CI checks that no backend crate's source mentions `tungsten_optimizer::`, except
-  `tungsten-inspect`'s `InlineStats` import. A `grep` in the existing CI script is enough. The same script checks that
-  `tungsten-optimizer` and `tungsten-check` never list `tungsten-interface` as a dependency (§2.1).
+- **Dependency rule**: a test in `tungsten-wg/tests/dependency_rules.rs` reads the workspace sources and manifests. It
+  checks that no backend crate's source mentions `tungsten_optimizer::`, except `tungsten-inspect`'s `InlineStats`
+  import, and that `tungsten-optimizer` and `tungsten-check` never list `tungsten-interface` as a dependency (§2.1).
+  The repo has no CI, so this runs with `cargo test`.
 - **Backend crates**: existing `tests.rs` follow the trait change (`let out = backend.generate(..)?`). Rewrite the CUDA
   tests that use `#[should_panic]` on invalid configs to assert `validate()` errors.
 - **Testsuite**: the harnesses (`harness/{rust,java,cuda}.rs`) stay on the low-level path. They change to use the
@@ -436,8 +442,10 @@ validation, passes, the check and `deny_warnings`. Callers that want validation 
 
 It stays on its pin, and nothing in this repo builds it. When it moves to v0.3:
 
-- `compile_java` becomes `Compiler::new(optimized, JavaBackend::new(cfg)).passes(Passes { inline: Inline::All, .. })
-  .compile()`, which removes its manual `perform_inline` and the `.output().cloned().ok_or(..)` dance.
+- It must pass the checker first, since there is no unchecked `Compiler`. Vanilla currently fails `check::prepare` with
+  1,719 errors, none about inputs (`specs/program-level-inputs.md`, milestone 3 notes). A port has to fix those.
+- `compile_java` becomes `Compiler::new(optimized, &registry, JavaBackend::new(cfg))
+  .passes(Passes::default().inline(Inline::All)).compile()`, which removes its manual `perform_inline` and the `.output().cloned().ok_or(..)` dance.
 - `do_compile` (four backends) becomes four `Compiler`s over clones of the converted program, with the CUDA one using
   `.profile(Profile::Tolerance)`.
 - Its `CompileError::Internal(format!(.."{:?}"))` wrapping can match `tungsten_wg::CompileError` variants instead.
@@ -452,6 +460,7 @@ It stays on its pin, and nothing in this repo builds it. When it moves to v0.3:
 | D4 | A full, consuming builder, and no free functions | One entry point, room for compile options. Consuming matches one backend per compile | Free `compile`/`compile_checked` (too little room for options); check-once handle; `&self` reuse with a cached check |
 | D5 | Backend settings stay in `XConfig`, exposed via extension traits on `Compiler<XBackend>` | One place per setting; type-checked per backend; adding a setting touches only that backend's files | Separate `B::Options` type (two overlapping structs per backend); untyped option bag; shared `OptLevel`/profile (precision is backend-specific, and Rust and Java have no non-exact mode) |
 | D6 | `Compiler` lives in `tungsten-interface`, which every backend already depends on. Each backend crate defines its ext trait and impls it on `Compiler<'_, ItsBackend>`. `tungsten-wg` only re-exports | One pattern for built-in and custom backends; a setting lives in one crate; no cycle (§2.1); no new crate; `Compiler` sits next to `Interface::build`, `Backend` and `Passes`, all of which it uses. The cost is that every backend depends on the optimizer transitively, so the rule becomes "backends never run passes" | A separate `tungsten-compiler` crate (its only advantage is a lighter dependency for custom backends with no setters, which is rare); `Compiler` in `tungsten-wg` with the ext traits there too (a cycle stops backends from writing their own impls, settings get split over two crates, and custom backends would follow a different pattern); traits in the backend crate with an accessor method plus a per-backend impl in `tungsten-wg` (works, but two patterns); a shared `BackendHandle` trait with blanket impls (an extra public trait only to get around the cycle) |
+| D15 | The registry is a required argument of `Compiler::new`, and `tungsten-check` is always built | One checked path. Mapping and refinement validation can't be skipped by accident, and invalid programs no longer reach backends. Costs one check per target, and a frontend must pass the checker before it can compile | Optional `.registry()` behind a feature: the default path skips validation, so strict rules only hold for callers who opt in |
 | D14 | Custom backends are first-class | Frontends may target their own languages without forking this repo | Closed set of backends |
 | D7 | Program taken by value | Passes mutate. No hidden clone | `&` plus clone-on-pass (hidden cost); `&mut` (one compile's passes leak into the next) |
 | D8 | Passes are a closed struct of knobs. Backend default, frontend override wins | Only one pass exists. A `#[non_exhaustive]` struct and enum can grow without breaking | `Vec<Box<dyn Pass>>` pipeline (overkill); a bare `.inline()` (no room to grow) |
@@ -472,5 +481,6 @@ It stays on its pin, and nothing in this repo builds it. When it moves to v0.3:
 - **An inspect dump of the compiled program** (after passes), now that passes run inside `compile`. Today a caller
   can't see the inlined program without running the inliner itself.
 - **Panic capture** as a builder option, if frontends besides the testsuite need it.
+- **Unmeasured:** the cost of the mandatory check on vanilla-sized programs.
 - **A testsuite mode** that compiles the corpus through `Compiler` with `Inline::All`, for end-to-end differential
   testing of backend × inliner.

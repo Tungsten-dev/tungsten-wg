@@ -1,8 +1,8 @@
 # Generic autoconsts
 
-Status: design agreed, not implemented. Lands after milestone 5 of `specs/program-level-inputs.md`, which deletes
-`tungsten-legacy`, and therefore after `specs/builder.md`. It lands before `specs/density-mappings.md` and
-`specs/refinement.md`, which don't depend on tables.
+Status: design agreed, not implemented. Lands after `specs/compiler.md`, and so after milestone 5 of
+`specs/program-level-inputs.md`, which deletes `tungsten-legacy`. It lands before `specs/workers.md`, which restates the
+creation API from §5.1 on its final types.
 
 ## 1. Summary
 
@@ -141,8 +141,8 @@ arguments.
 A const initializer can't read either. `ConstExpr` has no way to express it, and core's rule that const initializers
 can't read hosts stays as it is.
 
-Handles keep today's other rules: a function can hold one in a variable, and a host may have a handle type. This spec
-doesn't widen or narrow those.
+A function can hold a handle in a variable, as today. A host can't have a handle type: Rust's handle type is a
+reference with no lifetime to put in the host struct, so no backend could generate it uniformly.
 
 ## 3. Checks
 
@@ -172,6 +172,7 @@ Lowering checks all of these, and collects them like its other errors:
 | Param type is `I64`, `F64` or `Bool` | `BadAutoParamType` |
 | Param names are unique | `DuplicateAutoParam` |
 | Autoconst type is a handle or an allowed scalar | `BadAutoConstType` |
+| A host's type isn't a handle | `HandleHost` |
 | Initializer is in the registry | `UnknownAutoInitializer` |
 | Argument count matches | `AutoArgCount` |
 | Each argument matches its declared type. A `Param` has its param's type | `AutoArgType { index }` |
@@ -308,6 +309,11 @@ today's signatures.
 
 An unread param stays in the signature, so a frontend can keep its API stable. Params aren't merged away.
 
+`specs/workers.md` lands next and moves these calls to its final types: `Orchestration::new(..)` (Rust),
+`Orchestration.create(..)` (Java, where `AutoConsts.create` stops being public) and
+`Orchestration::create(.., std::shared_ptr<Orchestration>&)` (CUDA). `auto_param` names stay unique against the names that
+creation code uses.
+
 Parameter order is a contract the frontend controls through declaration order. `permute` changes it, but it's only used
 by tests, whose harness is generated per program and binds by name.
 
@@ -357,7 +363,7 @@ The Rust `AutoConsts` keeps `#[repr(C)]` and `Clone`, and the Java class keeps `
 ### 6.1 Syntax
 
 ```ebnf
-item      = use | host | param | auto | const | fn | unit | entry ;
+item      = use | host | param | auto | const | fn | input | unit | entry ;
 param     = "param" label ":" type ";" ;
 auto      = "auto" label ":" type ("@name" "(" STRING ")")? "=" IDENT "(" (autoarg ("," autoarg)*)? ")" ";" ;
 autoarg   = "param" "(" label ")" | LONG | F64 | "true" | "false" | STRING ;
@@ -372,7 +378,7 @@ unititem  = … | "autos" "[" labels? "]" ";" ;
   `12L`.
 - **Names:** a param's name is its label. An autoconst's name defaults to its label, and `@name` overrides it. The
   printer labels autoconsts `a<N>` and prints `@name` unless it would equal the label, so P2 holds.
-- **Order:** the printer emits `host`s, `param`s, `auto`s, `const`s, `fn`s, `unit`s, `entry`s. Unit lists print `autos`
+- **Order:** the printer emits `host`s, `param`s, `auto`s, `const`s, `fn`s, `input`s, `unit`s, `entry`s. Unit lists print `autos`
   where `tables` was.
 
 ### 6.2 `@case`
@@ -410,7 +416,7 @@ anywhere, and only the differential tests are the bar.
 | Consumer | Effect |
 | --- | --- |
 | `tungsten-mc-compile` | None until its port, because it stays pinned from `specs/program-level-inputs.md` §6.8 |
-| JNI (`docs/jni-api.md` in `tungsten-frontends`) | `AutoConsts.create(long seed)` is unchanged if the port declares only `seed`. Public field names follow the port's `name`s |
+| JNI (`docs/jni-api.md` in `tungsten-frontends`) | `Orchestration.create(long seed)` (`specs/workers.md`) if the port declares only `seed`. Public field names follow the port's `name`s |
 | `.tw` files | Mechanical rewrite, in the same commit as the syntax change |
 | Other specs | `specs/builder.md` §3.2, §5 and its API are edited in place when this lands. `SPEC.md` §5.3 and `crates/tungsten-parse/SPEC.md` are updated |
 
@@ -420,14 +426,12 @@ Not part of this work, but agreed now so it isn't re-decided:
 
 - The frontend owns `xoroshiro_seed` and a helper that turns `(ident, subident, subident_index)` into an `AutoConst`,
   and it declares `seed` as a param and its initializers in its registry.
-- **Proof:** `specs/builder.md` §9 applies. Values must match the pinned tag bit for bit.
+- **Proof:** `specs/builder.md` §9 applies. Values must match the pinned v0.2 bit for bit.
 - **Expected findings:**
   - `transform_spmt/noise.rs:312` declares `VariableType::PermutationTable` for the `base3d_noise` parameter while passing
     a Base3D table. Nominal handle types reject this, so the declaration must become
     `Handle("InterpolatedNoiseSampler")`.
   - Noise ids without a namespace hash differently (`COMPILER_BUGS.md` #8). That bug is now clearly the frontend's.
-  - Its Rust runtime's `make_boxed` leaves `AutoConsts` uninitialised (`PAPER.md`, 2026-11-01). A `bool` value autoconst
-    makes that undefined behaviour more reachable, so it should zero-initialise first, as the test runtime does.
 
 ## 9. Open and deferred
 
@@ -475,8 +479,24 @@ All through the existing structure in `TESTING.md` and `docs/testing-policy.md`.
 ```rust
 let seed = pb.param("seed", I64);                   // Same name, same type: existing. Other type: AutoParamConflict
 let t = pb.auto_const("temperature", Handle("PerlinNoiseSampler"), "make_permutation_table", [seed.into(), 1i64.into()]);
-let v = f.read(t);                                  // Reads like any expression, typed from `t`
+let v = perm_get(t, 0);                             // An `AutoConst` handle reads like any expression, typed from `t`
 ```
+
+The builder's declarations cover handle types and initializers, so `registry_from` can build the whole registry:
+
+```rust
+extern_fns! {
+    group noise_externs;
+    perm_get(t: handle "PerlinNoiseSampler", i: I32): I32,
+}
+
+auto_initializers! {
+    group noise_initializers;
+    make_permutation_table(I64, I64, I64, I64, I64, I64): handle "PerlinNoiseSampler",
+}
+```
+
+`Decls` gains the initializers, and `registry_from` passes them to `RegistryBuilder::auto_initializer`.
 
 | Item | Merge key | On a match |
 | --- | --- | --- |

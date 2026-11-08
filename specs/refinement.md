@@ -1,17 +1,17 @@
 # Refinement: rerun part of an orchestration, marching along `Pos3`
 
-Status: design agreed, not implemented. Depends on `specs/program-level-inputs.md` and `specs/density-mappings.md`,
-which land first, in that order. §10 lists the amendments to the latter.
+Status: design agreed, not implemented. Lands last among the v0.3 code, after `specs/workers.md` and
+`specs/density-mappings.md`. Its refine calls are worker methods.
 
 ## 1. Summary
 
-Today a caller runs `orchestrate_<entry>`, which computes the entry's whole closure and returns its buffer.
-Refinement adds a second generated call that reruns only part of that closure:
+A worker's `run` computes the entry's whole closure and returns its buffer. Refinement adds a second generated call on
+the worker that reruns only part of that closure:
 
 ```text
-orchestrate_main(origin, hosts)                 // normal: everything, Pos3 offset 0
-refine_main_step(offset(0, 383, 0), hosts)      // reruns the marked instances; the rest stays frozen
-refine_main_step(offset(0, 382, 0), hosts)
+worker.run(origin, hosts)                       // normal: everything, Pos3 offset 0
+worker.refine_step(offset(0, 383, 0), hosts)    // reruns the marked instances; the rest stays frozen
+worker.refine_step(offset(0, 382, 0), hosts)
 ...
 ```
 
@@ -28,7 +28,6 @@ refine_main_step(offset(0, 382, 0), hosts)
   done slice by slice.
 - `@lerp` and `@expand` give correct results along the march, including reads of frozen coarse grids.
 - Same results, bit for bit, on the interpreter and every backend.
-- Programs with no refinements generate byte-identical code and keep the same L2 snapshots and protocol bytes.
 - `tungsten-core` and its proofs are unchanged.
 
 ### Non-goals
@@ -70,8 +69,8 @@ program {
 }
 ```
 
-`orchestrate_main` runs `seed`, `column` and `coarse`. It doesn't run `detail`, since only a rerun reads it.
-`refine_main_step` runs `detail`, then `surface`, and stores the result in `seed`'s buffer. `column` and
+`run` on `main`'s worker runs `seed`, `column` and `coarse`. It doesn't run `detail`, since only a rerun reads it.
+`refine_step` runs `detail`, then `surface`, and stores the result in `seed`'s buffer. `column` and
 `coarse` aren't listed, so they stay frozen.
 
 ## 3. Data model
@@ -117,25 +116,35 @@ pub struct DensityInput {
 - Readers name the **target**, also when it's replaced. `input d = detail ...` reads `detail`'s buffer, whichever
   unit wrote it last.
 - A new `Ref`-holding field must be added to `retag.rs` and `rebuild.rs`, per the note on `OptimizedProgram`.
-- `OptimizedProgram` and `DensityInput` struct literals break at the next version bump. `tungsten-builder` gains
-  `InputSpec::previous`, which joins its input merge key, and `pb.refinement(...)` (`specs/builder.md` §8).
+- `tungsten-builder` gains `InputSpec::previous`, which joins its input merge key, and a way to declare refinements
+  (`specs/builder.md` §8). `pb.entry` returns an `Entry` handle, and validation stays in lowering:
+
+```rust
+let entry: Entry = pb.entry(seed, grid);
+let prev = pb.input_with(InputSpec::new(seed, grid).previous());
+// ... `surface` reads `prev` ...
+pb.refinement("step", entry, (0, 383, 0), [
+    RerunSpec::new(seed, grid).with(surface),
+    RerunSpec::new(detail, grid),
+]);
+```
 
 ## 4. Semantics
 
 ### 4.1 One refine call
 
-`refine_<entry>_<name>(offset, hosts)`:
+`refine_<name>(offset, hosts)` on the entry's worker:
 
 1. **Reachability.** Starting at the entry's target, follow non-`previous` inputs of each running unit, but only
    through instances in `reruns`. The instances reached run in this call, in dependency order. Others are frozen.
 2. **Execution.** Each running instance is evaluated over its own grid, with:
-   - `Ambient(Origin)`: the origin of the last `orchestrate_<entry>` on this `Orchestration`.
+   - `Ambient(Origin)`: the origin of the last `run` on this worker.
    - `Ambient(OriginScale)`, `Ambient(PositionScale)`: the target's scales.
    - `Ambient(Pos3)`: `cell + offset`.
    - **Buffer index**: `flat(cell, dims)`, unaffected by the offset.
    - Hosts: the ones passed to this call.
 3. **Result.** The running unit's value is written to the target's buffer. The entry's result is that buffer, in
-   the same form as `orchestrate_<entry>` returns it.
+   the same form as `run` returns it.
 
 Each cell is written after its density function returns, as all kernels do today.
 
@@ -167,10 +176,10 @@ Java, `pos.pos` / `pos.idx` in CUDA, `ctx.cell` / `ctx.k` in core.
   written only after its function returns, the read always gets the old value. It needs no second buffer and no
   copy, and it can't race.
 - Multiple reads in one cell give the same value.
-- The first value comes from the normal unit, through `orchestrate_<entry>`. After that it comes from the last
+- The first value comes from the normal unit, through `run`. After that it comes from the last
   refinement call that wrote this buffer, of any refinement.
 
-### 4.5 What `orchestrate_<entry>` computes
+### 4.5 What `run` computes
 
 For an entry with refinements, the schedule is the union of the normal closures of:
 
@@ -179,16 +188,17 @@ For an entry with refinements, the schedule is the union of the normal closures 
 - every `with` target of its refinements, because the normal unit provides the first value.
 
 A stateless rerun instance that only a rerun reads is left out. Callers who never refine still pay for this
-schedule. Eager failure rules apply: a failing frozen buffer fails `orchestrate_<entry>`.
+schedule. Eager failure rules apply: a failing frozen buffer fails `run`.
 
-`orchestrate_<entry>` always uses offset 0 and is the same as before, apart from the larger schedule and storing the
+`run` always uses offset 0 and is the same as before, apart from the larger schedule and storing the
 origin. For a top-down march, the normal unit provides the seed state, and the first refine passes the top offset.
 
 ### 4.6 Several refinements
 
-An entry can have any number of refinements. They share buffers, so one can continue from another's output, and a
-frozen instance in one can hold what another just rerun. Calling `orchestrate_<entry>` again recomputes the whole
-schedule and restarts from there.
+An entry can have any number of refinements. They share the worker's buffers, so one can continue from another's
+output, and a frozen instance in one can hold what another just rerun. Calling `run` again recomputes the whole
+schedule and restarts from there. Two entries never share buffers, even for the same instance, because each has its own
+worker.
 
 ### 4.7 Frozen buffers
 
@@ -198,9 +208,9 @@ count or an interpolation factor.
 
 ## 5. Validation
 
-Validation runs in `tungsten-check` lowering, next to the mapping validation, so `check::prepare` and `compile_checked`
-report it. The errors are new `LowerErrorKind` variants that `@expect reject(Kind)` can name. As with mappings, plain
-`compile` doesn't validate. It keeps its behaviour for a cycle (a panic in `arrange_waves`), and it returns
+Validation runs in `tungsten-check` lowering, next to the mapping validation, so `check::prepare` and `Compiler` report
+it. The errors are new `LowerErrorKind` variants that `@expect reject(Kind)` can name. As with mappings, only the
+low-level path skips it (`specs/compiler.md` §6). That path panics on a cycle in `arrange_waves`, and it returns
 `BackendError::Codegen` only for what it can't emit.
 
 | Rule | Error |
@@ -219,7 +229,7 @@ report it. The errors are new `LowerErrorKind` variants that `@expect reject(Kin
 | A `@previous` input has an `Identity` mapping | `PreviousMapped` |
 | A `@previous` input is never read with an explicit index | `PreviousIndexed` |
 
-The rest of density-mappings §4 applies to refined units too, with the amended reader rule in §10.
+The rest of density-mappings §4 applies to refined units too, including its reader rule with `march`.
 
 Validation checks declarations only. Offsets and call order are caller preconditions (§6.3).
 
@@ -242,13 +252,13 @@ pub fn density_fn(&self, cu, dimensions);             // existing; now also cove
 ```
 
 - **Discovery.** `discover_instances` ignores `previous` inputs, so `@previous` adds no dependency and can't trip the
-  panic in `arrange_waves`. Instances needed only by refinements are appended after the existing ones. Names and
-  order for programs with no refinements stay unchanged.
+  panic in `arrange_waves`. Instances needed only by refinements are appended after the existing ones.
 - **Buffers.** `instances()` includes rerun-only instances, so they get a field. `waves()` leaves them out. `with`
   units get no buffer of their own.
-- **`waves_for(entry)`** returns the schedule in §4.5.
-- **Names.** `tungsten_interface::naming` adds `refinement_method_names`, following `entry_method_names` and
-  `entry_base_names`: `refine_<entry>_<name>`, kept unique against the module's names, including the entry methods.
+- **`worker_schedule(entry)`** (`specs/workers.md` §4.1) returns the schedule in §4.5, plus the rerun-only instances of
+  the entry's refinements, so those instances get slots. `entry_hosts` also covers `with` units.
+- **Names.** `tungsten_interface::naming` adds `refinement_method_names`: `refine_<name>`, unique within the worker,
+  including against `run`.
 
 ### 6.2 Backends
 
@@ -256,8 +266,9 @@ pub fn density_fn(&self, cu, dimensions);             // existing; now also cove
 for a `@previous` read. Density functions don't change either.
 
 **Refine kernels.** `DeviceCodegen` gets `generate_refine_kernel(&RefineRun)`, one per run, named `<unit fn>_<target>_refine_kernel`. It
-works like a normal kernel with an extra `offset` parameter, and it adjusts the iterator's position only. No runtime
-changes are needed, since these all use existing fields:
+works like a normal kernel with an extra `offset` parameter, and it adjusts the iterator's position only. Like every
+kernel, it takes `out_off` and the input offsets of `specs/workers.md` §4.3, with `out_off` being the target's slot. No
+runtime changes are needed, since these all use existing fields:
 
 | Backend | Kernel change |
 | --- | --- |
@@ -265,43 +276,41 @@ changes are needed, since these all use existing fields:
 | Java | `p.set(ix + ox, iy + oy, iz + oz, index)` |
 | CUDA | After `tw::make_position`, add `offset` to `pos.pos` field by field, so it needs no `int3` operator from the runtime. Same `launch_shape`. `offset` is `int3`. The bounds check remains on `local` |
 
-**Orchestration.** Emitted only for entries with refinements:
+**Workers.** Emitted only for entries with refinements:
 
 | Backend | Stored origin | Refine call |
 | --- | --- | --- |
-| Rust | Field `origin_<entry>`, set by `orchestrate_<entry>` | `fn refine_<entry>_<name>(&mut self, offset: Pos3, host_consts: &HostConsts)`, same return type as the entry method |
-| Java | Field, set by the entry method | `refine_<entry>_<name>(int ox, int oy, int oz, HostConsts hc)`. Returns the internal buffer, with the same overwrite rule as the entry method |
-| CUDA | `double3 origin_<base>` in `Impl`, set on the host when enqueued | `Status enqueue_refine_<base>_<name>(Pos3 offset, const HostConsts&)`. Same host-constant upload, ordered on the stream, followed by a copy to `result_<base>`. Results are read through `result_<base>()` after `sync()`, with the same validity rule as today |
+| Rust | Worker field `origin: Vec3`, set by `run` | `fn refine_<name>(&mut self, offset: Pos3, host_consts: &<Base>HostConsts)`, same return type as `run` |
+| Java | Worker field, set by `run` | `refine_<name>(int ox, int oy, int oz, <Base>HostConsts hc)`. Returns the pool array, with the same overwrite rule as `run` |
+| CUDA | `double3 origin` in the worker's `Impl`, set on the host when enqueued | `Status enqueue_refine_<name>(Pos3 offset, const <Base>HostConsts&)`. Same host-constant upload, ordered on the stream, followed by a copy to the result buffer. Results are read through `result()` after `sync()`, with the same validity rule as `enqueue` |
 
 ### 6.3 Caller contract
 
 These are documented preconditions, with no generated checks:
 
-- `refine_*` runs after `orchestrate_<entry>` on the same `Orchestration`. Otherwise values are unspecified, and Java
-  may throw on a record buffer.
+- `refine_*` runs after `run` on the same worker. Otherwise values are unspecified, and Java may throw on a record
+  buffer.
 - Every offset component is within `[0, march]`. Outside it, a mapped read can address the wrong cell or go out of
-  bounds, just as an invalid mapping can under plain `compile`.
-- Between `orchestrate_<entry>` and `refine_*`, a call to another entry at a different origin or with different hosts overwrites
-  any shared buffers. The stored origin is per entry and doesn't notice this.
-- A runtime failure in a refine call behaves like one in orchestrate: a panic, an exception or a sticky CUDA error. The
-  `Orchestration` is then unusable until a new one is created (CUDA) or `orchestrate_<entry>` has run again (Rust, Java).
+  bounds, just as an invalid mapping can on the low-level path.
+- A runtime failure in a refine call behaves like one in `run`: a panic, an exception or a sticky CUDA error. The
+  worker is then unusable until a new one is created (CUDA) or `run` has run again (Rust, Java).
 
 ## 7. Interpreter
 
 ### 7.1 Sequence of ordinary core programs
 
-`tungsten-core` doesn't change. `tungsten-check` gets a driver that runs one **core program per call**, keeping a store
-of buffers by instance between calls:
+`tungsten-core` doesn't change. `tungsten-check` gets a driver that runs one **core program per call**, keeping one store
+of buffers per entry, keyed by instance, between calls. That matches workers, which never share buffers across entries:
 
 ```rust
 pub fn eval_sequence(prepared, case: &SequenceCase, ...) -> Vec<StepResult>;
 ```
 
-- **Orchestrate step.** The normal program, plus hidden entries for instances in §4.5 that aren't entries. Entry
-  results fill the store. Hidden entries are excluded from what's compared.
+- **Run step.** The normal program, plus hidden entries for instances in §4.5 that aren't entries. Results fill the store
+  of every entry whose schedule contains that instance. Hidden entries are excluded from what's compared.
 - **Refine step.** A separate lowered program per refinement, built once and checked with `check` like any other. Its
   entry is the refined unit at the target's grid, and the rerun instances are its inputs. A step is evaluated with the
-  store's buffers as hosts, and its results update the store.
+  buffers of its entry's store as hosts, and its results update that store.
 - A step's failure ends the sequence. The case's result is an error, as in `TESTING.md` §6.
 
 ### 7.2 Lowering a refine step
@@ -313,7 +322,8 @@ pub fn eval_sequence(prepared, case: &SequenceCase, ...) -> Vec<StepResult>;
 | Its index when un-indexed | `flat` over the **raw** `Ambient(Pos3)`, or `0` for a `(1,1,1)` input. This matches the kernel's index |
 | Read of a rerun input | `Density { .. }` as usual, so core's `ctx.k` gives the index |
 
-The new hosts are added to the scoping lists of the unit and its functions. `LowerMap` records them, so diagnostics keep
+The new hosts come after the IR's hosts and the value-autoconst hosts (`specs/auto-consts.md` §4.3), so those `HostId`s
+are the same in every step. They're added to the scoping lists of the unit and its functions. `LowerMap` records them, so diagnostics keep
 using source names. Density-mappings' desugaring runs first and produces an index over `Pos3`, which then gets the
 offset.
 
@@ -374,18 +384,18 @@ expect       = "@expect" STRING ("after" "(" UINT ")")? expectation ;
 
 ### 8.3 Test harness
 
-Root `SPEC.md` §7. Only programs that declare refinements change:
+Root `SPEC.md` §7:
 
 ```
-request  := origin:[u64;3] seed:u64 host* steps:u32 step*
+request  := origin:[u64;3] param* host* steps:u32 step*
 step     := refinement:u32 offset:[i32;3] host*
 response := 0x00 value* (entry order) (step_value*)   // the step entry's buffer per step
           | 0x01 kind:u8 len:u32 utf8[len]
 ```
 
-`steps` is absent for a program with no refinements, so its bytes and the golden files don't change. The driver still builds a fresh
-`Orchestration` per case. It calls every entry in order at one origin, which leaves shared buffers deterministic, then
-runs each step. Hosts sent are complete for each step, resolved from the case's carried values by the harness. Scoring stays per
+`steps` is always present, and is 0 for a program with no refinements, so the protocol golden file is regenerated once. The
+driver builds a fresh `Orchestration` per case and one worker per expected entry. It runs each worker at the case's origin, then
+runs each step on the worker of that step's entry. Hosts sent are complete for each step, resolved from the case's carried values by the harness. Scoring stays per
 case (§6.3 of that spec): a failure at any step fails the case. A case with `OutOfFuel` at any step isn't sent to a backend, and
 one with a cell error isn't sent to CUDA.
 
@@ -413,7 +423,7 @@ New `refine/`:
 | March | `Pos3` moves while the index doesn't; top-down order; thick windows (`dims.y = 2`); x and z axes; march 0 with zero offset |
 | Mappings | `@lerp` along the march across a frozen grid, compared with the same grid read at full resolution; `@expand` with `Repeat` on the marched axis; last valid offset; one input with two mappings |
 | Schedule | A frozen instance read only by a refinement is computed by orchestrate; a stateless rerun-only instance isn't; a failing frozen buffer fails orchestrate |
-| Multiple | Two refinements on one entry, sharing state; two entries, one refined; `orchestrate_<entry>` restart |
+| Multiple | Two refinements on one entry, sharing state; two entries, one refined; two refined entries sharing an instance, whose buffers stay separate; `run` restart |
 | Inlining | Frozen input not inlined into a rerun unit, and values unchanged; inlining deeper in a frozen closure still happens |
 
 New `reject/` files, one per error in §5, plus a mapped read whose range fails only with `march` included.
@@ -424,38 +434,33 @@ New `reject/` files, one per error in §5, plus a mapped read whose range fails 
   adding the offset to the index; dropping the offset; rerunning a frozen instance; a `@previous` read from the wrong buffer.
 - **Marched slices equal full grid.** A corpus test compares a program that marches through a volume, slice by
   slice, with the same unit evaluated as a full 3D entry, by bits. It is the main check of the design's premise.
-- **Compatibility.** Generated output for the existing corpus is byte-identical before and after on all backends, L2 snapshots
-  don't change, and protocol goldens don't change. Done at each backend's milestone.
+- **Worker isolation.** Creating a second worker of another entry between `run` and `refine_*` leaves the first worker's
+  march unchanged.
+- **Regression check while developing.** Generated output for the existing corpus and L2 snapshots don't change. This is a
+  development aid, not a compatibility requirement.
 - **Text.** Parser and printer round-trip, the generators in `tungsten-parse/tests/common/mod.rs`, and `isomorphic` over `refinements`.
 - **IR.** `Clone` and `rebuild` keep refinement refs valid.
-- **Interface.** Build twice and compare; `refine_waves` respects dependencies and excludes frozen instances; the §4.5 schedule.
+- **Interface.** Build twice and compare; `refine_waves` respects dependencies and excludes frozen instances; the §4.5
+  schedule; `entry_hosts` includes `with` units.
 - **L2.** Each refinement's lowered step program gets its own snapshot, named `<path>.<refinement>`.
 - **Verus.** `scripts/verify.sh` needs no change, since `tungsten-core` is untouched.
 
 ### Milestones
 
-Each lands green, and they start after density-mappings milestone 2.
+Each lands green, and they start after density-mappings.
 
-1. **Model.** `Refinement`, `previous`, retag and rebuild, parser and printer. Lowering rejects a declared refinement as unsupported.
+1. **Model.** `Refinement`, `previous`, retag and rebuild, parser and printer, the builder API (§3) with `previous` in its
+   merge key. Lowering rejects a declared refinement as unsupported.
 2. **Interpreter.** Validation, §7, inliner rule, corpus, `@refine` and `after`. Backend gaps are `@knownfail`.
-3. **Interface and Rust.** `refine_waves`, names, kernels, orchestration, driver and protocol. Its `@knownfail`s expire.
+3. **Interface and Rust.** `refine_waves`, names, kernels, worker methods, driver and protocol. Its `@knownfail`s expire.
 4. **Java.**
 5. **CUDA.**
-6. **Inspect, optimizer integration if DCE and CSE have landed, and documentation.**
+6. **Inspect, and optimizer integration if DCE and CSE have landed.** Documentation lands with that of the other v0.3 specs.
 
-## 10. Amendments to `specs/density-mappings.md`
+## 10. Effects on `specs/density-mappings.md`
 
-To apply with milestone 2 here, or into that spec if it hasn't landed by then.
-
-| Section | Change |
-| --- | --- |
-| §3 | `p` is the reader's `Pos3`, which equals the cell only outside a refine call |
-| §4.1 | `@previous` inputs must be `Identity` (§5 here) |
-| §4.2 | Reader pairs become `(reading unit, dims, march)`, reachable from entries and from refinements. For `Expand` and `Lerp`, `r - 1` becomes `r - 1 + march` on each axis, so a march can't leave the input's grid. `Identity` still requires equal dims, with no `march` |
-| §5.2 | Lerp helpers are collected from refined units as well |
-| §5.4 | The new `InlineRejection::Refinement` is checked before `MappedRead` |
-
-Worked example for §4.2: a `(16,1,16)` reader with `@march(0, 383, 0)` reading `(5,49,5)` through `@lerp(4, 8, 4)`. On y: `(1 - 1 + 383) / 8 + 1 = 48 < 49`, which passes. On x and z: `15 / 4 + 1 = 4 < 5`.
+The `march` reader rule, the marched `p`, the `@previous` restriction, lerp helpers for refined units and the inliner's
+check order are written into that spec. Milestone 2 here turns them on.
 
 ## 11. Decisions
 

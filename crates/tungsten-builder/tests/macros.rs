@@ -128,3 +128,52 @@ fn recursion_inside_macro_blocks() {
         p.functions.values().filter_map(|f| f.canonical_name.clone()).collect();
     assert!(names.contains("leaf_8"), "{names:?}");
 }
+
+fn input_of(pb: &mut ProgramBuilder, name: &str, value: f64) -> Input {
+    let mut g = FnBuilder::new(name, F64);
+    g.ret(value);
+    let unit = pb.finish_unit(g);
+    pb.input(unit, Grid::new((1, 1, 1)))
+}
+
+#[test]
+fn if_blocks_can_use_the_program_builder_in_both_branches() {
+    let mut pb = ProgramBuilder::new();
+    let mut f = FnBuilder::new("m", F64);
+    let x = f.local("x", F64);
+    f.assign(x, 1.0);
+    let then = f.block(|f| {
+        let read = input_of(&mut pb, "a", 2.0).read();
+        f.assign(x, read);
+    });
+    let other = f.block(|f| {
+        let read = input_of(&mut pb, "b", 3.0).read();
+        f.assign(x, read);
+    });
+    f.if_blocks(x.gt(0.0), then, other);
+    f.ret(x);
+    finish(&mut pb, f);
+    let methods = checked(pb);
+
+    let mut pb = ProgramBuilder::new();
+    let mut f = FnBuilder::new("m", F64);
+    let x = f.local("x", F64);
+    build!(f, {
+        x = 1.0;
+        if (x.gt(0.0)) {
+            x = input_of(&mut pb, "a", 2.0).read();
+        } else {
+            x = input_of(&mut pb, "b", 3.0).read();
+        }
+        return x;
+    });
+    finish(&mut pb, f);
+    let macros = checked(pb);
+
+    assert!(
+        isomorphic(&methods, &macros),
+        "methods:\n{}\nmacros:\n{}",
+        tungsten_parse::print(&methods),
+        tungsten_parse::print(&macros)
+    );
+}

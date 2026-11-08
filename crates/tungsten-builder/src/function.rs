@@ -254,6 +254,30 @@ impl FnBuilder {
         });
     }
 
+    /// `if cond { then } else { other }`, from blocks captured with [`block`](Self::block).
+    ///
+    /// Each branch is built in its own step, so lowering code can use `&mut ProgramBuilder` in
+    /// both, which the two closures of [`if_else`](Self::if_else) can't do. A block from another
+    /// function is `ForeignHandle` if it uses that function's locals.
+    #[track_caller]
+    pub fn if_blocks(&mut self, cond: impl Into<Expr>, then: Block, other: Block) {
+        let at = Location::caller();
+        let condition = self.condition(cond.into(), at);
+        if then
+            .0
+            .iter()
+            .chain(&other.0)
+            .any(|s| foreign_in_stmt(&self.vars, s))
+        {
+            self.foreign(at);
+        }
+        self.push(Statement::If {
+            condition,
+            then_branch: then.0,
+            else_branch: other.0,
+        });
+    }
+
     /// `while cond { body }`
     #[track_caller]
     pub fn while_(&mut self, cond: impl Into<Expr>, body: impl FnOnce(&mut Self)) {

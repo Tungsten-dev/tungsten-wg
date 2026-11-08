@@ -191,6 +191,22 @@ fn foreign(errs: &BuildErrors) -> Vec<(&'static str, &'static str)> {
 }
 
 #[test]
+fn if_blocks_reports_a_block_from_another_function() {
+    let mut pb = ProgramBuilder::new();
+    let mut a = FnBuilder::new("a", F64);
+    let y = a.local("y", F64);
+    let block = a.block(|a| a.assign(y, 1.0));
+    let mut b = FnBuilder::new("b", F64);
+    let empty = b.block(|_| {});
+    b.if_blocks(true, block, empty);
+    b.ret(0.0);
+    let u = pb.finish_unit(b);
+    pb.entry(u, Grid::new((1, 1, 1)));
+    let errs = pb.build().err().expect("a foreign block is an error");
+    assert_eq!(foreign(&errs), [("a local", "function")]);
+}
+
+#[test]
 fn local_from_another_function() {
     let mut pb = ProgramBuilder::new();
     let mut a = FnBuilder::new("a", F64);

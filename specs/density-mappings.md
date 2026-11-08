@@ -1,6 +1,7 @@
 # Static density-input mappings
 
-Status: design agreed, not implemented. Depends on `specs/program-level-inputs.md`, which lands first.
+Status: design agreed, not implemented. Lands after `specs/workers.md`, and before `specs/refinement.md`, which extends
+it.
 
 ## 1. Summary
 
@@ -23,7 +24,6 @@ There are three mappings:
   instead of 11 extern calls per read.
 - The frontend's mappings can be expressed with no extern runtime support.
 - All three mappings behave the same on the interpreter and every backend, bit for bit.
-- Existing programs generate byte-identical code.
 
 ### Non-goals
 
@@ -33,7 +33,7 @@ There are three mappings:
 - A lower-precision lerp. The lerp's type is the input's element type. If a frontend wants `f32`
   interpolation, it gives the input an `f32` unit.
 - Checking that scales agree with factors (§7).
-- Validation in plain `compile`, which will be removed later.
+- Validation on the low-level path (`specs/compiler.md` §6).
 
 ## 2. Data model
 
@@ -74,7 +74,8 @@ pub struct DensityInput {
 ## 3. Semantics
 
 In these formulas `p` is the reader's `Pos3`, and `(sx, sy, sz)` are the input's dims. Reader
-coordinates are never negative, so `/` and `%` are floor operations here.
+coordinates are never negative, so `/` and `%` are floor operations here. Inside a refine call, `p` is the marched
+position (`specs/refinement.md` §4.3), which equals the cell only outside one.
 
 For an input flat index: `flat(X, Y, Z) = X + Y*sx + Z*sx*sy`.
 
@@ -133,8 +134,8 @@ difference comes from the flags that profile already allows.
 
 ## 4. Validation
 
-Validation runs in `tungsten-check` lowering, so `check::prepare` and `compile_checked` report it
-along with other lowering errors. Plain `compile` doesn't validate (§5.3).
+Validation runs in `tungsten-check` lowering, so `check::prepare` and `Compiler` report it along with
+other lowering errors. Only the low-level path skips it (§5.3).
 
 The errors are new `LowerErrorKind` variants, so `@expect reject(Kind)` can name them.
 
@@ -145,6 +146,8 @@ The errors are new `LowerErrorKind` variants, so `@expect reject(Kind)` can name
 | Every `Factor(n)` has `n >= 1` | `MappingBadFactor` |
 | `Repeat` only on an axis where the input's size is 1 | `MappingRepeatOnWideAxis` |
 | `Lerp` only on an input whose unit returns `f32` or `f64` | `MappingNotFloat` |
+
+`specs/refinement.md` §5 adds that a `@previous` input must be `Identity`.
 
 ### 4.2 Reader grids, only for a unit that reads the input un-indexed
 
@@ -165,6 +168,9 @@ such unit of a shared input is checked separately:
 These checks matter because a coordinate past the end of an axis often gives a flat index that is
 still in range, in the next row. That reads the wrong cell without any error.
 
+- **With refinement,** reader pairs become `(reading unit, dims, march)`, reachable from entries and from refinements.
+  For `Expand` and `Lerp`, `r - 1` becomes `r - 1 + march` on each axis, so a march can't leave the input's grid.
+  `Identity` still requires equal dims, with no `march`. Until `specs/refinement.md` lands, `march` is 0.
 - The high corner counts even when its weight is 0. Interpolating `(5,…)` with factor 4 fits a reader
   up to 16 wide. A 17-wide reader is rejected.
 - A reader smaller than the input allows is legal.
@@ -181,6 +187,7 @@ Worked examples:
 | `(5,1,5)` | `(5,49,5)` | `@expand(1, *, 1)` | x, z: `4/1 = 4 < 5` |
 | `(4,1,4)` | `(16,384,16)` | `@expand(4, *, 4)` | x, z: `15/4 = 3 < 4` |
 | `(5,49,5)` | `(16,384,16)` | `@lerp(4, 8, 4)` | x, z: `15/4 + 1 = 4 < 5`; y: `383/8 + 1 = 48 < 49` |
+| `(5,49,5)` | `(16,1,16)`, `@march(0, 383, 0)` | `@lerp(4, 8, 4)` | x, z: `15/4 + 1 = 4 < 5`; y: `(1 - 1 + 383)/8 + 1 = 48 < 49` |
 
 ## 5. Pipeline
 
@@ -209,23 +216,27 @@ and the test runtimes don't change.
 
 **Identity:** generated code stays exactly as it is, including the existing `(1,1,1)` branch.
 
-**Expand:** the read's index is an inline expression, folded from constants. Factor 1 and `Repeat` drop
-out, and powers of two use shifts:
+**Expand:** the read's index is an inline expression, folded from constants, and is then read like any
+index (`specs/workers.md` §5.1). Factor 1 and `Repeat` drop out, and powers of two use shifts:
 
 ```
 (p.x >> 2) + (p.z >> 2) * 4       // (4,1,4) read with @expand(4, *, 4)
 ```
 
 **Lerp:** each distinct `(input dims, factors, element type)` gets one generated helper that takes the
-buffer and the position. Expression-only emission would repeat each corner several times, and would
+worker's pool, the input's offset and the position. Expression-only emission would repeat each corner several times, and would
 threaten Java's 64 KB method limit, which `size.rs` estimates against. The helper body holds the folded
 offsets, the fractions, the loads and the lerps in §3.3 order.
 
 | Backend | Helper form |
 | --- | --- |
-| Rust | `#[inline(always)] fn`, taking `&[T; N]` and `Pos3` |
-| Java | `private static` method, taking `T[]` and the coordinates. Small enough for the JIT to inline |
-| CUDA | `__device__ __forceinline__` function, taking `const T*` and `int3`. Loads go through `checked_index` when `debug_checks` is on |
+| Rust | `#[inline(always)] fn`, taking `&[T]` (the pool), `off: usize` and `Pos3` |
+| Java | `private static` method, taking `T[]` (the pool), `int off` and the coordinates. Small enough for the JIT to inline |
+| CUDA | `__device__ __forceinline__` function, taking `const T*` (`tw::buffer<T>(ctx.buffers, off)`) and `int3` |
+
+The caller passes its `off_<input>` parameter (`specs/workers.md` §4.3). Each load follows the compile's
+`BufferBounds` as in `specs/workers.md` §5.1, with `LEN` from the input's dims, so `BufferBounds` is part of the
+generated helper, which is fixed per compile.
 
 `Interface` fixes the helper names through `NamingRules`, in the module namespace:
 
@@ -234,15 +245,15 @@ pub fn lerp_helper(&self, input: &DensityInput) -> &str;
 pub fn lerp_helpers(&self) -> &[LerpHelper];   // shape and name, in discovery order
 ```
 
-Names look like `lerp_5x49x5_by_4x8x4_f64`. Helpers are collected from inputs of reachable units, so
-the set is deterministic and shared across readers.
+Names look like `lerp_5x49x5_by_4x8x4_f64`. Helpers are collected from inputs of reachable units, including
+refined units once `specs/refinement.md` lands, so the set is deterministic and shared across readers.
 
 Backends read the same mapping regardless of the reader's dims, so density functions don't need a
 per-dims variant for it.
 
-### 5.3 Plain `compile`
+### 5.3 Low-level path
 
-Plain `compile` doesn't validate, and it will be removed later:
+`Compiler` always validates. The low-level path (`specs/compiler.md` §6) doesn't, and that path is for tools and tests:
 
 - A mapping that fails §4 generates code that can read the wrong cell.
 - An `Identity` read across different shapes keeps today's flat-number behavior there. So strict 1-to-1
@@ -259,7 +270,7 @@ returns true for `Identity`, and for `Expand` or `Lerp` where each axis is `Fact
 | Case | Inlined? |
 | --- | --- |
 | Reads with a mapping that is identity on the grid | Yes, including a `(1,1,1)` input with all `Repeat` in a `(1,1,1)` reader |
-| Other mapped reads | No: new `InlineRejection::MappedRead { function }` |
+| Other mapped reads | No: new `InlineRejection::MappedRead { function }`. `InlineRejection::Refinement` (`specs/refinement.md` §8.1) is checked first |
 | A callee that has its own mapped inputs | Yes. The caller lists the input from then on, and the existing same-grid rule means its reader dims don't change |
 
 ### 5.5 Text format
@@ -308,7 +319,7 @@ from a larger grid must be `Expand([Repeat; 3])`, which generates the same code.
 | Interpreter | Desugar in lowering | Native in core: Verus work for a mapping set that may still change. |
 | Default read | Strict 1-to-1 | Keeping flat-number reads as a separate default: keeps a read `SEMANTICS.md` itself warns about. |
 | Reader validation | Bounds only | Scales too: a mapping is only an index formula, and synthetic tests and unusual programs stay legal. A wrong scale remains a frontend bug with no diagnostic. Exact coverage: rules out partial readers. |
-| Validation site | Checked path only | Also in plain `compile`: that function is going away. Panic in `Interface::build`: user-reachable paths should return errors. |
+| Validation site | In lowering, which `Compiler` always runs | Panic in `Interface::build`: user-reachable paths should return errors. |
 | Lerp order | Today's X, Y, Z, with `a + t*(b-a)` | Z, Y, X: easier hoisting, but changes values and may no longer match Minecraft. Per-backend order with a tolerance: breaks bit comparison. |
 | Lerp types | `f32` and `f64`, following the input's element type | `f64` only: too narrow. `Vec3`: backends' layouts differ, and nothing uses it. |
 | Fast lerp | Out of scope; the frontend picks the type | An FP32 lerp under `Tolerance`: precision is decided by what the input emits, not by the backend. |
@@ -346,28 +357,28 @@ weight 0.
 
 - **Mutation checks on the real path**, done once and recorded: swapping lerp axes, and replacing the
   `t == 0` case with a shortcut, must turn the lerp corpus red on each backend.
-- **Compatibility:** generated output for the existing corpus is byte-identical before and after, on
-  all backends, except for the files changed in §6.
+- **Regression check while developing:** generated output for the existing corpus doesn't change, except
+  for the files changed in §6. This is a development aid, not a compatibility requirement.
 - **Formula agreement:** a test compares the lowered lerp with a copy of `tungsten-mc`'s `interpolate`
   on edge values, by bits.
 - **Text:** parser and printer round-trip, plus the generators in `tungsten-parse/tests/common/mod.rs`.
 - **Verus:** `scripts/verify.sh` needs no change, since `tungsten-core` is untouched.
-- **Vanilla gate:** before milestone 2 lands, run `check::prepare` on the vanilla overworld. Any
-  `MappingDimsMismatch` is a real un-indexed read across shapes and needs deciding before strict 1-to-1
-  is merged.
+- **Vanilla gate:** milestone 2 starts from the vanilla mapping scan recorded by
+  `specs/program-level-inputs.md` §8, done with the frontend on v0.2. Each read it found is a real
+  un-indexed read across shapes and needs deciding before strict 1-to-1 is merged.
 
 ### Milestones
 
 Each lands green.
 
-1. **Model.** `DensityMapping`, parser and printer, no semantics yet.
-   Mapped input is rejected by lowering as unsupported.
+1. **Model.** `DensityMapping`, parser and printer, `InputSpec::mapping` in the builder and its merge key, no semantics
+   yet. Mapped input is rejected by lowering as unsupported.
 2. **Interpreter.** Validation, desugaring, inliner rule, corpus, §6 migration, vanilla gate. Backend gaps
    are `@knownfail`.
 3. **Rust.** `Interface` helpers, expansion and lerp. Its `@knownfail`s expire.
 4. **Java.**
 5. **CUDA.**
-6. **Inspect and documentation.**
+6. **Inspect.** Documentation lands with that of the other v0.3 specs.
 
 ## 9. Open and deferred
 
@@ -380,4 +391,3 @@ Each lands green.
 - **Mapping as core semantics:** move it into `tungsten-core` if the proof work needs it.
 - **Scale agreement:** source scale equal to reader scale × factor holds across today's frontend grids.
   A lint could report it later, without rejecting.
-- **Removing plain `compile`:** the §5.3 caveats disappear with it.

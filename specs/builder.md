@@ -1,8 +1,7 @@
 # `tungsten-builder`: an IR builder for frontends
 
-Status: milestones B1–B4 implemented (see Implementation notes); friction point 1 of the review gate is open. Lands after milestone 3 of `specs/program-level-inputs.md` and before its
-milestone 5, which deletes `tungsten-legacy`. `specs/density-mappings.md` and `specs/refinement.md` land later and
-extend it.
+Status: milestones B1–B4 implemented and the review gate is closed (see Implementation notes). `specs/auto-consts.md`,
+`specs/density-mappings.md` and `specs/refinement.md` land later and extend it.
 
 ## 1. Summary
 
@@ -77,7 +76,6 @@ crates/tungsten-builder/
   src/derive.rs     unit lists from bodies
   src/decls.rs      ExternDecl, RecordDecl, Decls
   src/macros.rs     body!, build!, extern_fns!, record_decls!, vec3!, pos3!, array!, vt!
-  src/math.rs       sin, cos, sqrt, floor, pow, min, max, clamp and their decls
   src/error.rs      BuildError, BuildErrors
   tests/            typing agreement, derivation, slices (§10)
 ```
@@ -86,8 +84,8 @@ crates/tungsten-builder/
 | --- | --- |
 | Dependencies | `tungsten-builder` depends on `tungsten-ir` and `thiserror`. Dev-dependencies: `tungsten-check`, `tungsten-parse` |
 | Facade | `pub use tungsten_builder as builder`, as a non-optional dependency like `tungsten-ir` |
-| Macros | Exported from `tungsten_builder`, so they're reached as `tungsten_wg::builder::body!`. They don't conflict with the legacy root re-exports (`tungsten_wg::body!`), which go away at program-level milestone 5 |
-| Registry helper | `tungsten_wg::registry_from(decls)`, behind the `check` feature (§7) |
+| Macros | Exported from `tungsten_builder`, so they're reached as `tungsten_wg::builder::body!` |
+| Registry helper | `tungsten_wg::registry_from(decls)` (§7) |
 | `docs/redesign.md` rule | Builder depends only on `ir`. Only the facade depends on the builder |
 
 ## 3. API
@@ -175,6 +173,7 @@ impl FnBuilder {
     pub fn if_then(&mut self, cond: impl Into<Expr>, then: impl FnOnce(&mut Self));
     pub fn if_else(&mut self, cond: impl Into<Expr>,
                    then: impl FnOnce(&mut Self), other: impl FnOnce(&mut Self));
+    pub fn if_blocks(&mut self, cond: impl Into<Expr>, then: Block, other: Block);
     pub fn while_(&mut self, cond: impl Into<Expr>, body: impl FnOnce(&mut Self));
     pub fn repeat(&mut self, count: usize, body: impl FnOnce(&mut Self));
 
@@ -211,6 +210,9 @@ fn lower(pb: &mut ProgramBuilder, f: &mut FnBuilder, d: &Density) -> Expr {
     }
 }
 ```
+
+`if_else`'s two closures can't both borrow `pb`. When both branches need it, capture each with `block`, one after the
+other, and join them with `if_blocks`, which is what `build!`'s `if`/`else` does.
 
 Assigning requires a `Local`, so an ambient can't be a target. Where the frontend's `water_levels` moves `pos3` today,
 it declares a local and copies the ambient into it, which is what conversion generated implicitly.
@@ -319,7 +321,7 @@ expression.
 ### 4.3 What stays in core
 
 The builder doesn't check flow (missing returns, unassigned reads, `break` outside a loop), grid rules, or externs and
-records against the registry. `compile_checked` reports those. The builder guarantees only that lists match bodies and
+records against the registry. `Compiler` reports those. The builder guarantees only that lists match bodies and
 that the program's refs are valid, so a builder program always lowers past `DanglingRef` errors. It can still fail
 the checker.
 
@@ -388,17 +390,14 @@ record_decls! {
 let registry = tungsten_wg::registry_from([
     aquifer_externs(),
     structure_records(),
-    tungsten_wg::builder::math::decls(),
 ])?;
-tungsten_wg::compile_checked(&program, &registry, &mut [&mut rust])?;
+let out = tungsten_wg::Compiler::new(program, &registry, rust).compile()?;
 ```
 
 - `group name;` generates `pub fn name() -> Decls`. It's a function because `VariableType` can't be `const`.
 - Generated call functions take `impl Into<Expr>` and check arity and argument types, with `ArgumentType` and `Arity`.
   There is deliberately no untyped extern call, so the frontend's 29 inline `ExternCall` literals in the main lowering
   files would each get a declaration.
-- `math` keeps the eight functions legacy shipped (`sin cos sqrt floor pow min max clamp`), so ported code keeps
-  working, and their declarations are opt-in. A frontend's runtime must still provide them.
 - `registry_from` feeds `RegistryBuilder`. It drops identical duplicates, so groups can overlap, and leaves conflicts
   for `RegistryBuilder` to report.
 
@@ -416,23 +415,20 @@ Edited in place, as those specs' own decisions ask.
 | --- | --- |
 | `program-level-inputs` §1, §6.8, §7, §8, §9, §10 | Milestone 5 no longer needs the port. It needs the frontend pinned (below) |
 | `density-mappings` §5.6, §9 | Adds `InputSpec::mapping`, included in the merge key. The frontend's move waits for its port |
-| `refinement` §3, §12 | Adds `InputSpec::previous`, included in the merge key, and `pb.refinement(...)`. Frontend adoption waits for its port |
+| `refinement` §3, §12 | Adds `InputSpec::previous`, included in the merge key, `pb.refinement(...)`, and an `Entry` handle returned by `pb.entry`. Frontend adoption waits for its port |
+| `auto-consts` §10 | Replaces the table methods with `pb.param` and `pb.auto_const`, spells handle types in `extern_fns!`, and adds `auto_initializers!` |
+| `compiler` §4 | `compile_checked` is replaced by `Compiler`, and `registry_from` is always available |
 
-**Pinning the frontend.** Before milestone 5 lands:
-
-1. Tag the last commit with `tungsten-legacy`, after program-level milestone 4.
-2. Switch `tungsten-mc-compile`'s `tungsten-wg` dependency from the path to that tag.
-3. Confirm `cargo check --workspace` passes in `tungsten-frontends`.
-
-The frontend then gets no mappings, refinement or builder until a port moves it to a newer version.
+**Pinning the frontend.** `tungsten-mc-compile` is pinned to v0.2 before milestone 5 lands. The frontend then gets no mappings, refinement or builder until a port moves it to a newer version.
 
 ## 9. For a later `tungsten-mc-compile` port
 
 Not part of this work, but agreed now so it isn't re-decided:
 
-- **Proof:** generated code matches the code generated from the pinned tag, bit for bit in values, on vanilla, for
+- **Proof:** generated code matches the code generated from the pinned v0.2, bit for bit in values, on vanilla, for
   every route on fixed seeds and chunks. Byte diffs are reviewed and don't block.
-- **Checking:** every compile goes through `compile_checked`, including datapacks. Measure the cost, which is unknown.
+- **Checking:** every compile goes through `Compiler`, which always checks, including datapacks. Measure the cost, which
+  is unknown.
 - **Expected findings:** the frontend has never run the checker. `as_index` and `flat_y_zero_index` declare `F64` but
   are used as density indexes, which must be `I32`. Others are likely, and poison-and-collect exists to show them
   together.
@@ -507,13 +503,13 @@ this repo always has a way to construct programs from Rust.
 | Static or dynamic types | Dynamic `Expr` | `Expr<F64>`: needs a marker per record, const generics for arrays, and type erasure wherever lowering's result type varies |
 | Externs | One declaration, two outputs | Separate registry: signatures written twice. Builder takes a registry: string-named calls |
 | Landing | After program-level m3 | Before: internals rewritten at m3. After m4: delays with no dependency |
-| Frontend port | Out of scope, frontend pins the last legacy tag | Keep m5 blocked on the port: density-mappings and refinement stay blocked too |
+| Frontend port | Out of scope, frontend pins v0.2 | Keep m5 blocked on the port: density-mappings and refinement stay blocked too |
 | API proof | Real slices with a review gate | Toy frontend: misses what makes real code awkward. Unit tests only: verify correctness, not how the API reads |
 | Spec location | `specs/builder.md` | Root `SPEC.md`: holds the testsuite design |
 
 Decided without an interview question, and easy to revisit: `FnBuilder::new` rather than `FnBuilder::unit`, since the
 kind is chosen at finish; `let x: T` in macros using `temp`; names being required; `source_hash` defaulting to 0;
-interned `&'static` types; keeping `math`; `Block` as an opaque type; the `group` and `@domain_error` syntax; the
+interned `&'static` types; `Block` as an opaque type; the `group` and `@domain_error` syntax; the
 `Grid` and `InputSpec` shapes; and the milestone split.
 
 ## 12. Open and deferred
@@ -556,9 +552,9 @@ interned `&'static` types; keeping `math`; `Block` as an opaque type; the `group
   arithmetic, with exact binary constants. `as_mut_ref` is checked as IR and text only, because
   core treats a reference as its operand and no toy extern takes one. The review gate is
   `tests/slices/REVIEW.md`: three frontend type errors the builder catches, and six friction points.
-  The first, that the method-style `if_else` can't use `&mut ProgramBuilder` in both branches, has a
-  proposed fix (a public `if_blocks`) that hasn't landed, so by §10's gate the crate isn't done until
-  that is decided.
+  The first, that the method-style `if_else` can't use `&mut ProgramBuilder` in both branches, is fixed
+  by the public `if_blocks`. `build!` keeps its hidden `__condition`/`__if`, so a condition's errors
+  are still reported before its branches'. The other five were accepted as they are.
 - **Mutation checks**, done once, each reverted: dropping callee helpers from the summary merge fails
   `derive::lists_match_the_hand_written_twin`; widening `+ - * /` to any numeric pair fails
   `errors::one_mistake_one_error_at_its_line` (and the typing agreement); listing inputs in reverse
