@@ -373,7 +373,7 @@ Reading a constant from a function just gives the value computed at the start of
 
 ### 9.1 What an input is
 
-A density input `i` is declared by its **owner** unit and says:
+A density input `i` is declared once for the whole program, and any unit can list it. It says:
 
 - `source`: which unit to evaluate,
 - `dims`: over which grid,
@@ -400,7 +400,12 @@ once, with the cell that failed.
 
 ### 9.3 Reading an input
 
-Only a function of the owner unit can read its inputs:
+A function running as part of unit `U` can read an input only if `U` lists it. A function listed by
+several units is checked against each of them. Reading an input the unit doesn't list is
+`InputNotListed` (CHECK.md §6(e)). An input that no unit lists is legal and inert: it is never built,
+so a failing source has no effect.
+
+The index rules:
 
 - **`Density(i)` without an index** reads "the matching cell":
   - if the input's grid is a single cell `(1,1,1)`, it reads that cell, from any reader cell;

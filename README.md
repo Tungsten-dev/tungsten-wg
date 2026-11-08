@@ -20,14 +20,13 @@ The project is a Cargo workspace of small crates. Each one owns a single part of
 
 <!-- TODO: add dependency diagram (draw.io) -->
 
-- tungsten-ir: the OptimizedProgram model (compute units, functions, statements, arenas).
+- tungsten-ir: the OptimizedProgram model (compute units, functions, statements, arenas). Density inputs live in one program-wide arena, and each unit lists the ones it reads.
 - tungsten-builder: builds OptimizedPrograms from Rust, for frontends. Expressions are typed as they are built, every mistake is collected, and unit lists are derived from the bodies.
 - tungsten-optimizer: passes over the IR. Right now that is inlining.
 - tungsten-interface: the contract between the compiler and the backends (Interface, NamingRules, the codegen traits and the Backend trait).
 - tungsten-codegen: language-agnostic building blocks, like the pretty printer.
 - tungsten-rust, tungsten-cuda, tungsten-java: one backend per target language.
 - tungsten-inspect: the debugging backend.
-- tungsten-legacy: the old SPMT model and builder, plus the conversion that lowers it to the IR. It is kept isolated so it can be deleted later.
 - tungsten-wg: the top-level crate. It re-exports everything, switches backends on and off through features, and provides compile.
 
 Backends never depend on each other or on the optimizer. For the full rules and the reasoning behind them, see [docs/redesign.md](docs/redesign.md).

@@ -209,8 +209,8 @@ written order. The error choice is canonical: lowest failing `ConstId`, then low
 - Grids: additionally `dx*dy*dz ≤ i32::MAX`.
 - Scoping, for every unit `U` and every `f ∈ F(U) = {U.main} ∪ U.helpers`: (a) calls stay in
   `F(U)`; (b) hosts read are in `f.hosts ⊆ U.hosts`; (c) tables in `U.tables`; (d) consts, and
-  every const their inits reach, in `U.consts`; (e) density reads only of inputs owned by `U`,
-  by a function no other unit lists.
+  every const their inits reach, in `U.consts`; (e) density reads only of inputs in `U.inputs`.
+  A function listed by several units is checked against each of them.
 
 ### 5.4 Integer and float operations (Java)
 
@@ -309,7 +309,7 @@ The full format (grammar, elaboration, printer, envelope) is specified in
 - `print` is canonical and fully explicit: 4-space indent, fully parenthesized binary ops,
   explicit types everywhere.
 - Required: `parse(print(m)) ≅ compact(m)`, and `print(parse(print(m))) == print(m)`.
-- Variable names: `Named(s)` prints as `s`, `Prefixed(s)` as `s#N`, and `Anonymous` as `%N`,
+- Variable, host and input names: `Named(s)` prints as `s`, `Prefixed(s)` as `s#N`, and `Anonymous` as `%N`,
   where `N` is the compacted slot index.
 - Floats: shortest round-trip decimal with a mandatory `.` (`1.5f`, `-0.0`, `2.0`), `inf`,
   `-inf`, `inf_f32`, and NaNs with their full bits: `nan_f32(0x7fc00000)` /
@@ -345,13 +345,15 @@ program {
         consts [half];
     }
 
+    input b = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
+
     fn top_main() -> f64 {
         return (density(b) * 2.0);
     }
 
     unit top {
         main top_main;
-        input b = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
+        inputs [b];
     }
 
     entry top @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
@@ -363,8 +365,8 @@ program {
 @expect "far" error(OutOfBounds)
 ```
 
-Every fn is top level and a unit names its main fn (`main f;`). Lists (`helpers`, `tables`,
-`hosts`, `consts`) are explicit and never derived. Simple statements and items end in `;`.
+Every fn and every `input` is top level, and a unit names its main fn (`main f;`). Lists (`helpers`, `tables`,
+`hosts`, `consts`, `inputs`) are explicit and never derived. Simple statements and items end in `;`.
 
 Other directives: `@fuel(n)`, `@tier(large)`, and `@cells(sample = n, seed = s)` to compare only
 a sample of cells on large grids.

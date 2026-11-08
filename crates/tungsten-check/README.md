@@ -42,12 +42,11 @@ small.
 
 | `LowerErrorKind` | When |
 | --- | --- |
-| `DanglingRef { kind }` | A ref that is stale, removed or from another arena. Includes a `Var` from another function, a `DensityInput` ref found in no unit's arena, and `EntryPoint.density_function`. |
+| `DanglingRef { kind }` | A ref that is stale, removed or from another arena. Includes a `Var` from another function, a `DensityInput` ref that is not in the program's `density_inputs` arena, and `EntryPoint.density_function`. A stale ref in a unit's `inputs` list is reported at that list entry. |
 | `UnknownExtern` / `UnknownRecord` | The name isn't in the registry. |
 | `UnknownField { base, field }` | Not `x`/`y`/`z` on Vec3/Pos3, or not in the registry's record. |
 | `FieldOnNonStruct { base }` | The `Field`'s `base_type` isn't Vec3, Pos3 or a record. |
 | `DynamicHost` | `HostInput::Dynamic`. |
-| `DensityInputType` | `VariableType::DensityInput` as a parameter, return type, host, annotation, cast target or array element, or a read or assign of a `DensityInput` var. |
 | `BadConstruct { t }` | `Construct` on a type other than Vec3/Pos3/Extern, or `ConstructExtern` on a non-`Extern` type. |
 | `ConstructArity` | Vec3/Pos3 with ≠ 3 args, or a positional record construct with more args than fields. |
 | `Parameter { problem }` | A parameter listed twice, or not in the function's arena. |
@@ -55,10 +54,10 @@ small.
 **Not** lowering errors (kept for the checker): every type mismatch, missing or duplicate
 record fields, a positional record construct with too few args, empty array literals, dims
 < 1, cyclic constants or calls, `Break` placement, definite assignment, scoping-list violations
-and cross-unit density reads.
+and density reads of inputs the unit doesn't list (`InputNotListed`).
 
 Dropped during lowering (kept in `LowerMap` where it matters): every name, `canonical_name`,
-`source_hash`, `DensityInput.var` and table idents. A `Field`'s `base_type` is used only to pick
+`source_hash` and table idents. A `Field`'s `base_type` is used only to pick
 the selector.
 
 ## Files at a glance
@@ -96,12 +95,11 @@ not the program uses them.
 ### 2. `lower/program.rs::run`: two passes
 
 **Pass 1: `build_ids`** walks every arena and gives each item its core id, in arena
-iteration order. It fills the `LowerMap`: units, functions, constants, hosts, tables, inputs
-(unit by unit), each with a display name.
+iteration order. It fills the `LowerMap`: units, functions, constants, hosts, tables, inputs,
+each with a display name.
 
 The order is **arena iteration order** (slot order, skipping holes), the same order `compact`
-and `isomorphic` use. Inputs are numbered unit by unit, then in each unit's `density_inputs`
-order. Entries keep their `entry_points` index. Extern and record ids are registry order.
+and `isomorphic` use. Inputs are numbered in the order of the program's `density_inputs` arena. Entries keep their `entry_points` index. Extern and record ids are registry order.
 Consequences:
 
 - `lower(p) == lower(p.clone()) == lower(compact(p))` exactly, but `lower(permute(p, s))` may
@@ -130,11 +128,8 @@ this item", and builds the core struct.
 This is where locals get their numbers:
 
 1. Parameters first, in order → `LocalId(0)`, `LocalId(1)`, …  
-   A parameter that is missing from the arena, listed twice, or has type `DensityInput` is an
-   error.
-2. Then every other var in the function's arena, in arena order, **skipping vars of type
-   `DensityInput`**. Those vars are only placeholders for `DensityInput.var`; backends skip them
-   too.
+   A parameter that is missing from the arena or listed twice is an error.
+2. Then every other var in the function's arena, in arena order.
 3. The `Ref<Var> → LocalId` table goes into `cx.locals` for the body, and into
    `map.locals[fn_id]` for later.
 4. Then the return type, the `hosts` list, and the body (`cx.block`).
@@ -143,7 +138,7 @@ This is where locals get their numbers:
 
 A one-to-one translation. The only interesting part is `local()`, which turns a `Ref<Var>`
 into a `LocalId` using `cx.locals`. If the ref isn't there, it works out why: a
-`DensityInput` var (error), a var from another function (`DanglingRef`), or a broken
+var from another function (`DanglingRef`), or a broken
 parameter that was already reported (no second error).
 
 ### 5. Expressions (`expr.rs::expr`)
@@ -155,8 +150,7 @@ look up an id, lower the children, build the core variant. A few to know about:
 - **`ExternCall`** looks the name up in the registry, then lowers the *annotated* parameter and
   return types as written. It doesn't compare them with the registry's signature; that's for
   the checker.
-- **`DensityVariable(r, _)`** finds `r` in `map.inputs`. That gives the one global input whose
-  arena contains it, even when a helper function shared between units does the read.
+- **`DensityVariable(r, _)`** finds `r` in `map.inputs`. Inputs are program-wide, so this is the same input whichever unit or shared helper does the read.
 - **`Field`** calls `field_sel` (below).
 - **`Construct` / `ConstructExtern`** → `construct` / `construct_extern`. Vec3/Pos3 need exactly
   3 args. A record by position becomes fields `0..n`; a record by name looks up each field
@@ -170,17 +164,13 @@ or id 0) so the walk can continue and find further errors. Placeholders never es
 
 To turn `foo.x` into a `FieldSel`, the lowering has to know whether `foo` is a `vec3`, a
 `pos3` or a record. `tungsten-ir` stores that on every `Field` as `base_type`, filled by whoever
-built the IR (legacy conversion, tungsten-parse, frontends). `field_sel` reads it:
+built the IR (tungsten-parse, tungsten-builder, frontends). `field_sel` reads it:
 
 - `vec3` / `pos3` → `FieldSel::Vec3(axis)` / `FieldSel::Pos3(axis)`, or `UnknownField` if the
   name isn't `x`/`y`/`z`
 - an extern record → `FieldSel::Record(id, index)` via the registry, or `UnknownRecord` /
   `UnknownField`
-- `density` → a quiet placeholder (the read of the `density` value is reported on its own)
 - anything else → `FieldOnNonStruct`
-
-A `density`-typed parameter is reported once at the parameter, and again at every read or
-assign, since reading a `DensityInput` var is its own error.
 
 **`base_type` is trusted for nothing else**, and lowering doesn't compare it with the base. If
 it is wrong, the result is a wrong `FieldSel`, and the checker will notice that the base doesn't
@@ -206,7 +196,7 @@ The path is maintained by `Ctx`:
 
 Names in a location come from `canonical_name` or the `Name`, falling back to `#<core id>`
 (`Ref`'s slot index isn't public). A unit's name is its main function's name, a Perlin table's
-is its `ident`, and an input's is its var's name.
+is its `ident`, and an input's is its `name`.
 
 Errors come out in walk order (pass 2's order, then pre-order within an item: a node's own
 error before its children's). `lower` never stops early; you get all of them.
@@ -225,7 +215,7 @@ program also knows its externs and records, so it builds the registry with `Regi
 - `extern_fn(name, params, ret)` / `extern_fn_with_domain_error(…)`
 - `record(name, &[(field, type), …])`. Field types can name other records.
 - `build()` resolves record names, assigns ids **in declaration order**, and rejects duplicate
-  names, duplicate fields, unknown record names, `DensityInput` used as a type, and records
+  names, duplicate fields, unknown record names, and records
   that contain themselves by value (`find_record_cycle`).
 
 The registry is **strict**: an extern, record or field the program uses but the registry
@@ -240,7 +230,7 @@ someone might still want:
   is one for units, functions, consts, hosts, tables and inputs, plus one per function for
   locals (`map.locals[fn_id]`, or `map.local(fn_id, var_ref)`).
 - Extras: `host_names` (the `Named` string, for binding host values by name), `table_idents`
-  (the original table, with `ident`/`subident`), `input_vars`, extern names, record and field
+  (the original table, with `ident`/`subident`), extern names, record and field
   names.
 
 Use it to turn a core id back into something a human recognizes, as `check.rs` does for checker
@@ -291,12 +281,11 @@ the result. `tests/mod.rs` has the helpers:
 | --- | --- |
 | `normalization.rs` | One test per expression rule: input expression → expected core `Expr` |
 | `errors.rs` | Every `LowerErrorKind` at least once, including how its location prints |
-| `ids.rs` | Local numbering, input ids across units, shared helpers reading inputs |
+| `ids.rs` | Local numbering, input ids, shared inputs, shared helpers reading inputs |
 | `determinism.rs` | `lower(p) == lower(p.clone()) == lower(compact(p))` |
 | `map.rs` | Every id round-trips through the `LowerMap` |
 | `registry.rs` | `RegistryBuilder` errors and id order |
 | `no_panic.rs` | proptest: break refs at random, `lower` must return `Err`, never panic |
-| `legacy.rs` | Programs from `tungsten-legacy`'s builders lower cleanly (and pass the checker) |
 | `check_errors.rs` | One reject test per `CheckErrorKind` (both hints), with its rendered location; hand-built core programs for wf and forbidden const inits |
 | `check_rejects.rs` | The lowering tests whose programs the checker rejects on purpose, with reasons |
 | `eval.rs` | Interpreter results computed by hand (operators × types, overflow, shifts, casts, `-0.0`, short-circuit, loops, fuel, consts, density inputs, eager failures, canonical errors, externs) and the `prepare`/`Prepared`/`evaluate` API |

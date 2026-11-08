@@ -24,15 +24,15 @@ form that is fully explicit, deterministic, and a fixpoint of `print ∘ parse`.
 | --- | --- |
 | Architecture | `parse` → AST, then `elaborate(ast, &dyn Env)`. Besides `tungsten-ir`, tungsten-parse uses well-maintained crates where they replace hand-written infrastructure: `logos` (lexer), `codespan-reporting` (diagnostics), `stacker` (stack growth). The parser, elaborator and printer are hand-written. The testsuite implements `Env` (registry + prelude). |
 | Printer scope | Total over any program whose refs resolve: weird names, duplicate names, `HostInput::Dynamic`, unregistered externs, density reads from helpers, shared fns. Dangling refs panic, like `Arena::get`. |
-| Top-level shape | Flat. Every fn is top level. A unit names its main fn (`main f;`) and its inputs. Density reads are `density(unit.input)`, so a read can sit in any fn, including a helper shared between units. |
-| Fn labels | Label ⇔ `canonical_name`: `f` ⇔ `Some("f")`, `` `a:b/c` `` quoted, `%N` ⇔ `None`, `f#N` when the name is duplicated. Unit, table, entry and input labels are syntax only. |
+| Top-level shape | Flat. Every fn is top level. A unit names its main fn (`main f;`) and lists its inputs. Inputs are top-level items, and density reads are `density(input)`, so a read can sit in any fn, including a helper shared between units. |
+| Fn labels | Label ⇔ `canonical_name`: `f` ⇔ `Some("f")`, `` `a:b/c` `` quoted, `%N` ⇔ `None`, `f#N` when the name is duplicated. Unit, table and entry labels are syntax only. Input labels follow the host rule (§5.2). |
 | Variables | Canonical: declared in slot order (typed params first when they're a slot prefix, then a `vars { }` block). Lenient: `let x: T [= e];` appends a slot. Arena order should be semantically insignificant, and a metamorphic test checks that (§12). |
-| Namespaces | Separate per kind. Bare identifiers in expressions are vars. Other references are wrapped: `const(c)`, `host(h)`, `table(t)`, `density(u.d)`, `ambient(k)`. Lenient: a bare name that isn't a var falls back to a constant. |
+| Namespaces | Separate per kind. Bare identifiers in expressions are vars. Other references are wrapped: `const(c)`, `host(h)`, `table(t)`, `density(d)`, `ambient(k)`. Lenient: a bare name that isn't a var falls back to a constant. |
 | Statements | Mandatory `;` after every simple statement and simple item. Whitespace is fully free. |
 | Precedence | Rust precedence. Comparisons don't associate. Shift and bitwise ops (`<< >> >>> & ^ \|`) can't mix unparenthesized with any other binary operator. Canonical form fully parenthesizes. |
 | Negative literals | A `-` glued to a digit or `inf` in operand position is part of the literal. `Negate` prints as `-(e)`. |
 | Literal typing | The suffix alone decides inside bodies and const exprs. Contextual int→float only in attribute and envelope positions. |
-| Derived fields | Only: extern signatures (from `Env`), `Field` type and base type (from `type_of(base)`), `source_hash = 0`, the density-input `var`. Lists (`helpers`, `tables`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
+| Derived fields | Only: extern signatures (from `Env`), `Field` type and base type (from `type_of(base)`), `source_hash = 0`. Lists (`helpers`, `tables`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
 | Failed derivation | `ElabError` with a span. `@expect reject` tests write those fields explicitly. |
 | Prelude | `use lib::{a, b};` copies the named fns plus their transitive library fns and consts. `print` emits them expanded. |
 | `&'static str` | A global leaking interner, one copy per distinct string. |
@@ -47,7 +47,7 @@ form that is fully explicit, deterministic, and a fixpoint of `print ∘ parse`.
 ```
 crates/tungsten-parse/
   Cargo.toml            # deps: tungsten-ir, logos, codespan-reporting, stacker.
-                        # Dev: proptest, tungsten-optimizer, tungsten-legacy, bumpalo.
+                        # Dev: proptest, tungsten-optimizer.
   SPEC.md
   src/lib.rs            # public API, re-exports. Only `ast` is a public module.
   src/span.rs           # Span, FileId, SourceFiles, Diagnostic (rendered by codespan-reporting)
@@ -65,7 +65,7 @@ crates/tungsten-parse/
   src/intern.rs
   src/tests.rs          # L0
   tests/                # roundtrip (P1–P4), fuzz (P5), floats (P6), permute (P7, partly),
-                        # depth (P1 at the nesting limits), legacy (converted programs)
+                        # depth (P1 at the nesting limits)
 ```
 
 ```rust
@@ -118,8 +118,8 @@ program is compact by construction: no holes, and every generation is 0.
   comes from textual order.
 - **Strings**: `"…"` with `\\ \" \n \t \u{hex}`. Used for perlin idents, case names and reasons.
 - **Keywords**: `program fn unit main input entry host table const use let vars return break if
-  else while repeat true false as new extern ext mut dynamic none perlin base3d density ambient
-  helpers tables hosts consts inf nan` and the type names (§5.4).
+  else while repeat true false as new extern ext mut dynamic none perlin base3d ambient
+  helpers tables hosts consts inputs inf nan` and the type names (§5.4).
 
 ### 4.1 Numeric literals
 
@@ -169,7 +169,7 @@ Rules:
 ```ebnf
 file      = directive* program directive* ;
 program   = "program" "{" item* "}" ;
-item      = use | host | table | const | fn | unit | entry ;
+item      = use | host | table | const | fn | input | unit | entry ;
 
 use       = "use" IDENT "::" "{" label ("," label)* ","? "}" ";" ;
 host      = "host" label ( ":" type | "dynamic" ) ";" ;
@@ -180,9 +180,9 @@ param     = label (":" type)? ;
 vars      = "vars" "{" (label ":" type ("," label ":" type)* ","?)? "}" ;
 fn_attr   = "@hash" "(" UINT ")" | "@hosts" "(" labels? ")" ;
 unit      = "unit" label ("@hash" "(" UINT ")")? "{" unit_item* "}" ;
+input     = "input" label "=" label grid_attrs ";" ;
 unit_item = "main" label ";"
-          | ("helpers" | "tables" | "hosts" | "consts") "[" labels? "]" ";"
-          | "input" label "=" label grid_attrs ";" ;   (* grid_attrs plus "@var" "(" label "." label ")" *)
+          | ("helpers" | "tables" | "hosts" | "consts" | "inputs") "[" labels? "]" ";" ;
 entry     = "entry" (label "=")? label grid_attrs ";" ;
 grid_attrs= "@dims" "(" INT "," INT "," INT ")"
             "@origin_scale" "(" num "," num "," num ")"
@@ -201,7 +201,7 @@ block     = "{" stmt* "}" ;
 ```
 
 `num` in `grid_attrs` is an attribute position: an int literal is accepted for an f64 (§4.1, §2).
-An `input`'s `@var(f.v)` may sit anywhere among its grid attributes; the printer puts it last.
+`input` inside a unit is an `ElabError` that points to the top-level form, and `@var` is an unknown attribute.
 
 ### 5.2 Labels per namespace
 
@@ -211,19 +211,18 @@ An `input`'s `@var(f.v)` may sit anywhere among its grid attributes; the printer
 | host | `HostInput::Static.name` | `Named` | `Prefixed` | dup `Named` | `Anonymous` (or `dynamic`) |
 | fn | `canonical_name` | `Some("x")` | `Some("x")`, name is duplicated | — | `None` |
 | const | `Constant.name` | `"x"` | `"x"`, name is duplicated | — | — |
-| unit, table, entry, input | none (syntax only) | free | free | — | free |
+| input (program-wide) | `DensityInput.name: Name` | `Named` | `Prefixed` | dup `Named` | `Anonymous` |
+| unit, table, entry | none (syntax only) | free | free | — | free |
 
 The printer emits `#N` / `##N` / `%N` with `N` = the compacted slot index of that entity in its
 arena. Every label must be unique within its namespace, or it's an `ElabError`. Var namespaces are
-per fn. Input namespaces are per unit.
+per fn. The input namespace is program-wide.
 
 **Printer-generated labels** for syntax-only kinds:
 
 - tables: `t<N>`.
 - units: the main fn's label, if it's a plain identifier, not of the form `u<digits>`, and unique
   among units. Otherwise `u<N>`.
-- inputs: the input var's base string, if it's an identifier, unique within the unit and not of
-  the form `d<digits>`. Otherwise `d<N>`.
 - entries: the unit label, if the unit has exactly one entry and the label isn't of the form
   `e<digits>`. Otherwise `e<N>`.
 
@@ -241,20 +240,20 @@ per fn. Input namespaces are per unit.
 - **`unit`**: `main` is required exactly once. Each list appears at most once, and omitted means
   empty. Lists are taken **verbatim**, so they can be missing reachable entries or contain extras,
   and the checker judges them. A unit has no return type in the IR, so it has none in the text.
-- **`input d = target grid_attrs @var(f.v);`**: one `DensityInput` in the unit's arena. `@var`
-  names the var that `DensityInput.var` points to: var `v` of fn `f`, which can be any fn (after
-  inlining it's a helper's var). If `@var` is omitted, elaboration appends a new var labeled `d`
-  (so `d`, `d#N` and `%N` give `Named`, `Prefixed` and `Anonymous`, §5.2) of type `density` to
-  the unit's main fn, after all of that fn's declared vars, in input order. If the main fn
-  already has a var labeled `d`, that's an `ElabError`, to avoid silent aliasing. A repeated
-  input label is an `ElabError` of its own.
+- **`input d = target grid_attrs;`**: one `DensityInput` in the program's `density_inputs` arena, with
+  `name` from the label (`d`, `d#N`, `d##N` and `%N` give `Named`, `Prefixed`, a duplicate `Named` and
+  `Anonymous`, §5.2). No var is created, and a local variable may share the label, since `density(...)` is its
+  own syntax. A repeated input label is an `ElabError`.
+- **`unit` `inputs [d, …]`**: `ComputeUnit::density_inputs`, verbatim like the other lists. Several units
+  can list one input, and an input no unit lists is legal. Elaboration declares units, then inputs, then
+  resolves the `inputs` lists, so references don't depend on order.
 - **`entry [l =] u grid_attrs;`**: without `l =`, the label is the unit label. Duplicate entry
   labels are an error.
 
 ### 5.4 Types
 
 ```
-bool i8 i32 i64 f32 f64 vec3 pos3 density perm_table interpolated_noise_sampler
+bool i8 i32 i64 f32 f64 vec3 pos3 perm_table interpolated_noise_sampler
 [T; n]                 // Array(T, n)
 extern Name            // Extern(&'static str); Name is an identifier or quoted
 ```
@@ -267,7 +266,7 @@ These are the spellings of `VariableType`'s `Debug` impl, except that arrays are
   can't shadow, and a reference resolves anywhere in the fn regardless of textual position. Which
   vars are definitely assigned is the checker's job.
 - Slots are assigned in this order: typed params in order, then `vars { }` entries, then `let`
-  declarations in textual order (depth-first), then implicit input vars (§5.3).
+  declarations in textual order (depth-first), in that order.
 - An untyped param (`(a, b)`) must be declared in `vars { }`. A param whose declaration appears
   later in the list than another param's isn't an error: `parameters` order is the param list,
   and slot order is the declaration order. An untyped param may repeat (`(a, a)`): the checker
@@ -292,8 +291,8 @@ they're binary ops, §10).
 | `Constant(c)` | `const(c)`, or bare `c` if no var `c` exists | `const(c)` |
 | `HostInput(h)` | `host(h)` | `host(h)` |
 | `PermutationTable(t)` | `table(t)` | `table(t)` |
-| `DensityVariable(d, None)` | `density(u.d)`, or `density(d)` (below) | `density(u.d)` |
-| `DensityVariable(d, Some(i))` | `density(u.d, i)` | `density(u.d, i)` |
+| `DensityVariable(d, None)` | `density(d)` | `density(d)` |
+| `DensityVariable(d, Some(i))` | `density(d, i)` | `density(d, i)` |
 | `Ambient(k)` | `ambient(origin \| pos3 \| origin_scale \| position_scale)` | same |
 | `FunctionCall` | `f(a, …)` | `f(a, …)` |
 | `ExternCall` | `ext name(a, …)` (signature from `Env`) or `ext name::<(T, …) -> R>(a, …)` | always with `::<…>` |
@@ -311,9 +310,7 @@ Operators: `+ - * /`, `== != < <= > >=`, `&& ||` (`And`/`Or`), `& | ^` (`BitAnd`
 `<< >> >>>` (`ShiftLeft`/`ShiftRight`/`LogicalShiftRight`). `!` is the single `Not` operator,
 so logical vs bitwise follows from the type. In operand position, `&&` lexes as two `&`.
 
-**Unqualified `density(d)`**: allowed when the enclosing fn is the main fn of, or listed in
-`helpers` of, exactly one unit, and that unit has input `d`. Otherwise it's an `ElabError` that
-asks for qualification.
+**Reads of unlisted inputs**: `density(d)` names a program input. Whether the running unit lists it is the checker's business (`InputNotListed`), not an `ElabError`, so `reject` files can name it.
 
 **Struct-literal ambiguity**: `ConstructExtern` always starts with `new`, so `if x { … }` never
 reads `x { … }` as a construction.
@@ -348,8 +345,7 @@ These are the only derivations. Anything else that's missing is a syntax error.
 2. **Field type and base type**: `e.x` without `; B` takes `base_type = type_of(e)`. Without
    `::<…>` the field type is derived from the base type: `vec3.{x,y,z}` → `f64`,
    `pos3.{x,y,z}` → `i32`, and `extern R` → the field's type from `Env::extern_type`.
-3. **Density-input var**: §5.3.
-4. **Defaults**: `source_hash = 0`. Omitted lists are empty.
+3. **Defaults**: `source_hash = 0`. Omitted lists are empty.
 
 `type_of(e)` is defined over the IR expression being built:
 
@@ -449,8 +445,8 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
   Without a registry entry (under `NoEnv`, say) it keeps the written order and each field is
   typed by how it's written. Canonical text spells every kind unambiguously (`1`, `1b`, `1L`,
   `1.0`, `1.0f`), so P3 holds without the registry.
-  `nan` is a valid expected value, and the comparison rule makes any NaN match it. `perm_table`,
-  `interpolated_noise_sampler` and `density` have no literal values, so binding them is an error.
+  `nan` is a valid expected value, and the comparison rule makes any NaN match it. `perm_table` and
+  `interpolated_noise_sampler` have no literal values, so binding them is an error.
 
 ### 9.2 `TestFile`
 
@@ -492,12 +488,11 @@ use the canonical expression spellings. Floats use §10.2.
   per line with a trailing comma. No `let` in canonical output.
 - `@hosts(...)` is printed when non-empty. `@hash(0x…)` is always printed (lowercase hex, no
   padding). Unit lists are printed when non-empty, in the order `main`, `helpers`, `tables`,
-  `hosts`, `consts`, then `input`s. `@var(f.v)` is always printed.
+  `hosts`, `consts`, then `inputs`. `input` items are printed after the functions and before the units.
 - Every binary op, cast and unary op is parenthesized as in §6.1, including the outermost
   expression of a statement. The `if` / `while` condition is printed as a plain expression, so it
   carries its own parens when it's a binary op.
-- `ext` always carries `::<(T, …) -> R>`, fields always carry `::<T>`, and density reads are
-  always qualified. A field writes `; B` only when `type_of(base)` (§6.3, replayed on the IR by
+- `ext` always carries `::<(T, …) -> R>`, fields always carry `::<T>`. A field writes `; B` only when `type_of(base)` (§6.3, replayed on the IR by
   `printer/derive.rs`) isn't its `base_type`.
 - Labels are quoted when they aren't identifiers or when they're keywords.
 
@@ -513,9 +508,7 @@ use the canonical expression spellings. Floats use §10.2.
 ### 10.3 Totality
 
 The precondition is that every `Ref` resolves: arena refs into their program arenas,
-`DensityVariable` refs into **some** unit's `density_inputs` (found by tag, so reads from shared
-helpers work), and `DensityInput.var` into **some** fn's `variables` (found with
-`Arena::contains`). Anything else panics with a message that names the dangling entity. Every
+`DensityVariable` and unit `density_inputs` refs into the program's `density_inputs`. Anything else panics with a message that names the dangling entity. Every
 other IR shape prints, including `HostInput::Dynamic` (`host %N dynamic;`), unregistered externs,
 type-inconsistent expressions, `base_type`s that disagree with the base,
 `ConstructExtern` with a non-extern type and repeated `parameters`, and the output loads again.
@@ -534,7 +527,7 @@ doesn't load.
 - `parse` never panics on any input, including unterminated strings, stray bytes in quoted
   identifiers, and deep nesting.
 - `SourceMap` holds spans for:
-  - entities: fn, unit, const, host, table, entry index, `(fn, var)`, `(unit, input)`;
+  - entities: fn, unit, const, host, table, entry index, `(fn, var)`, `input`;
   - statements: `(fn, StmtPath)`, where `StmtPath` is a list of steps `Index(i)`, `Then`, `Else`
     and `Body`, which index into the IR statement lists. A declaration-only `let` produces no
     statement, and `else if` is `Else, Index(0)`;
@@ -554,18 +547,18 @@ doesn't load.
 | P4 | Lenient and canonical agree: `load(src) ≅ load(print(load(src)))` | L1, corpus and generated imports |
 | P5 | `parse` never panics: random bytes, random token streams, and mutated corpus files (proptest) | L0 |
 | P6 | Float literals: every edge value (±0, min subnormal, max, ±inf, NaN payloads with and without the sign bit, `0.1f` vs `0.1`) plus a random bit-pattern sample print and re-parse bit-identically, for f32 and f64 | L0 |
-| P7 | **Slot-order insignificance** (metamorphic): `permute(m, seed)` shuffles every arena's slot order (vars, fns, consts, hosts, tables, units, density inputs) and rewrites refs. Interpreter and backend results are equal to the unpermuted program's. | testsuite, next to L5 |
+| P7 | **Slot-order insignificance** (metamorphic): `permute(m, seed)` shuffles every arena's slot order (vars, fns, consts, hosts, tables, units, program inputs) and rewrites refs. Interpreter and backend results are equal to the unpermuted program's. | testsuite, next to L5 |
 
 L0 unit tests also cover the glued-minus cases (§4.1), hex suffix rules, out-of-range literals,
-each mixing-restriction error, unqualified `density` ambiguity, label quoting and `#N` / `##N`
-generation for duplicate and weird names, `@var` defaulting and its collision error, `use` closure
+each mixing-restriction error, label quoting and `#N` / `##N`
+generation for duplicate and weird names, `use` closure
 and cycles, and every envelope validation error.
 
 ## 13. Changes outside this crate
 
 1. **TESTING.md §3 / §8**: `parse(&str) -> TestFile` becomes `load(src, file, env)`. The §8.2
    example is updated to this syntax (`;`, `const c = …` without a type, units with `main` and no
-   return type, `ext`, qualified `density`, `entry l = u`). §8 points here.
+   return type, `ext`, `input` items and `density(d)`, `entry l = u`). §8 points here.
 2. **tungsten-ir**: `permute(&mut OptimizedProgram, seed)` next to `compact` / structural
    equality (it reuses the `retag.rs` walker), for P7.
 3. **tungsten-checker**: lowering keeps each core node's `(fn, StmtPath, ExprPath)` origin (or
@@ -578,9 +571,6 @@ and cycles, and every envelope validation error.
 - **Explicit helper lists vs prelude**: using `sin` means listing its whole library closure in
   `helpers`. The checker error names what's missing. If this gets tedious, a list form like
   `helpers [..use]` can be added later without changing the IR mapping.
-- **Density-input var type**: the lenient default declares it as `density`, which is what legacy
-  conversion produces and what the Rust backend skips. Real programs that use another type still
-  print and parse through the explicit `@var` form.
 - **`Constant` has no type**: const types are derived, never declared. If a future IR change adds
   a type to `Constant`, the syntax becomes `const c: T = …` and the printer always emits it.
 

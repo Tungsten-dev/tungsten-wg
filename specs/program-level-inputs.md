@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1–5 implemented; milestone 6 (documentation) not implemented. Milestone 5 lands first among the
+Status: design agreed. Milestones 1–6 implemented. The other v0.3 specs' documentation is still to come. Milestone 5 lands first among the
 remaining v0.3 work, in this order: this spec's milestone 5, `specs/compiler.md`, `specs/auto-consts.md`,
 `specs/workers.md`, `specs/density-mappings.md`, `specs/refinement.md`, then the documentation of all of them. v0.3 is
 released as one piece, so no intermediate state needs compatibility or workarounds.
@@ -440,6 +440,11 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
   `ambient(pos3).x::<f64>`. `tungsten-rust/src/model/tests/examples.rs` is not compiled (no `mod` declares it) and
   still names the old paths, so it was left alone. `scripts/verify.sh` was not run, since nothing in
   `tungsten-core` changed. Milestone 6 is deferred by request.
+- **Milestone 6.** Updated `SEMANTICS.md` §9, `CHECK.md` (wf table, §6(e), error tables), `tungsten-core/README.md`,
+  `tungsten-check/README.md`, `tungsten-parse/SPEC.md` (§1, §3, §4, §5, §6, §10, §13, §14), `TESTING.md` §5 and §8,
+  `docs/redesign.md` (layout, rules, decisions), the root `README.md` and `PAPER.md`'s state section. Only this
+  spec's changes are covered; the other v0.3 specs document theirs when they land. Left alone: the historical
+  Ambient notes in `TESTING.md` §4 and the dated log entries in `PAPER.md`. No code changed, so no tests were run.
 
 ## 10. Open and deferred
 

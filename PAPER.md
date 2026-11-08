@@ -10,11 +10,11 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
 
 - `TESTING.md` is a partly implemented spec. `tungsten-parse` (parser, elaborator, canonical
   printer, `.tw` test-file envelope) is implemented, and its tests pass (round-trip, floats, depth,
-  fuzz, permute, legacy). `tungsten-testsuite` (harness, corpus, test runtimes) exists: milestones 1
-  and 2 are done, so the Rust backend is compared bit for bit against the interpreter (original and
-  inlined). Java, CUDA and the random generator are not built yet.
-- `Expression::Ambient` is implemented in the Rust, Java and CUDA backends, and legacy conversion
-  emits it instead of the four `Named` variables. `derive_binop_type` has not been changed to the
+  fuzz, permute). `tungsten-testsuite` (harness, corpus, test runtimes) exists: milestones 1, 2, 3
+  and 5 are done, so the Rust, Java and CUDA backends are compared bit for bit against the interpreter
+  (original and inlined). The random generator is not built yet.
+- `Expression::Ambient` is implemented in the Rust, Java and CUDA backends, and the old legacy conversion
+  emitted it instead of the four `Named` variables (`tungsten-legacy` is deleted in v0.3). `derive_binop_type` has not been changed to the
   §5.3 typing.
 - `tungsten-core` has a checker and an interpreter. There are **no functional proofs yet**.
   `scripts/verify.sh` proves bounds, absence of overflow and termination only. The spec/refinement
@@ -108,7 +108,7 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
   `position_scale` by matching the name, while the checker and interpreter treat it as an ordinary
   uninitialized local. A legacy program reading them could not pass the flow check. Fixed by
   lowering to `Ambient` and removing the name binding. Evidence: `default_variables_are_ambients`
-  in `crates/tungsten-check/src/tests/legacy.rs`.
+  in `crates/tungsten-check/src/tests/legacy.rs` (deleted with the legacy crate).
 - 2026-11-01 [bug] `aquifer_random` in `tungsten-mc-compile` creates `origin` as `Pos3` (it is a
   `Vec3`) and only worked because undeclared variables resolved by name. Conversion now resolves it
   to the ambient, types the field from the ambient and records a warning, but `convert` discards

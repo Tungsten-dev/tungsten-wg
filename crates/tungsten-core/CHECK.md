@@ -119,11 +119,6 @@ with `check_wf`. If you change one of the three, change all of them.
 | Every type is wf: `Record(r)` needs record `r` to exist, recursively through `Array` | `WfBadId { table: Record, … }` |
 | Each function has `params <= locals.len()` | `WfParams` |
 | A record field selector `Record(r, i)`, and each field of a `MakeRecord`, names an existing field of `r` | `WfField` |
-| Input ownership agrees in both directions: input `i` names unit `u` as its owner **if and only if** unit `u` lists input `i` | `WfInputLink` |
-
-*Why the input link rule?* There are two descriptions of "who owns this input": the input's
-`owner` field and the unit's `inputs` list. Both are used (the scoping rules use the owner, the
-interpreter uses the list), so they must say the same thing.
 
 ### What wf deliberately doesn't check
 
@@ -383,16 +378,14 @@ unit mu { main m; consts [k2]; }      // error: const `k` isn't in the consts of
 **Why transitive:** the backend computes the unit's constants from the list. To compute `k2` it
 needs `k`, so `k` must be there too.
 
-### (e) Density inputs are read only by their owner, through unshared functions
+### (e) Density inputs are read only by units that list them
 
-**Rule:** every input `f` reads is owned by `U` (`InputNotOwned { unit, input }`), and `f` is in
-no other unit's `F(U')` (`InputReaderShared { func, units }`).
+**Rule:** every input `f` reads is in the `inputs` of `U` (`InputNotListed { unit, input }`).
 
-**Why:** a density input is a buffer that belongs to one unit's evaluation. If a helper that
-reads input `i` were shared between units `A` and `B`, then when it runs as part of `B` there is
-no buffer `i` to read. Earlier designs resolved input numbers relative to the running unit, which
-silently made such a read pick some *other* input. With one global input numbering and this rule,
-that can't happen.
+**Why:** a density input is a buffer built before the unit's cells run, and only the inputs a
+unit lists are built for it. Inputs are global, so a helper shared between units can read an
+input as long as each of those units lists it. A helper whose units don't all list the input is
+reported for each unit that doesn't, so a read can't find a missing buffer.
 
 ### Details
 
@@ -400,7 +393,7 @@ that can't happen.
   is in its own `hosts`" applies to it.
 - Listing **more** than is used is never an error.
 - Each violation is reported **once per (unit, offending id)**, at its first occurrence in walk
-  order. `InputReaderShared` is reported once per function, at its first density read.
+  order.
 - A function listed by several units is checked against each of them.
 
 ---
@@ -504,7 +497,6 @@ Messages are as `tungsten-check` renders them; names come from its `LowerMap`.
 | `WfBadId { table, id }` | An id that points past the end of its table |
 | `WfParams { params, locals }` | A function with more parameters than locals |
 | `WfField { record, field }` | A field index the record doesn't have |
-| `WfInputLink { input, unit }` | Input and unit disagree about who owns the input |
 
 ### Types
 
@@ -542,8 +534,7 @@ Messages are as `tungsten-check` renders them; names come from its `LowerMap`.
 | `HostNotInUnit { unit, host }` | ``host `h2` isn't in the hosts of unit `top_main` `` |
 | `TableNotListed { unit, table }` | ``table `m` isn't in the tables of unit `top_main` `` |
 | `ConstNotListed { unit, konst }` | ``const `k` isn't in the consts of unit `top_main` `` |
-| `InputNotOwned { unit, input }` | ``input `d` belongs to unit `a_main`, not to unit `b_main` `` |
-| `InputReaderShared { func, units }` | `` `g` reads a density input, so only one unit may list it, but `a_main`, `b_main` do `` |
+| `InputNotListed { unit, input }` | ``input `d` isn't in the inputs of unit `a_main` `` |
 
 ### Grids and cycles
 

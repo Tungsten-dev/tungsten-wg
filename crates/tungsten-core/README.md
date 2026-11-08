@@ -120,7 +120,7 @@ If you know `tungsten-ir`, these are the differences that will trip you up:
 | `ConstExpr` (a separate type) | the ordinary `Expr` | One expression type to reason about |
 | `UnaryOperator::Ref(_)` | gone | It's the identity |
 | `Function.parameters` (a list of var refs) | `Function.params: usize` | Parameters are simply `locals[0..params]` |
-| A unit's own `density_inputs` arena | a global `inputs` table, each with an `owner` unit | One id space for all inputs |
+| A unit's own `density_inputs` arena | a global `inputs` table that units list | One id space for all inputs |
 | `VariableType::Extern("Name")` | `Type::Record(RecordId)` | Resolved against the registry |
 
 ### Things that look redundant but are on purpose
@@ -169,7 +169,7 @@ The functions are `spec fn`s. They exist only for Verus and are erased in a norm
 you can't call them from regular Rust. Read them as precise documentation:
 
 - `wf_program(p)` is the top. It says every unit, function, constant, host, input, entry,
-  extern and record is well-formed, plus `wf_input_links`.
+  extern and record is well-formed.
 - `wf_function(f)`: `params <= locals.len()`, all types wf, the body wf with
   `nlocals = locals.len()`.
 - `wf_expr(p, nlocals, e)`: a big `match`, one arm per `Expr` variant, checking ids against
@@ -177,8 +177,6 @@ you can't call them from regular Rust. Read them as precise documentation:
   Constants are checked with `nlocals = 0`, so any `Local` in a constant fails.
 - `wf_type`: `Record(r)` needs `r < records.len()`, recursively through `Array`.
 - `wf_sel`: `FieldSel::Record(r, i)` needs record `r` to have a field `i`.
-- `wf_input_links`: input `i` says its owner is unit `u` **if and only if** unit `u` lists
-  input `i`.
 
 What `wf` deliberately does **not** check, because these are checker rules: anything
 type-related, exactly-once record fields, scoping lists, acyclicity of calls and constants,
@@ -280,7 +278,7 @@ Each line gives the choice and the alternative that was rejected, so it doesn't 
 | Normalization | Aggressive: resolved `FieldSel`, `MakeVec3`/`MakePos3`/`MakeRecord`, `ConstExpr` folded into `Expr`, `Ref` dropped, params are locals `0..k`. | A 1:1 mirror of tungsten-ir: more cases in every later proof. |
 | Annotations | Kept (`ExternCall` params/ret, `Field.ty`, construct record ids); the checker verifies them. | Lowering checks and drops them: more trusted code. |
 | Scoping | Units and functions keep their scoping lists with global ids; the checker enforces them. | Flattening: scoping bugs would only show up as backend failures. |
-| Density inputs | One global `InputId` space with `owner: UnitId`. A function reading an input owned by `U` may only be listed in `U`. | A per-unit index resolved against the evaluating unit: silently reinterprets cross-unit reads. |
+| Density inputs | One global `InputId` space. A function reading an input may only run in units that list it (`InputNotListed`), so shared helpers can read shared inputs. | A per-unit index resolved against the evaluating unit: silently reinterprets cross-unit reads. |
 | Declaration tables | `externs`/`records` live in `Program`, so the checker needs only `&Program`. | A separate registry argument to the checker. |
 | Names | Only in plain-Rust side tables (`Registry`, `LowerMap`). | Names inside core types: Verus would see `String`. |
 | Derives | Derived `Clone`/`Debug`/`Eq`/… inside `verus!{}`, except a hand-written `Clone` for the recursive types (Verus rejects the derive as a possible cycle). | — |

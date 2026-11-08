@@ -12,20 +12,18 @@ tungsten-wg (facade, repo root)
 ├── tungsten-inspect┘            │
 ├── tungsten-optimizer ──────────┴──────────► tungsten-ir
 ├── tungsten-builder ─────────────────────────► tungsten-ir
-├── tungsten-legacy ──► tungsten-ir, tungsten-codegen
 └── tungsten-codegen   (no tungsten deps)
 ```
 
 | Crate | Responsibility |
 | --- | --- |
 | `tungsten-ir` | The `OptimizedProgram` model (compute units, functions, statements, arenas). Leaf crate. |
-| `tungsten-builder` | Builds `OptimizedProgram`s from Rust for frontends: `ProgramBuilder`, `FnBuilder`, typed `Expr` with collected errors, derived unit lists, `body!`/`build!`, `extern_fns!`/`record_decls!`. The replacement for the legacy builder. |
+| `tungsten-builder` | Builds `OptimizedProgram`s from Rust for frontends: `ProgramBuilder`, `FnBuilder`, typed `Expr` with collected errors, derived unit lists, `body!`/`build!`, `extern_fns!`/`record_decls!`. The replacement for the removed legacy builder. |
 | `tungsten-optimizer` | Passes over the IR. Currently inlining (`perform_inline` returns `InlineStats`); `fuse` is a stub and not exported. |
 | `tungsten-interface` | The backend-agnostic contract: `Interface` (names and wave schedule), `NamingRules`, `DeviceCodegen`, `OrchestrationCodegen`, `Backend`. |
 | `tungsten-codegen` | Language-agnostic building blocks (`Printer`, `Interned`). Leaf crate. |
 | `tungsten-rust`, `tungsten-cuda`, `tungsten-java` | One backend per target language. |
 | `tungsten-inspect` | A backend that renders the program and schedule for debugging (IR text, DOT/SVG graphs, diffs) instead of generating code. |
-| `tungsten-legacy` | The old SPMT model and builder, plus `conversion` that lowers it to the IR. Isolated so it can be deleted. |
 | `tungsten-wg` | The facade: re-exports the crates, gates backends behind features (`rust` is the default; `cuda`, `java`, `inspect` are opt-in), and provides `compile`. |
 
 ## Rules
@@ -34,7 +32,6 @@ tungsten-wg (facade, repo root)
 - Backends depend on `ir`, `interface` and `codegen`. They never depend on `optimizer`: optimization is the caller's decision.
 - Only the facade depends on everything.
 - `tungsten-builder` depends only on `ir`, and only the facade depends on the builder. Backends and passes never see it.
-- Nothing outside `tungsten-legacy` may depend on it. The new pipeline must keep building when it is removed.
 - Known exception: `tungsten-cuda` and `tungsten-java` depend on `tungsten-rust` for shared helpers (type derivation, constant dependencies, auto-const specs). Moving those into a neutral crate would remove the exception.
 
 ## Using it
@@ -62,7 +59,8 @@ let out: &RustOutput = rust.output().unwrap();
 | Naming | Names and wave order live in `Interface`, built from `NamingRules` supplied by each backend. | Letting each backend invent names: cross-target comparison (e.g. Rust vs CUDA validation) becomes impossible. |
 | Optimization | Explicit, before `compile`. Backends never run passes. | Backends running their own passes: hidden behavior. Note that inlining is slower on CPU, so a `recommended_passes()` hint on `Backend` is the cheap way to express per-target policy if it is needed. |
 | Facade | Root stays the `tungsten-wg` package (not a virtual workspace). | A virtual workspace: it would break the published name, the `tungsten_wg` lib name and `tungsten-mc-compile`'s dependency. |
-| Legacy SPMT | Lives in its own crate and lowers to the IR through `conversion`. The facade re-exports it as `tungsten_wg::spmt`. | Keeping it in the facade or in the IR crate: the IR would be coupled to a model that is being phased out. Delete the crate once `tungsten-mc-compile` builds the IR directly. |
+| Legacy SPMT | Lived in its own crate and lowered to the IR through `conversion`. The crate and the `tungsten_wg::spmt` re-export were deleted in v0.3 (`specs/program-level-inputs.md` §6.8). `tungsten-mc-compile` stays pinned to v0.2 until it is ported to `tungsten-builder`. | Keeping it in the facade or in the IR crate: the IR would be coupled to a model that is being phased out. |
+| Density inputs | One `density_inputs` arena on `OptimizedProgram`. A unit lists the inputs it reads, like hosts, tables and consts, so units and shared helpers can share an input. Core has no `owner`, and the checker reports `InputNotListed`. Equal inputs are not merged by the IR. | An arena per unit: no sharing, nested arenas and placeholder variables, and IR inputs wouldn't map 1:1 to core's `inputs`. |
 | Legacy pipeline | The old wave orchestration and `transform_*` codegen were not migrated. `Interface::waves()` replaced wave orchestration. | Porting them: they consumed the legacy SPMT/wave DAG. The old `compile(&SPMT, &CompilerConfig)` API is removed. |
 | Program construction | `tungsten-builder`: an owned `FnBuilder` per function plus `&mut ProgramBuilder`, typed `Expr` with poison-and-collect errors, lists always derived, equal inputs merged. See `specs/builder.md` §11. | `Rc<RefCell>` builders (borrow panics, `!Send`), panicking on type errors (one error per run), hand-written lists (transitive helpers become frontend bookkeeping). |
 | Errors | One `thiserror` enum per crate (`BackendError`, ...); the facade's `CompileError` wraps them. User-reachable paths return errors instead of `unwrap`/`panic!`. | |
