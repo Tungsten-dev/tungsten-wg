@@ -15,5 +15,4 @@ tungsten-ir.workspace = true
 [dev-dependencies]
 bumpalo.workspace = true
 proptest.workspace = true
-tungsten-legacy.workspace = true
 tungsten-optimizer.workspace = true

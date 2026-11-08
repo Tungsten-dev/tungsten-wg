@@ -91,8 +91,6 @@ pub enum LowerErrorKind {
     FieldOnNonStruct { base: String },
     #[error("dynamic host inputs are not supported")]
     DynamicHost,
-    #[error("`density` can't be used as a value type")]
-    DensityInputType,
     #[error("can't construct `{t}`")]
     BadConstruct { t: String },
     #[error("construct expects {expected} arguments, found {found}")]

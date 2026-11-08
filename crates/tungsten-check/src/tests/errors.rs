@@ -72,22 +72,6 @@ fn dynamic_host() {
 }
 
 #[test]
-fn density_input_type() {
-    assert_eq!(
-        reg_errs("fn bad(x: density) -> f64 { return 1.0; }", "return p;"),
-        ["fn `bad` › param 0: `density` can't be used as a value type"]
-    );
-    assert_eq!(
-        reg_errs("", "return (p as [density; 2]);"),
-        ["fn `top` › stmt 0 › value › type: `density` can't be used as a value type"]
-    );
-    assert_eq!(
-        reg_errs("host hd: density;", "return p;"),
-        ["host `hd`: `density` can't be used as a value type"]
-    );
-}
-
-#[test]
 fn bad_construct() {
     assert_eq!(
         reg_errs("", "return new f64(1.0);"),
@@ -133,7 +117,7 @@ fn hand_built() {
         &[
             ("a", VariableType::F64),
             ("gone", VariableType::F64),
-            ("d", VariableType::DensityInput),
+            ("d", VariableType::F64),
         ],
         &[0],
         VariableType::F64,
@@ -178,8 +162,6 @@ fn hand_built() {
         errs(&p, &registry()),
         [
             "fn `f` › param 1: parameter not in the function's variables",
-            // No placeholder vars any more: a `density` local is rejected where it's declared.
-            "fn `f` › local 1: `density` can't be used as a value type",
             "fn `f` › stmt 0: dangling reference to a variable",
             "fn `f` › stmt 0 › value: dangling reference to a variable",
             "fn `f` › stmt 2 › value: dangling reference to a density input",

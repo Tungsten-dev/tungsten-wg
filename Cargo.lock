@@ -863,7 +863,6 @@ dependencies = [
  "thiserror",
  "tungsten-core",
  "tungsten-ir",
- "tungsten-legacy",
  "tungsten-parse",
 ]
 
@@ -882,11 +881,10 @@ dependencies = [
 name = "tungsten-cuda"
 version = "0.2.0"
 dependencies = [
- "bumpalo",
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
- "tungsten-legacy",
+ "tungsten-parse",
  "tungsten-rust",
 ]
 
@@ -894,13 +892,12 @@ dependencies = [
 name = "tungsten-inspect"
 version = "0.2.0"
 dependencies = [
- "bumpalo",
  "serde",
  "serde_json",
  "tungsten-interface",
  "tungsten-ir",
- "tungsten-legacy",
  "tungsten-optimizer",
+ "tungsten-parse",
 ]
 
 [[package]]
@@ -919,20 +916,10 @@ version = "0.2.0"
 name = "tungsten-java"
 version = "0.2.0"
 dependencies = [
- "bumpalo",
  "tungsten-interface",
  "tungsten-ir",
- "tungsten-legacy",
+ "tungsten-parse",
  "tungsten-rust",
-]
-
-[[package]]
-name = "tungsten-legacy"
-version = "0.2.0"
-dependencies = [
- "bumpalo",
- "tungsten-codegen",
- "tungsten-ir",
 ]
 
 [[package]]
@@ -952,7 +939,6 @@ dependencies = [
  "proptest",
  "stacker",
  "tungsten-ir",
- "tungsten-legacy",
  "tungsten-optimizer",
 ]
 
@@ -965,7 +951,7 @@ dependencies = [
  "tungsten-codegen",
  "tungsten-interface",
  "tungsten-ir",
- "tungsten-legacy",
+ "tungsten-parse",
 ]
 
 [[package]]
@@ -1002,7 +988,6 @@ dependencies = [
  "tungsten-interface",
  "tungsten-ir",
  "tungsten-java",
- "tungsten-legacy",
  "tungsten-optimizer",
  "tungsten-parse",
  "tungsten-rust",

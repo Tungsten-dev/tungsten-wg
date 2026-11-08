@@ -51,7 +51,7 @@ fn function_qualifiers(config: &CudaConfig) -> String {
 fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<cuda::Statement> {
     let mut out = Vec::new();
     for (r, var) in func.variables.iter() {
-        if func.parameters.contains(&r) || matches!(var.t, VariableType::DensityInput) {
+        if func.parameters.contains(&r) {
             continue;
         }
         let name = conv.declare_var(r);

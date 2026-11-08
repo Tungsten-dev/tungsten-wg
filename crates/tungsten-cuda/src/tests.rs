@@ -1,152 +1,117 @@
-//! Smoke tests: small hand-built programs exercising the CUDA-specific lowerings.
+//! Smoke tests: small programs, as `.tw` text, exercising the CUDA-specific lowerings.
 //! Set `TUNGSTEN_CUDA_OUT=<dir>` to also write the generated files there, e.g. to run nvcc on them.
 
-use bumpalo::Bump;
-
 use tungsten_interface::{Backend, Interface};
-use tungsten_legacy::builder::{Builder, SPMTBuilder, floor, sin};
-use tungsten_legacy::conversion::convert;
-use tungsten_legacy::model::*;
+use tungsten_parse::{FileId, NoEnv, load};
 
 use crate::backend::{CudaBackend, CudaConfig, CudaOutput};
 
-fn var<'m>(v: Var<'m>) -> Expression<'m> {
-    Expression::Variable(v)
-}
+const SMALL: &str = r#"
+program {
+    host sea_level: i32;
+    table temperature = perlin("minecraft:temperature", none, 0);
+    const base = 0.25;
+    const scale = (const(base) * 2.0);
+    const points = [-1.0, 0.0, nan];
 
-fn build_program<'m>(arena: &'m Bump) -> SPMT<'m> {
     // Helper `int` (a C++ keyword) with a parameter and a loop with a break.
-    let mut h = Builder::new(arena).named("int").returns(VariableType::F64);
-    let t = h.param("t", VariableType::F64);
-    let acc = h.local("acc", VariableType::F64);
-    h.set_body(vec![
-        Statement::Assign { target: acc, value: 0.0f64.into() },
-        Statement::Repeat {
-            count: 3,
-            body: vec![
-                Statement::Assign { target: acc, value: acc + t },
-                Statement::If { condition: acc.gt(10.0f64), then_branch: vec![Statement::Break], else_branch: vec![] },
-            ],
-        },
-        Statement::Return(var(acc)),
-    ]);
-    let helper = h.finish_function();
+    fn `int`(t: f64) -> f64 {
+        vars { acc: f64 }
+        acc = 0.0;
+        repeat 3 {
+            acc = (acc + t);
+            if (acc > 10.0) {
+                break;
+            }
+        }
+        return acc;
+    }
 
     // A 1x1x1 unit reading a host input: wrapping arithmetic, masked shifts.
-    let mut s = Builder::new(arena).named("minecraft:scalar").returns(VariableType::I32);
-    let sea = s.alloc_var(Name::Named("sea_level".into()), VariableType::I32);
-    let flag = s.local("flag", VariableType::Bool);
-    let k = s.local("k", VariableType::I32);
-    s.set_body(vec![
-        Statement::Assign { target: flag, value: var(sea).gt(62i32) },
+    fn `minecraft:scalar`() -> i32 @hosts(sea_level) {
+        vars { flag: bool, k: i32 }
+        flag = (host(sea_level) > 62);
         // literal shift count folded: 33 & 31 == 1
-        Statement::Assign { target: k, value: var(sea).shl(33i32) },
+        k = (host(sea_level) << 33);
         // i32 + bool, `!` on an integer, logical shift by a variable.
-        Statement::Return(((var(sea) + var(flag)).bitxor(!var(sea))).ushr(var(k))),
-    ]);
-    let mut scalar = s.build_compute_unit();
-    scalar.host_inputs = vec![HostInput::Static(sea)];
-    let scalar: DensityFunctionRef = Interned::new(arena.alloc(scalar));
+        return (((host(sea_level) + flag) ^ !host(sea_level)) >>> k);
+    }
 
     // A 4x4x4 noise unit: constants (one depending on another), permutation table, an ambient read.
-    let n = Builder::new(arena).named("minecraft:noise").returns(VariableType::F64);
-    let base = n.constant("base", VariableType::F64, 0.25f64);
-    let scale = n.constant("scale", VariableType::F64, Expression::Variable(base) * 2.0f64);
-    let points = n.constant(
-        "points",
-        VariableType::Array(Box::new(VariableType::F64), 3),
-        Expression::ArrayLiteral(vec![(-1.0f64).into(), 0.0f64.into(), f64::NAN.into()]),
-    );
-    let pos3 = n.alloc_var(Name::Named("pos3".into()), VariableType::Pos3);
-    let v = n.local("v", VariableType::F64);
-    let bits = n.local("bits", VariableType::I64);
-    let mut n = n;
-    let x = Expression::Field {
-        base: Box::new(var(pos3)),
-        field: "x".into(),
-        type_of_field: VariableType::F64,
-        known_idnex: Some(0),
-    };
-    let perm = Expression::PermutationTable(PermutationTableInput::PerlinNoise {
-        ident: "minecraft:temperature".into(),
-        subident: None,
-        subident_index: 0,
-    });
-    let sample = Expression::ExternCall {
-        function_name: "sample".into(),
-        parameters: vec![perm, x.clone()],
-        parameter_types: vec![VariableType::PermutationTable, VariableType::F64],
-        return_type: VariableType::F64,
-    };
-    n.set_body(vec![
-        Statement::Assign { target: v, value: floor(x * var(scale)) + sin(sample) },
-        Statement::Assign {
-            target: bits,
-            value: Expression::ExplicitCast { to: VariableType::I64, expr: Box::new(var(v)) } * (-5i64),
-        },
+    fn `minecraft:noise`() -> f64 {
+        vars { v: f64, bits: i64 }
+        v = (ext floor::<(f64) -> f64>(ambient(pos3).x::<f64> * const(scale))
+            + ext sin::<(f64) -> f64>(ext sample::<(perm_table, f64) -> f64>(table(temperature), ambient(pos3).x::<f64>)));
+        bits = ((v as i64) * -5L);
         // `&mut v` on a local and `&(v * 2.0)` on a temporary.
-        Statement::Assign {
-            target: bits,
-            value: Expression::ExternCall {
-                function_name: "nudge".into(),
-                parameters: vec![
-                    v.as_mut_ref(),
-                    Expression::UnaryOp {
-                        op: UnaryOperator::Ref,
-                        operand: Box::new(var(v) * 2.0f64),
-                    },
-                ],
-                parameter_types: vec![VariableType::F64, VariableType::F64],
-                return_type: VariableType::I64,
-            },
-        },
-        Statement::Return(
-            var(v) + Expression::ArrayAccess { array: Box::new(var(points)), index: Box::new(var(bits)) },
-        ),
-    ]);
-    let noise = n.finish_compute_unit();
+        bits = ext nudge::<(f64, f64) -> i64>(&mut v, &(v * 2.0));
+        return (v + const(points)[bits]);
+    }
 
     // The 4x4x4 entry: reads both units, calls the helper, compares vectors.
-    let f = Builder::new(arena).named("minecraft:final").returns(VariableType::F64);
-    let noise_in = f.density(noise, (1.0, 1.0, 1.0), (0.25, 0.25, 0.25), (4, 4, 4));
-    let scalar_in = f.density(scalar, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (1, 1, 1));
-    let origin = f.alloc_var(Name::Named("origin".into()), VariableType::Vec3);
-    let same = f.local("same", VariableType::Bool);
-    let mut f = f;
-    f.set_body(vec![
-        Statement::Assign {
-            target: same,
-            value: var(origin).eq_expr(Expression::Construct {
-                t: VariableType::Vec3,
-                args: vec![0.0f64.into(), 0i32.into(), 0.0f64.into()],
-            }),
-        },
-        Statement::If {
-            condition: var(same),
-            then_branch: vec![Statement::Return(noise_in.at(0i32))],
-            else_branch: vec![],
-        },
-        Statement::Return(
-            helper.call([noise_in.get()])
-                + Expression::ExplicitCast { to: VariableType::F64, expr: Box::new(scalar_in.get()) },
-        ),
-    ]);
-    let entry = f.finish_compute_unit();
-
-    SPMT {
-        density_functions: vec![scalar, noise, entry],
-        functions: vec![helper],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: entry,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (0.25, 0.25, 0.25),
-        }],
+    fn `minecraft:final`() -> f64 {
+        vars { same: bool }
+        same = (ambient(origin) == vec3(0.0, 0, 0.0));
+        if same {
+            return density(noise_in, 0);
+        }
+        return (`int`(density(noise_in)) + (density(scalar_in) as f64));
     }
-}
 
-fn generate(program: &SPMT<'_>, config: CudaConfig) -> CudaOutput {
-    let program = convert(program).expect("conversion");
+    unit scalar { main `minecraft:scalar`; hosts [sea_level]; }
+    unit noise { main `minecraft:noise`; consts [base, scale, points]; tables [temperature]; }
+    input noise_in = noise @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
+    input scalar_in = scalar @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    unit final_u {
+        main `minecraft:final`;
+        helpers [`int`];
+        inputs [noise_in, scalar_in];
+    }
+    entry final_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
+}
+"#;
+
+const MINIMAL: &str = r#"
+program {
+    fn `minecraft:const`() -> f64 { return 1.5; }
+    unit constant { main `minecraft:const`; }
+    entry constant @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
+const BYTES: &str = r#"
+program {
+    const `table` = [1b, -2b, 127b];
+    fn `minecraft:bytes`() -> i8 {
+        vars { a: i8, wide: i32, d: f64 }
+        // 127 + 127 wraps
+        a = (const(`table`)[2] + 127b);
+        a = (-a & (a << 1));
+        wide = ((a as i32) & 255);
+        d = 300.5;
+        a = (d as i8);
+        return (a + (wide as i8));
+    }
+    unit bytes { main `minecraft:bytes`; consts [`table`]; }
+    entry bytes @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// A unit reading all four ambients.
+const AMBIENTS: &str = r#"
+program {
+    fn `minecraft:ambients`() -> f64 {
+        return ((ambient(origin).x * ambient(origin_scale).x)
+            + (ambient(pos3).x::<f64> * ambient(position_scale).x));
+    }
+    unit ambients { main `minecraft:ambients`; }
+    entry ambients @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+fn generate(src: &str, config: CudaConfig) -> CudaOutput {
+    let program = load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
     let mut backend = CudaBackend::new(config);
     let interface = Interface::build(&program, backend.naming_rules());
     backend.generate(&program, &interface).unwrap();
@@ -171,8 +136,7 @@ fn assert_contains(file: &str, text: &str, expected: &[&str]) {
 
 #[test]
 fn generates_cuda_for_small_program() {
-    let arena = Bump::new();
-    let output = generate(&build_program(&arena), CudaConfig::default());
+    let output = generate(SMALL, CudaConfig::default());
     write_out(&output, "small");
 
     assert_contains("density.cu", &output.density_source, &[
@@ -260,7 +224,6 @@ fn generates_cuda_for_small_program() {
 
 #[test]
 fn debug_checks_and_config() {
-    let arena = Bump::new();
     let config = CudaConfig {
         namespace: "wg".into(),
         kernel_prefix: Some("wgk_".into()),
@@ -269,7 +232,7 @@ fn debug_checks_and_config() {
         inline_policy: crate::InlinePolicy::Force,
         ..CudaConfig::default()
     };
-    let output = generate(&build_program(&arena), config);
+    let output = generate(SMALL, config);
     write_out(&output, "debug");
     assert_contains("density.cu", &output.density_source, &[
         "#define TUNGSTEN_PROFILE_TOLERANCE 1",
@@ -285,28 +248,13 @@ fn debug_checks_and_config() {
 
 #[test]
 fn program_without_inputs_or_entries() {
-    let arena = Bump::new();
-    let mut u = Builder::new(&arena).named("minecraft:const").returns(VariableType::F64);
-    u.set_body(vec![Statement::Return(1.5f64.into())]);
-    let unit = u.finish_compute_unit();
-    let spmt = SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (2, 1, 1),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
-    };
-    let output = generate(&spmt, CudaConfig::default());
+    let output = generate(MINIMAL, CudaConfig::default());
     write_out(&output, "minimal");
     assert_contains("interface.cuh", &output.interface_header, &["struct AutoConsts {\n};", "struct DeviceHostConsts {\n};"]);
     assert_contains("orchestration.cu", &output.orchestration_source, &["(void)seed;", "(void)host_consts;"]);
     assert!(!output.orchestration_source.contains("cudaEventSynchronize"));
 
-    let empty = SPMT { density_functions: vec![], functions: vec![], main_density_functions: vec![] };
-    let output = generate(&empty, CudaConfig::default());
+    let output = generate("program { }", CudaConfig::default());
     assert_contains("orchestration.h", &output.public_header, &["Status sync();"]);
     assert_contains("interface.cuh", &output.interface_header, &["static constexpr unsigned long long total_bytes = 0;"]);
 }
@@ -317,44 +265,9 @@ fn rejects_invalid_block_size() {
     CudaBackend::new(CudaConfig { block_size: 100, ..CudaConfig::default() });
 }
 
-/// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
-fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
-    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
-    let table = b.constant(
-        "table",
-        VariableType::Array(Box::new(VariableType::I8), 3),
-        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
-    );
-    let a = b.local("a", VariableType::I8);
-    let wide = b.local("wide", VariableType::I32);
-    let d = b.local("d", VariableType::F64);
-    let mut b = b;
-    b.set_body(vec![
-        // 127 + 127 wraps
-        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
-        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
-        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
-        Statement::Assign { target: d, value: 300.5f64.into() },
-        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
-        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
-    ]);
-    let unit = b.finish_compute_unit();
-    SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
-    }
-}
-
 #[test]
 fn bytes() {
-    let arena = Bump::new();
-    let output = generate(&build_byte_program(&arena), CudaConfig::default());
+    let output = generate(BYTES, CudaConfig::default());
     write_out(&output, "bytes");
     assert_contains("density.cu", &output.density_source, &[
         "__device__ constexpr tw::Array<signed char, 3> table = tw::Array<signed char, 3>{{(signed char)1, (signed char)(-2), (signed char)127}};",
@@ -371,39 +284,9 @@ fn bytes() {
     assert_contains("orchestration.h", &output.public_header, &["const signed char* result_minecraft_bytes() const;"]);
 }
 
-/// A unit reading all four default variables, which lower to ambient reads.
-fn build_ambient_program<'m>(arena: &'m Bump) -> SPMT<'m> {
-    let mut b = Builder::new(arena).named("minecraft:ambients").returns(VariableType::F64);
-    let field = |name: &str, t: VariableType, f: &str, field_t: VariableType| Expression::Field {
-        base: Box::new(var(b.alloc_var(Name::Named(name.into()), t))),
-        field: f.into(),
-        type_of_field: field_t,
-        known_idnex: None,
-    };
-    let body = vec![Statement::Return(
-        field("origin", VariableType::Vec3, "x", VariableType::F64)
-            * field("origin_scale", VariableType::Vec3, "x", VariableType::F64)
-            + field("pos3", VariableType::Pos3, "x", VariableType::I32).cast(VariableType::F64)
-                * field("position_scale", VariableType::Vec3, "x", VariableType::F64),
-    )];
-    b.set_body(body);
-    let unit = b.finish_compute_unit();
-    SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
-    }
-}
-
 #[test]
 fn ambients() {
-    let arena = Bump::new();
-    let output = generate(&build_ambient_program(&arena), CudaConfig::default());
+    let output = generate(AMBIENTS, CudaConfig::default());
     assert_contains("density.cu", &output.density_source, &[
         "ctx.config.origin.x",
         "ctx.config.origin_scale.x",

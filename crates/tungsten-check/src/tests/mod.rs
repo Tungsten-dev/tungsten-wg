@@ -8,7 +8,6 @@ mod determinism;
 mod errors;
 mod eval;
 mod ids;
-mod legacy;
 mod map;
 mod memo;
 mod no_panic;

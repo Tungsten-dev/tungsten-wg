@@ -7,7 +7,6 @@ use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
     ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram, PermutationTableInput,
-    VariableType,
 };
 
 use super::{Ctx, get};
@@ -240,10 +239,6 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 self.err(LowerErrorKind::Parameter {
                     problem: ParameterProblem::Duplicate,
                 });
-                continue;
-            }
-            if v.t == VariableType::DensityInput {
-                self.err(LowerErrorKind::DensityInputType);
                 continue;
             }
             let t = self.ty(&v.t);

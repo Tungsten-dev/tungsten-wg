@@ -24,7 +24,6 @@ members = [
     "crates/tungsten-java",
     "crates/tungsten-inspect",
     "crates/tungsten-ir",
-    "crates/tungsten-legacy",
     "crates/tungsten-optimizer",
     "crates/tungsten-parse",
     "crates/tungsten-rust",
@@ -61,7 +60,6 @@ tungsten-optimizer = { path = "crates/tungsten-optimizer" }
 tungsten-rust = { path = "crates/tungsten-rust" }
 tungsten-java = { path = "crates/tungsten-java" }
 tungsten-cuda = { path = "crates/tungsten-cuda" }
-tungsten-legacy = { path = "crates/tungsten-legacy" }
 tungsten-inspect = { path = "crates/tungsten-inspect" }
 tungsten-parse = { path = "crates/tungsten-parse" }
 tungsten-core = { path = "crates/tungsten-core" }
@@ -84,7 +82,6 @@ tungsten-builder.workspace = true
 tungsten-codegen.workspace = true
 tungsten-interface.workspace = true
 tungsten-optimizer.workspace = true
-tungsten-legacy.workspace = true
 tungsten-rust = { workspace = true, optional = true }
 tungsten-java = { workspace = true, optional = true }
 tungsten-inspect = { workspace = true, optional = true }

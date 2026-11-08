@@ -11,7 +11,6 @@ transformation!(DeviceCodegenRCL: OptimizedProgram=O -> RCL=R;
 */
 
 // use std::collections::HashMap;
-// use crate::spmt_optimize::model::Ref;
 // use crate::transform_rcl_new
 
 // pub struct DeviceCodegenRCL {

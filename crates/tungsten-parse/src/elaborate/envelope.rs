@@ -382,8 +382,7 @@ impl<'a> Ctx<'a> {
                 self.record_value(v, name, fields)?
             }
             (
-                VariableType::DensityInput
-                | VariableType::PermutationTable
+                VariableType::PermutationTable
                 | VariableType::InterpolatedNoiseSampler,
                 _,
             ) => {

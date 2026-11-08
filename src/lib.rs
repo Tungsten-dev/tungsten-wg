@@ -7,10 +7,8 @@ pub use tungsten_builder as builder;
 pub use tungsten_codegen as codegen;
 pub use tungsten_interface as interface;
 pub use tungsten_ir as ir;
-pub use tungsten_legacy as spmt;
 pub use tungsten_optimizer as optimizer;
 
-pub use tungsten_legacy::{body, build, extern_fns, pos3, vec3};
 
 #[cfg(feature = "rust")]
 pub use tungsten_rust as rust;
@@ -124,7 +122,7 @@ mod registry_tests {
     use super::*;
     use builder::prelude::*;
 
-    // Paths are explicit: the legacy `extern_fns!` is still re-exported at the facade root.
+    // Paths are explicit, so the macro name stays unambiguous.
     tungsten_builder::extern_fns! {
         group group_a;
         twice(x: F64): F64,

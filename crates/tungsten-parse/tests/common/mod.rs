@@ -165,7 +165,6 @@ pub fn gen_type(rng: &mut Rng, depth: usize, valued: bool) -> VariableType {
         }
         8 => VariableType::F64,
         9 if valued => VariableType::Extern(intern(rng.pick(EXTERNS))),
-        9 => VariableType::DensityInput,
         10 => VariableType::PermutationTable,
         11 => VariableType::InterpolatedNoiseSampler,
         _ => VariableType::Extern(intern(rng.pick(EXTERNS))),

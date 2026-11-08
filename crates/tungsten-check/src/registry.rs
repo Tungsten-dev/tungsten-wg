@@ -72,8 +72,6 @@ pub enum RegistryError {
     /// `context` names the extern or `record.field` whose type mentions it.
     #[error("unknown record `{name}` in the type of `{context}`")]
     UnknownRecord { context: String, name: String },
-    #[error("`density` used as a type in `{context}`")]
-    DensityInputType { context: String },
     /// The records on the cycle, starting and ending with the same name.
     #[error("records contain themselves by value: {}", .0.join(" → "))]
     RecordCycle(Vec<String>),
@@ -172,7 +170,6 @@ impl RegistryBuilder {
 
         let resolve = |t: &VariableType, context: &dyn Fn() -> String| {
             lower_type(t, &mut |n| record_ids.get(n).copied()).map_err(|e| match e {
-                TypeFail::DensityInput => RegistryError::DensityInputType { context: context() },
                 TypeFail::UnknownRecord(name) => RegistryError::UnknownRecord {
                     context: context(),
                     name: name.to_string(),

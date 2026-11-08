@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 /// Handle to an arena-allocated value, compared and hashed by address.
 ///
-/// Mirrors `Interned` in `tungsten-legacy` (the orphan rule keeps the two apart for now).
+/// Interned reference wrapper.
 pub struct Interned<'m, T: ?Sized>(&'m T);
 
 impl<'m, T> Interned<'m, T> {

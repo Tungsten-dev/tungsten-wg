@@ -14,4 +14,4 @@ bumpalo.workspace = true
 md5.workspace = true
 
 [dev-dependencies]
-tungsten-legacy.workspace = true
+tungsten-parse.workspace = true

@@ -1086,7 +1086,6 @@ fn input_names() {
             Name::Named("l".into())
         ]
     );
-    assert!(root.variables.values().all(|v| v.t != VariableType::DensityInput));
     // input labels follow the host rule
     let names: Vec<_> = t.program.density_inputs.values().map(|d| d.name.clone()).collect();
     assert_eq!(
@@ -1121,12 +1120,21 @@ fn input_names() {
     fails(
         &format!(
             "program {{
-                fn leaf() -> f64 {{ vars {{ v: density }} return 1.0; }}
+                fn leaf() -> f64 {{ return 1.0; }}
                 input d = leaf_u {GRID} @var(leaf.v);
                 unit leaf_u {{ main leaf; }}
             }}"
         ),
         "unknown attribute `@var`",
+    );
+    // `density` is not a type
+    fails(
+        "program { fn f(x: density) -> f64 { return 1.0; } }",
+        "expected a type, found `density`",
+    );
+    fails(
+        "program { fn f() -> f64 { vars { v: density } return 1.0; } }",
+        "expected a type, found `density`",
     );
 }
 

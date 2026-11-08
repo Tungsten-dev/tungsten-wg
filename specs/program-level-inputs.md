@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1–4 implemented; milestones 5–6 not implemented. Milestone 5 lands first among the
+Status: design agreed. Milestones 1–5 implemented; milestone 6 (documentation) not implemented. Milestone 5 lands first among the
 remaining v0.3 work, in this order: this spec's milestone 5, `specs/compiler.md`, `specs/auto-consts.md`,
 `specs/workers.md`, `specs/density-mappings.md`, `specs/refinement.md`, then the documentation of all of them. v0.3 is
 released as one piece, so no intermediate state needs compatibility or workarounds.
@@ -431,6 +431,15 @@ inputs whose source is an inlined callee; the milestone split; and printing inpu
   `::inline` and `::rust::inlined`, and two `inline_shared` tests; keeping the callee's unlisted inputs fails
   `shared_inline_unlisted::inline` and `inline_shared::unlisted_input_of_callee_is_removed`. The backend trial
   passes there, since plain `compile` doesn't validate (§6.3).
+- **Milestone 5.** The crate directory was already deleted, so this milestone removed the manifest entries, the facade
+  re-exports, the two legacy-only test files, and `VariableType::DensityInput` with its error variants and backend
+  arms. The `density` type keyword is gone while `density(...)` reads stay. `vars x: density` is now a parse error
+  (a `tungsten-parse` test replaces `check`'s `density_input_type`). The `tests.rs` of `tungsten-rust`, `-java`,
+  `-cuda` and `-inspect` are `.tw` text through `tungsten-parse` (a new dev-dependency; `bumpalo` is no longer one
+  there) and keep every assertion. In the CUDA and Java programs a pos3 read as `f64` is written
+  `ambient(pos3).x::<f64>`. `tungsten-rust/src/model/tests/examples.rs` is not compiled (no `mod` declares it) and
+  still names the old paths, so it was left alone. `scripts/verify.sh` was not run, since nothing in
+  `tungsten-core` changed. Milestone 6 is deferred by request.
 
 ## 10. Open and deferred
 

@@ -5,10 +5,9 @@ use tungsten_ir::model::VariableType;
 
 use super::{BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME};
 
-/// Value type of a variable. Panics on `DensityInput`: density inputs are read through buffers.
+/// Value type of a variable.
 pub fn convert_type(t: &VariableType) -> rcl::Type {
     match t {
-        VariableType::DensityInput => panic!("DensityInput type should not be directly converted"),
         VariableType::Vec3 => rcl::Type::Struct("Vec3".to_string()),
         VariableType::Pos3 => rcl::Type::Struct("Pos3".to_string()),
         VariableType::F32 => rcl::Type::F32,
@@ -83,15 +82,13 @@ pub fn convert_unary_op(op: opt::UnaryOperator) -> rcl::UnaryOperator {
 /// Element type when indexing a value of type `array`; `None` if unknown.
 pub fn element_type(array: &VariableType) -> Option<VariableType> {
     match array {
-        VariableType::Vec3 | VariableType::Pos3 | VariableType::DensityInput => {
-            Some(VariableType::F64)
-        }
+        VariableType::Vec3 | VariableType::Pos3 => Some(VariableType::F64),
         VariableType::Array(t, _) => Some((**t).clone()),
         _ => None,
     }
 }
 
-/// Result type of a binary operation; mirrors `spmt::try_derive_binop_type`.
+/// Result type of a binary operation.
 pub fn derive_binop_type(
     op: opt::BinaryOperator,
     left: Option<VariableType>,

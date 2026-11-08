@@ -5,8 +5,6 @@ use tungsten_ir::VariableType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TypeFail {
-    /// `VariableType::DensityInput`, possibly nested in an array.
-    DensityInput,
     /// A record name the resolver doesn't know.
     UnknownRecord(&'static str),
 }
@@ -17,7 +15,6 @@ pub(crate) fn lower_type(
     record: &mut dyn FnMut(&'static str) -> Option<RecordId>,
 ) -> Result<Type, TypeFail> {
     Ok(match t {
-        VariableType::DensityInput => return Err(TypeFail::DensityInput),
         VariableType::PermutationTable => Type::PermTable,
         VariableType::InterpolatedNoiseSampler => Type::Sampler,
         VariableType::Vec3 => Type::Vec3,

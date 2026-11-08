@@ -44,12 +44,7 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
             .get(id)
             .ok_or_else(|| Failed::from(format!("fn {i} has no ref")))?;
         n(&format!("fn {i} parameters"), ir.functions[r].parameters.len(), f.params)?;
-        // Density-input vars are not locals in the core IR.
-        let vars = ir.functions[r]
-            .variables
-            .values()
-            .filter(|v| v.t != tungsten_ir::VariableType::DensityInput)
-            .count();
+        let vars = ir.functions[r].variables.values().count();
         n(&format!("fn {i} locals"), vars, f.locals.len())?;
         n(&format!("fn {i} hosts"), ir.functions[r].host_inputs.len(), f.hosts.len())?;
     }

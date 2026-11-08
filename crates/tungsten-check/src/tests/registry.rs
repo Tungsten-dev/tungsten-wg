@@ -101,14 +101,6 @@ fn unknown_record_and_density() {
             name: "Nope".into()
         })
     );
-    assert_eq!(
-        RegistryBuilder::new()
-            .extern_fn("f", &[], T::DensityInput)
-            .build(),
-        Err(RegistryError::DensityInputType {
-            context: "f".into()
-        })
-    );
 }
 
 #[test]

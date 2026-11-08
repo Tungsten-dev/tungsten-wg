@@ -416,8 +416,7 @@ impl<'a> Ctx<'a> {
             VariableType::Vec3 => s.vec3,
             VariableType::Pos3 => s.pos3,
             VariableType::Array(t, n) => self.element_size(t)? * n,
-            VariableType::DensityInput
-            | VariableType::PermutationTable
+            VariableType::PermutationTable
             | VariableType::InterpolatedNoiseSampler
             | VariableType::Extern(_) => return None,
         })

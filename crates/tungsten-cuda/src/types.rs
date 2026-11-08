@@ -10,11 +10,10 @@ use tungsten_ir::model::VariableType;
 use crate::model as cuda;
 use crate::{BASE3D_NOISE_SAMPLER_TYPE, PERLIN_NOISE_SAMPLER_TYPE};
 
-/// Device type of a value. Panics on `DensityInput`: density inputs are read through buffers.
+/// Device type of a value.
 pub fn device_type(t: &VariableType) -> cuda::Type {
     use cuda::Type as T;
     match t {
-        VariableType::DensityInput => panic!("DensityInput type should not be directly converted"),
         VariableType::Vec3 => T::named("double3"),
         VariableType::Pos3 => T::named("int3"),
         VariableType::F32 => T::Float,

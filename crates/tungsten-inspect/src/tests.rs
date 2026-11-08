@@ -1,162 +1,94 @@
-//! Smoke test: a small hand-built program covering sharing, resampling, indexed reads, loops,
+//! Smoke test: a small program, as `.tw` text, covering sharing, resampling, indexed reads, loops,
 //! constants, host inputs and tables. Set `TUNGSTEN_INSPECT_OUT=<dir>` to write the tree there.
 
-use bumpalo::Bump;
-
 use tungsten_interface::{Backend, Interface};
-use tungsten_legacy::builder::{Builder, SPMTBuilder};
-use tungsten_legacy::conversion::convert;
-use tungsten_legacy::model::*;
+use tungsten_ir::model::OptimizedProgram;
 use tungsten_optimizer::{explain_inline, perform_inline};
+use tungsten_parse::{FileId, NoEnv, load};
 
 use crate::backend::{InspectBackend, InspectConfig, inspect};
 use crate::diff::diff;
 use crate::model::{Inspection, Verdict};
 
-fn var<'m>(v: Var<'m>) -> Expression<'m> {
-    Expression::Variable(v)
+fn program(src: &str) -> OptimizedProgram {
+    load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program
 }
 
-fn unit<'m>(
-    arena: &'m Bump,
-    name: &str,
-    body: impl FnOnce(&mut Builder<'m>) -> Vec<Statement<'m>>,
-) -> DensityFunctionRef<'m> {
-    let mut b = Builder::new(arena).named(name).returns(VariableType::F64);
-    let stmts = body(&mut b);
-    b.set_body(stmts);
-    b.finish_compute_unit()
-}
+const SMALL: &str = r#"
+program {
+    host seed: i64;
+    table temperature = perlin("t:temperature", "first", 0);
+    const base = 0.25;
+    const scale = (const(base) * 2.0);
 
-fn build_program<'m>(arena: &'m Bump) -> SPMT<'m> {
     // Helper: a repeat loop with a break; `acc` is reassigned in the loop (loop-carried).
-    let mut h = Builder::new(arena)
-        .named("t:accumulate")
-        .returns(VariableType::F64);
-    let t = h.param("t", VariableType::F64);
-    let acc = h.local("acc", VariableType::F64);
-    h.set_body(vec![
-        Statement::Assign {
-            target: acc,
-            value: 0.0f64.into(),
-        },
-        Statement::Repeat {
-            count: 3,
-            body: vec![
-                Statement::Assign {
-                    target: acc,
-                    value: acc + t,
-                },
-                Statement::If {
-                    condition: acc.gt(10.0f64),
-                    then_branch: vec![Statement::Break],
-                    else_branch: vec![],
-                },
-            ],
-        },
-        Statement::Return(var(acc)),
-    ]);
-    let helper = h.finish_function();
+    fn `t:accumulate`(t: f64) -> f64 {
+        vars { acc: f64 }
+        acc = 0.0;
+        repeat 3 {
+            acc = (acc + t);
+            if (acc > 10.0) {
+                break;
+            }
+        }
+        return acc;
+    }
 
     // A 1x1x1 unit reading a host input.
-    let mut s = Builder::new(arena)
-        .named("t:seed")
-        .returns(VariableType::F64);
-    let seed = s.alloc_var(Name::Named("seed".into()), VariableType::I64);
-    s.set_body(vec![Statement::Return(Expression::ExplicitCast {
-        to: VariableType::F64,
-        expr: Box::new(var(seed)),
-    })]);
-    let mut seed_unit = s.build_compute_unit();
-    seed_unit.host_inputs = vec![HostInput::Static(seed)];
-    let seed_unit: DensityFunctionRef = Interned::new(arena.alloc(seed_unit));
+    fn `t:seed`() -> f64 @hosts(seed) { return (host(seed) as f64); }
 
     // Noise: a constant depending on a constant, and a permutation table. Used at two grids.
-    let noise = unit(arena, "t:noise", |n| {
-        let base = n.constant("base", VariableType::F64, 0.25f64);
-        let scale = n.constant(
-            "scale",
-            VariableType::F64,
-            Expression::Variable(base) * 2.0f64,
-        );
-        let perm = Expression::PermutationTable(PermutationTableInput::PerlinNoise {
-            ident: "t:temperature".into(),
-            subident: Some("first".into()),
-            subident_index: 0,
-        });
-        vec![Statement::Return(
-            Expression::ExternCall {
-                function_name: "sample".into(),
-                parameters: vec![perm, 1.0f64.into()],
-                parameter_types: vec![VariableType::PermutationTable, VariableType::F64],
-                return_type: VariableType::F64,
-            } * var(scale),
-        )]
-    });
+    fn `t:noise`() -> f64 {
+        return (ext sample::<(perm_table, f64) -> f64>(table(temperature), 1.0) * const(scale));
+    }
 
     // Shared by both entries; reads the seed at 1x1x1 (resampled).
-    let shared = unit(arena, "t:shared", |b| {
-        let seed_in = b.density(seed_unit, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (1, 1, 1));
-        vec![Statement::Return(seed_in.get() + 1.0f64)]
-    });
+    fn `t:shared`() -> f64 { return (density(seed_in) + 1.0); }
 
     // Read once, by `t:a`, with an identity mapping: inlinable.
-    let leaf = unit(arena, "t:leaf", |_| vec![Statement::Return(2.0f64.into())]);
+    fn `t:leaf`() -> f64 { return 2.0; }
     // Read once, by `t:a`, with an index: not inlinable.
-    let table = unit(arena, "t:table", |_| vec![Statement::Return(3.0f64.into())]);
+    fn `t:table`() -> f64 { return 3.0; }
 
-    let a = unit(arena, "t:a", |b| {
-        let s = b.density(shared, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (4, 4, 4));
-        let n = b.density(noise, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (4, 4, 4));
-        let l = b.density(leaf, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (4, 4, 4));
-        let t = b.density(table, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (4, 4, 4));
-        let x = b.local("x", VariableType::F64);
-        vec![
-            Statement::Assign {
-                target: x,
-                value: s.get() + n.get(),
-            },
-            Statement::If {
-                condition: var(x).gt(0.0f64),
-                then_branch: vec![Statement::Assign {
-                    target: x,
-                    value: helper.call([var(x)]),
-                }],
-                else_branch: vec![Statement::Assign {
-                    target: x,
-                    value: l.get() + t.at(0i32),
-                }],
-            },
-            // `x` here is a φ of both branches.
-            Statement::Return(var(x) * (s.get() + n.get())),
-        ]
-    });
+    fn `t:a`() -> f64 {
+        vars { x: f64 }
+        x = (density(shared_in) + density(noise_a));
+        if (x > 0.0) {
+            x = `t:accumulate`(x);
+        } else {
+            x = (density(leaf_in) + density(table_in, 0));
+        }
+        // `x` here is a phi of both branches.
+        return (x * (density(shared_in) + density(noise_a)));
+    }
 
-    let b_entry = unit(arena, "t:b", |b| {
-        let s = b.density(shared, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (4, 4, 4));
-        let n = b.density(noise, (1.0, 1.0, 1.0), (0.5, 0.5, 0.5), (2, 2, 2));
-        vec![Statement::Return(s.get() - n.at(0i32))]
-    });
+    fn `t:b`() -> f64 { return (density(shared_in) - density(noise_b, 0)); }
 
     // Read by nothing: unreachable.
-    let orphan = unit(arena, "t:orphan", |_| {
-        vec![Statement::Return(4.0f64.into())]
-    });
+    fn `t:orphan`() -> f64 { return 4.0; }
 
-    SPMT {
-        density_functions: vec![seed_unit, noise, shared, leaf, table, a, b_entry, orphan],
-        functions: vec![helper],
-        main_density_functions: [a, b_entry]
-            .into_iter()
-            .map(|density_function| MainDensityFunction {
-                density_function,
-                dimensions: (4, 4, 4),
-                scaled_origin: (1.0, 1.0, 1.0),
-                scaled_position: (1.0, 1.0, 1.0),
-            })
-            .collect(),
+    unit seed_u { main `t:seed`; hosts [seed]; }
+    unit noise_u { main `t:noise`; consts [base, scale]; tables [temperature]; }
+    unit shared_u { main `t:shared`; inputs [seed_in]; }
+    unit leaf_u { main `t:leaf`; }
+    unit table_u { main `t:table`; }
+    unit orphan_u { main `t:orphan`; }
+    input seed_in = seed_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input noise_a = noise_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input noise_b = noise_u @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
+    input shared_in = shared_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input leaf_in = leaf_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input table_in = table_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    unit a_u {
+        main `t:a`;
+        helpers [`t:accumulate`];
+        inputs [shared_in, noise_a, leaf_in, table_in];
     }
+    unit b_u { main `t:b`; inputs [shared_in, noise_b]; }
+    entry a_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
+"#;
 
 fn unit_info<'a>(i: &'a Inspection, display: &str) -> &'a crate::model::UnitInfo {
     i.units
@@ -167,8 +99,7 @@ fn unit_info<'a>(i: &'a Inspection, display: &str) -> &'a crate::model::UnitInfo
 
 #[test]
 fn inspects_small_program() {
-    let arena = Bump::new();
-    let mut program = convert(&build_program(&arena)).expect("conversion");
+    let mut program = program(SMALL);
     let config = InspectConfig::default();
 
     let out = inspect(&program, &config);
@@ -350,60 +281,27 @@ fn inspects_small_program() {
 }
 
 /// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
-fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
-    let b = Builder::new(arena)
-        .named("minecraft:bytes")
-        .returns(VariableType::I8);
-    let table = b.constant(
-        "table",
-        VariableType::Array(Box::new(VariableType::I8), 3),
-        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
-    );
-    let a = b.local("a", VariableType::I8);
-    let wide = b.local("wide", VariableType::I32);
-    let d = b.local("d", VariableType::F64);
-    let mut b = b;
-    b.set_body(vec![
+const BYTES: &str = r#"
+program {
+    const `table` = [1b, -2b, 127b];
+    fn `minecraft:bytes`() -> i8 {
+        vars { a: i8, wide: i32, d: f64 }
         // 127 + 127 wraps
-        Statement::Assign {
-            target: a,
-            value: var(table).index(2i32) + 127i8,
-        },
-        Statement::Assign {
-            target: a,
-            value: (-var(a)).bitand(var(a).shl(1i32)),
-        },
-        Statement::Assign {
-            target: wide,
-            value: var(a).cast(VariableType::I32).bitand(255i32),
-        },
-        Statement::Assign {
-            target: d,
-            value: 300.5f64.into(),
-        },
-        Statement::Assign {
-            target: a,
-            value: var(d).cast(VariableType::I8),
-        },
-        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
-    ]);
-    let unit = b.finish_compute_unit();
-    SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
+        a = (const(`table`)[2] + 127b);
+        a = (-a & (a << 1));
+        wide = ((a as i32) & 255);
+        d = 300.5;
+        a = (d as i8);
+        return (a + (wide as i8));
     }
+    unit bytes { main `minecraft:bytes`; consts [`table`]; }
+    entry bytes @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
+"#;
 
 #[test]
 fn byte_buffers_and_literals() {
-    let arena = Bump::new();
-    let program = convert(&build_byte_program(&arena)).expect("conversion");
+    let program = program(BYTES);
     let i = inspect(&program, &InspectConfig::default()).inspection;
     let entry = &i.entries[0];
     for axis in [&entry.buffers.cpu, &entry.buffers.gpu] {

@@ -35,7 +35,6 @@ impl PartialOrd for Name {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum VariableType {
-    DensityInput,
     PermutationTable,
     InterpolatedNoiseSampler,
     Vec3,
@@ -53,7 +52,6 @@ pub enum VariableType {
 impl Debug for VariableType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VariableType::DensityInput => write!(f, "density"),
             VariableType::PermutationTable => write!(f, "perm_table"),
             VariableType::InterpolatedNoiseSampler => write!(f, "interpolated_noise_sampler"),
             VariableType::Vec3 => write!(f, "vec3"),

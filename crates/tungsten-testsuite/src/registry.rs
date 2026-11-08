@@ -77,7 +77,6 @@ pub fn parse_type(s: &str) -> Result<VariableType, String> {
         "f64" => VariableType::F64,
         "vec3" => VariableType::Vec3,
         "pos3" => VariableType::Pos3,
-        "density" => VariableType::DensityInput,
         "perm_table" => VariableType::PermutationTable,
         "interpolated_noise_sampler" => VariableType::InterpolatedNoiseSampler,
         _ => return Err(format!("unknown type `{s}`")),

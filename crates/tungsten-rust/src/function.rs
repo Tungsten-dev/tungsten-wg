@@ -12,7 +12,7 @@ use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
-    ComputeUnit, Constant, Function, OptimizedProgram, Ref, VariableType,
+    ComputeUnit, Constant, Function, OptimizedProgram, Ref,
 };
 
 /// A converted function plus the items it still needs generated.
@@ -50,8 +50,8 @@ pub fn convert_helper<'a, 'm>(
         let v = conv.declare_var(*p);
         out.add_parameter(v.name.clone().unwrap(), v.t.clone());
     }
-    for (r, var) in func.variables.iter() {
-        if func.parameters.contains(&r) || matches!(var.t, VariableType::DensityInput) {
+    for (r, _) in func.variables.iter() {
+        if func.parameters.contains(&r) {
             continue;
         }
         let v = conv.declare_var(r);
@@ -88,11 +88,7 @@ pub fn convert_density<'a, 'm>(
     );
     add_uniform_parameters(&mut out);
 
-    for (r, var) in func.variables.iter() {
-        // Density input variables are read through `buffers`, never declared.
-        if matches!(var.t, VariableType::DensityInput) {
-            continue;
-        }
+    for (r, _) in func.variables.iter() {
         let v = conv.declare_var(r);
         out.add_variable(v);
     }

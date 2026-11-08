@@ -1,151 +1,91 @@
-//! Smoke test: a small hand-built program exercising the Java-specific lowerings.
+//! Smoke test: a small program, as `.tw` text, exercising the Java-specific lowerings.
 //! Set `TUNGSTEN_JAVA_OUT=<dir>` to also write the generated Java (and RCL) there, e.g. to run javac on it.
 
-use bumpalo::Bump;
-
 use tungsten_interface::{Backend, Interface};
-use tungsten_legacy::builder::{Builder, SPMTBuilder, floor, sin};
-use tungsten_legacy::conversion::convert;
-use tungsten_legacy::model::*;
+use tungsten_ir::model::OptimizedProgram;
+use tungsten_parse::{FileId, NoEnv, load};
 use tungsten_rust::backend::{RustBackend, RustConfig};
 
 use crate::backend::{JavaBackend, JavaConfig};
 
-fn var<'m>(v: Var<'m>) -> Expression<'m> {
-    Expression::Variable(v)
+fn program(src: &str) -> OptimizedProgram {
+    load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program
 }
 
-fn build_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+fn java(program: &OptimizedProgram) -> String {
+    let mut backend = JavaBackend::new(JavaConfig::default());
+    let interface = Interface::build(program, backend.naming_rules());
+    backend.generate(program, &interface).unwrap();
+    backend.output().expect("java output").source.clone()
+}
+
+const SMALL: &str = r#"
+program {
+    host sea_level: i32;
+    table temperature = perlin("minecraft:temperature", none, 0);
+    const base = 0.25;
+    const scale = (const(base) * 2.0);
+    const points = [-1.0, 0.0, nan];
+
     // Helper `int` (a Java keyword) with a parameter and a loop with a break.
-    let mut h = Builder::new(arena).named("int").returns(VariableType::F64);
-    let t = h.param("t", VariableType::F64);
-    let acc = h.local("acc", VariableType::F64);
-    h.set_body(vec![
-        Statement::Assign { target: acc, value: 0.0f64.into() },
-        Statement::Repeat {
-            count: 3,
-            body: vec![
-                Statement::Assign { target: acc, value: acc + t },
-                Statement::If { condition: acc.gt(10.0f64), then_branch: vec![Statement::Break], else_branch: vec![] },
-            ],
-        },
-        Statement::Return(var(acc)),
-    ]);
-    let helper = h.finish_function();
+    fn `int`(t: f64) -> f64 {
+        vars { acc: f64 }
+        acc = 0.0;
+        repeat 3 {
+            acc = (acc + t);
+            if (acc > 10.0) {
+                break;
+            }
+        }
+        return acc;
+    }
 
     // A 1x1x1 unit reading a host input.
-    let mut s = Builder::new(arena).named("minecraft:scalar").returns(VariableType::I32);
-    let sea = s.alloc_var(Name::Named("sea_level".into()), VariableType::I32);
-    let flag = s.local("flag", VariableType::Bool);
-    s.set_body(vec![
-        Statement::Assign { target: flag, value: var(sea).gt(62i32) },
+    fn `minecraft:scalar`() -> i32 @hosts(sea_level) {
+        vars { flag: bool }
+        flag = (host(sea_level) > 62);
         // i32 + bool, `!` on an integer, logical shift.
-        Statement::Return(((var(sea) + var(flag)).bitxor(!var(sea))).ushr(1i32)),
-    ]);
-    let mut scalar = s.build_compute_unit();
-    scalar.host_inputs = vec![HostInput::Static(sea)];
-    let scalar: DensityFunctionRef = Interned::new(arena.alloc(scalar));
+        return (((host(sea_level) + flag) ^ !host(sea_level)) >>> 1);
+    }
 
     // A 4x4x4 noise unit: constants (one depending on another), permutation table, an ambient read.
-    let n = Builder::new(arena).named("minecraft:noise").returns(VariableType::F64);
-    let base = n.constant("base", VariableType::F64, 0.25f64);
-    let scale = n.constant("scale", VariableType::F64, Expression::Variable(base) * 2.0f64);
-    let points = n.constant(
-        "points",
-        VariableType::Array(Box::new(VariableType::F64), 3),
-        Expression::ArrayLiteral(vec![(-1.0f64).into(), 0.0f64.into(), f64::NAN.into()]),
-    );
-    let pos3 = n.alloc_var(Name::Named("pos3".into()), VariableType::Pos3);
-    let v = n.local("v", VariableType::F64);
-    let bits = n.local("bits", VariableType::I64);
-    let mut n = n;
-    let x = Expression::Field {
-        base: Box::new(var(pos3)),
-        field: "x".into(),
-        type_of_field: VariableType::F64,
-        known_idnex: Some(0),
-    };
-    let perm = Expression::PermutationTable(PermutationTableInput::PerlinNoise {
-        ident: "minecraft:temperature".into(),
-        subident: None,
-        subident_index: 0,
-    });
-    let sample = Expression::ExternCall {
-        function_name: "sample".into(),
-        parameters: vec![perm, x.clone()],
-        parameter_types: vec![VariableType::PermutationTable, VariableType::F64],
-        return_type: VariableType::F64,
-    };
-    n.set_body(vec![
-        Statement::Assign { target: v, value: floor(x * var(scale)) + sin(sample) },
-        Statement::Assign {
-            target: bits,
-            value: Expression::ExplicitCast { to: VariableType::I64, expr: Box::new(var(v)) } * (-5i64),
-        },
+    fn `minecraft:noise`() -> f64 {
+        vars { v: f64, bits: i64 }
+        v = (ext floor::<(f64) -> f64>(ambient(pos3).x::<f64> * const(scale))
+            + ext sin::<(f64) -> f64>(ext sample::<(perm_table, f64) -> f64>(table(temperature), ambient(pos3).x::<f64>)));
+        bits = ((v as i64) * -5L);
         // `&mut v` on a primitive becomes a DoubleRef with a write-back.
-        Statement::Assign {
-            target: bits,
-            value: Expression::ExternCall {
-                function_name: "nudge".into(),
-                parameters: vec![v.as_mut_ref()],
-                parameter_types: vec![VariableType::F64],
-                return_type: VariableType::I64,
-            },
-        },
-        Statement::Return(
-            var(v) + Expression::ArrayAccess { array: Box::new(var(points)), index: Box::new(var(bits)) },
-        ),
-    ]);
-    let noise = n.finish_compute_unit();
+        bits = ext nudge::<(f64) -> i64>(&mut v);
+        return (v + const(points)[bits]);
+    }
 
     // The 4x4x4 entry: reads both units, calls the helper, compares vectors.
-    let f = Builder::new(arena).named("minecraft:final").returns(VariableType::F64);
-    let noise_in = f.density(noise, (1.0, 1.0, 1.0), (0.25, 0.25, 0.25), (4, 4, 4));
-    let scalar_in = f.density(scalar, (1.0, 1.0, 1.0), (1.0, 1.0, 1.0), (1, 1, 1));
-    let origin = f.alloc_var(Name::Named("origin".into()), VariableType::Vec3);
-    let same = f.local("same", VariableType::Bool);
-    let mut f = f;
-    f.set_body(vec![
-        Statement::Assign {
-            target: same,
-            value: var(origin).eq_expr(Expression::Construct {
-                t: VariableType::Vec3,
-                args: vec![0.0f64.into(), 0.0f64.into(), 0.0f64.into()],
-            }),
-        },
-        Statement::If {
-            condition: var(same),
-            then_branch: vec![Statement::Return(noise_in.at(0i32))],
-            else_branch: vec![],
-        },
-        Statement::Return(
-            helper.call([noise_in.get()])
-                + Expression::ExplicitCast { to: VariableType::F64, expr: Box::new(scalar_in.get()) },
-        ),
-    ]);
-    let entry = f.finish_compute_unit();
-
-    SPMT {
-        density_functions: vec![scalar, noise, entry],
-        functions: vec![helper],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: entry,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (0.25, 0.25, 0.25),
-        }],
+    fn `minecraft:final`() -> f64 {
+        vars { same: bool }
+        same = (ambient(origin) == vec3(0.0, 0.0, 0.0));
+        if same {
+            return density(noise_in, 0);
+        }
+        return (`int`(density(noise_in)) + (density(scalar_in) as f64));
     }
+
+    unit scalar { main `minecraft:scalar`; hosts [sea_level]; }
+    unit noise { main `minecraft:noise`; consts [base, scale, points]; tables [temperature]; }
+    input noise_in = noise @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
+    input scalar_in = scalar @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    unit final_u {
+        main `minecraft:final`;
+        helpers [`int`];
+        inputs [noise_in, scalar_in];
+    }
+    entry final_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
 }
+"#;
 
 #[test]
 fn generates_java_for_small_program() {
-    let arena = Bump::new();
-    let program = build_program(&arena);
-    let program = convert(&program).expect("conversion");
-    let mut backend = JavaBackend::new(JavaConfig::default());
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
-    let java = backend.output().expect("java output").source.clone();
+    let program = program(SMALL);
+    let java = java(&program);
 
     if let Ok(dir) = std::env::var("TUNGSTEN_JAVA_OUT") {
         let dir = std::path::Path::new(&dir).join("tungsten/generated");
@@ -189,47 +129,27 @@ fn generates_java_for_small_program() {
 }
 
 /// A 4x4x4 unit returning `I8`: byte constants, wrapping arithmetic, bit operations and casts.
-fn build_byte_program<'m>(arena: &'m Bump) -> SPMT<'m> {
-    let b = Builder::new(arena).named("minecraft:bytes").returns(VariableType::I8);
-    let table = b.constant(
-        "table",
-        VariableType::Array(Box::new(VariableType::I8), 3),
-        Expression::ArrayLiteral(vec![1i8.into(), (-2i8).into(), 127i8.into()]),
-    );
-    let a = b.local("a", VariableType::I8);
-    let wide = b.local("wide", VariableType::I32);
-    let d = b.local("d", VariableType::F64);
-    let mut b = b;
-    b.set_body(vec![
+const BYTES: &str = r#"
+program {
+    const `table` = [1b, -2b, 127b];
+    fn `minecraft:bytes`() -> i8 {
+        vars { a: i8, wide: i32, d: f64 }
         // 127 + 127 wraps
-        Statement::Assign { target: a, value: var(table).index(2i32) + 127i8 },
-        Statement::Assign { target: a, value: (-var(a)).bitand(var(a).shl(1i32)) },
-        Statement::Assign { target: wide, value: var(a).cast(VariableType::I32).bitand(255i32) },
-        Statement::Assign { target: d, value: 300.5f64.into() },
-        Statement::Assign { target: a, value: var(d).cast(VariableType::I8) },
-        Statement::Return(var(a) + var(wide).cast(VariableType::I8)),
-    ]);
-    let unit = b.finish_compute_unit();
-    SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
+        a = (const(`table`)[2] + 127b);
+        a = (-a & (a << 1));
+        wide = ((a as i32) & 255);
+        d = 300.5;
+        a = (d as i8);
+        return (a + (wide as i8));
     }
+    unit bytes { main `minecraft:bytes`; consts [`table`]; }
+    entry bytes @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
+"#;
 
 #[test]
 fn bytes() {
-    let arena = Bump::new();
-    let program = convert(&build_byte_program(&arena)).expect("conversion");
-    let mut backend = JavaBackend::new(JavaConfig::default());
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
-    let java = &backend.output().expect("java output").source;
+    let java = java(&program(BYTES));
     for e in [
         "static final byte[] table = new byte[]{(byte) 1, (byte) (-2), (byte) 127};",
         "final byte[] minecraft_bytes_d4x4x4_output = new byte[64];",
@@ -246,43 +166,21 @@ fn bytes() {
     }
 }
 
-/// A unit reading all four default variables, which lower to ambient reads.
-fn build_ambient_program<'m>(arena: &'m Bump) -> SPMT<'m> {
-    let mut b = Builder::new(arena).named("minecraft:ambients").returns(VariableType::F64);
-    let field = |name: &str, t: VariableType, f: &str, field_t: VariableType| Expression::Field {
-        base: Box::new(var(b.alloc_var(Name::Named(name.into()), t))),
-        field: f.into(),
-        type_of_field: field_t,
-        known_idnex: None,
-    };
-    let body = vec![Statement::Return(
-        field("origin", VariableType::Vec3, "x", VariableType::F64)
-            * field("origin_scale", VariableType::Vec3, "x", VariableType::F64)
-            + field("pos3", VariableType::Pos3, "x", VariableType::I32).cast(VariableType::F64)
-                * field("position_scale", VariableType::Vec3, "x", VariableType::F64),
-    )];
-    b.set_body(body);
-    let unit = b.finish_compute_unit();
-    SPMT {
-        density_functions: vec![unit],
-        functions: vec![],
-        main_density_functions: vec![MainDensityFunction {
-            density_function: unit,
-            dimensions: (4, 4, 4),
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
-        }],
+/// A unit reading all four ambients.
+const AMBIENTS: &str = r#"
+program {
+    fn `minecraft:ambients`() -> f64 {
+        return ((ambient(origin).x * ambient(origin_scale).x)
+            + (ambient(pos3).x::<f64> * ambient(position_scale).x));
     }
+    unit ambients { main `minecraft:ambients`; }
+    entry ambients @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
+"#;
 
 #[test]
 fn ambients() {
-    let arena = Bump::new();
-    let program = convert(&build_ambient_program(&arena)).expect("conversion");
-    let mut backend = JavaBackend::new(JavaConfig::default());
-    let interface = Interface::build(&program, backend.naming_rules());
-    backend.generate(&program, &interface).unwrap();
-    let java = &backend.output().expect("java output").source;
+    let java = java(&program(AMBIENTS));
     for e in ["config.origin.x", "config.origin_scale.x", "config.position_scale.x", "p.pos.x"] {
         assert!(java.contains(e), "missing `{e}` in:\n{java}");
     }

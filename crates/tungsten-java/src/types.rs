@@ -5,11 +5,10 @@ use tungsten_ir::model as opt;
 
 use super::{BASE3D_NOISE_SAMPLER_CLASS, PERLIN_NOISE_SAMPLER_CLASS};
 
-/// Java type of a value. Panics on `DensityInput`: density inputs are read through buffers.
+/// Java type of a value.
 pub fn convert_type(t: &VariableType) -> java::Type {
     use java::Type as J;
     match t {
-        VariableType::DensityInput => panic!("DensityInput type should not be directly converted"),
         VariableType::Vec3 => J::class("Vec3"),
         VariableType::Pos3 => J::class("Pos3"),
         VariableType::F32 => J::Float,

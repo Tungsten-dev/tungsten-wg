@@ -176,8 +176,6 @@ impl<'p, 'r> Ctx<'p, 'r> {
             fallback.clone()
         };
         match bt {
-            // Reported where the density input is read.
-            VariableType::DensityInput => fallback,
             VariableType::Vec3 => match axis(field) {
                 Some(a) => FieldSel::Vec3(a),
                 None => unknown(self),

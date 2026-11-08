@@ -70,10 +70,6 @@ impl<'p, 'r> Ctx<'p, 'r> {
         let reg = self.reg;
         match lower_type(t, &mut |n| reg.record_id(n)) {
             Ok(t) => t,
-            Err(TypeFail::DensityInput) => {
-                self.err(LowerErrorKind::DensityInputType);
-                Type::Bool
-            }
             Err(TypeFail::UnknownRecord(n)) => {
                 self.err(LowerErrorKind::UnknownRecord(n.to_string()));
                 Type::Bool

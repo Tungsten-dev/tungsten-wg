@@ -27,9 +27,7 @@ pub fn kind_name(kind: u8) -> &'static str {
 /// Types a driver can encode: no tables, anywhere.
 pub fn has_table_type(t: &VariableType) -> bool {
     match t {
-        VariableType::PermutationTable
-        | VariableType::InterpolatedNoiseSampler
-        | VariableType::DensityInput => true,
+        VariableType::PermutationTable | VariableType::InterpolatedNoiseSampler => true,
         VariableType::Array(e, _) => has_table_type(e),
         _ => false,
     }
