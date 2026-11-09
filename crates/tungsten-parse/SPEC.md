@@ -176,7 +176,7 @@ use       = "use" IDENT "::" "{" label ("," label)* ","? "}" ";" ;
 host      = "host" label ( ":" type | "dynamic" ) ";" ;
 param     = "param" label ":" type ";" ;
 auto      = "auto" label ":" type ("@name" "(" STRING ")")? "=" IDENT "(" (autoarg ("," autoarg)*)? ")" ";" ;
-autoarg   = "param" "(" label ")" | LONG ;                 (* `12` is an i32: write `12L` *)
+autoarg   = "param" "(" label ")" | LONG | F64 | "true" | "false" | STRING ;   (* `12` is an i32: write `12L` *)
 const     = "const" label "=" cexpr ";" ;
 fn        = "fn" label "(" (param ("," param)* ","?)? ")" "->" type fn_attr* "{" vars? stmt* "}" ;
 param     = label (":" type)? ;
@@ -431,7 +431,7 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
 - **`@knownfail`**: the backend is stored as a string and the harness validates it (`rust`, `java`
   or `cuda`). `case` and `stage` narrow the scope. The harness requires every covered
   (backend, case, stage) to fail, and a covered combination that passes is an error.
-- **`@case`**: the name is unique. Every declared param is bound exactly once with `param(name = value)`, by its label, and `param(…)` is left out when the program has no params. An `i64` param takes an unsuffixed or `L` literal, decimal or hex up to `u64::MAX` (reinterpreted as bits). Every `Static` host must be
+- **`@case`**: the name is unique. Every declared param is bound exactly once with `param(name = value)`, by its label, and `param(…)` is left out when the program has no params. An `i64` param takes an unsuffixed or `L` literal, decimal or hex up to `u64::MAX` (reinterpreted as bits); an `f64` or `bool` param takes that literal. Every `Static` host must be
   bound exactly once per case, a binding to an unknown or `dynamic` host is an error, and values
   are checked against the host's type. `origin` is an attribute position (ints are allowed).
 - **`@expect reject[(Kind)]`**: `Kind` is stored as a string, so the parser doesn't depend on the
@@ -585,7 +585,7 @@ Where the implementation differs from, or fills in, the text above:
   a seeded stream, or a recorded choice sequence. proptest generates and shrinks the sequence
   (`programs`, `test_files`), and a shrunk failure is shown as canonical text. Past the end of
   the sequence every choice is 0, the simplest option, so failures shrink to small programs. The
-  generator also produces records, repeated params, non-extern `ConstructExtern` and libraries.
+  generator also produces records, repeated params, non-extern `ConstructExtern`, libraries, and handle and scalar autoconsts with every argument kind (`-0.0`, NaN payloads, infinities, strings with quotes, control characters and non-BMP text).
 - **Quoted identifiers and strings** also accept `\n`, `\t`, `\r` and `\u{hex}`, so every name
   the IR can hold (including ones with newlines or control characters) has a spelling.
 - **`0b`** is the byte `0` unless a binary digit follows (`0b101` is still binary).

@@ -315,7 +315,7 @@ One `match` arm per expression kind, following SEMANTICS.md §5. Points worth kn
   `Stuck(BadIndex)`.
 - **`Const`**: inline rank check, then `eval_const`.
 - **`Host`**: a copy of `case.hosts[h]`, or `Stuck(Case)` if the case is too short.
-- **`Table`**: builds the handle from the table's declared kind.
+- **`Table`**: the handle `Handle(t)`, an opaque id typed by the table's `HandleTypeId`.
 - **`Ambient`**: reads `ctx`.
 - **`Density`**: `read_density` (§4.12).
 - **`Call`**: `eval_args` first, then the inline rank check, then `eval_call`. So the arguments

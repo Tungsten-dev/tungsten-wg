@@ -2,6 +2,7 @@
 //! hand-built programs for what text can't express. Every successful lowering goes through
 //! [`ok`], which runs `check_wf` and the checker.
 
+mod auto;
 mod check_errors;
 mod check_rejects;
 mod determinism;
@@ -20,7 +21,7 @@ use tungsten_core::{Expr, FnId, Stmt};
 use tungsten_ir::*;
 use tungsten_parse::{Env, ExternSig, FileId};
 
-use crate::{Lowered, Registry, RegistryBuilder, lower};
+use crate::{AutoArgType, Lowered, Registry, RegistryBuilder, lower};
 
 /// Knows `sin`, `sample` and the record `Pair { a: f64, b: i32 }`.
 pub struct TestEnv;
@@ -50,9 +51,22 @@ impl Env for TestEnv {
     }
 }
 
+/// The initializers of the shared corpus programs.
+pub fn corpus_initializers(b: RegistryBuilder) -> RegistryBuilder {
+    use AutoArgType::I64;
+    b.auto_initializer(
+        "make_permutation_table",
+        &[I64, I64, I64, I64, I64, I64],
+        VariableType::Handle("PerlinNoiseSampler"),
+    )
+    .auto_initializer("make_base3d_perm_table", &[I64], VariableType::Handle("InterpolatedNoiseSampler"))
+    .auto_initializer("make_perm", &[I64, I64], VariableType::Handle("PerlinNoiseSampler"))
+    .auto_initializer("make_base3d", &[I64], VariableType::Handle("InterpolatedNoiseSampler"))
+}
+
 /// The registry matching [`TestEnv`].
 pub fn registry() -> Registry {
-    RegistryBuilder::new()
+    corpus_initializers(RegistryBuilder::new())
         .extern_fn("sin", &[VariableType::F64], VariableType::F64)
         .extern_fn(
             "sample",

@@ -161,3 +161,33 @@ fn merged_input_read_by_two_units_blocks_inlining() {
         InlineVerdict::Rejected(InlineRejection::MultipleUses(2))
     );
 }
+
+#[test]
+fn autoconst_arguments_merge_by_bits() {
+    let mut pb = ProgramBuilder::new();
+    let mk = |pb: &mut ProgramBuilder, args: Vec<AutoArg>| pb.auto_const("v", I64, "make", args);
+    let a = mk(&mut pb, vec![0.0.into(), true.into(), "s".into()]);
+    assert_eq!(a, mk(&mut pb, vec![0.0.into(), true.into(), "s".into()]));
+    // `-0.0` is not `0.0`, NaN equals itself, and each other kind differs.
+    assert_ne!(a, mk(&mut pb, vec![(-0.0).into(), true.into(), "s".into()]));
+    assert_ne!(a, mk(&mut pb, vec![0.0.into(), false.into(), "s".into()]));
+    assert_ne!(a, mk(&mut pb, vec![0.0.into(), true.into(), "t".into()]));
+    let n = mk(&mut pb, vec![f64::NAN.into()]);
+    assert_eq!(n, mk(&mut pb, vec![f64::NAN.into()]));
+    let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(p.auto_consts.iter().count(), 5);
+}
+
+#[test]
+fn value_autoconsts_are_read_like_expressions_and_listed() {
+    let mut pb = ProgramBuilder::new();
+    let seed = pb.param("seed", I64);
+    let salt = pb.auto_const("salt", I64, "make_salt", [seed.into(), "caves".into()]);
+    let mut f = FnBuilder::new("m", F64);
+    f.ret(Expr::from(salt).cast(F64) + 1.0);
+    let u = pb.finish_unit(f);
+    pb.entry(u, Grid::new((1, 1, 1)));
+    let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
+    let ComputeUnit::DensityFunction { auto_consts, .. } = p.compute_units.values().next().unwrap();
+    assert_eq!(auto_consts.len(), 1, "the unit lists the autoconst its function reads");
+}

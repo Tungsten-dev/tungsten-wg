@@ -52,6 +52,9 @@ fn auto_const_specs(program: &OptimizedProgram, interface: &Interface) -> Vec<Au
                 .iter()
                 .map(|arg| match arg {
                     AutoConstArg::I64(v) => (AutoConstArg::I64(*v), rcl::Type::I64),
+                    AutoConstArg::F64(v) => (AutoConstArg::F64(*v), rcl::Type::F64),
+                    AutoConstArg::Bool(v) => (AutoConstArg::Bool(*v), rcl::Type::Bool),
+                    AutoConstArg::Str(v) => (AutoConstArg::Str(v.clone()), rcl::Type::StaticStr),
                     AutoConstArg::Param(p) => {
                         (AutoConstArg::Param(*p), convert_type(&program.auto_params[*p].t))
                     }
@@ -170,6 +173,9 @@ fn make_auto_consts_fn<'m>(
             .map(|(a, _)| match a {
                 AutoConstArg::Param(p) => E::Variable(param_vars[p].clone()),
                 AutoConstArg::I64(v) => E::I64Literal(*v),
+                AutoConstArg::F64(v) => E::F64Literal(*v),
+                AutoConstArg::Bool(v) => E::BoolLiteral(*v),
+                AutoConstArg::Str(v) => E::StrLiteral(v.clone()),
             })
             .collect::<Vec<_>>();
         f.add_statement(rcl::Statement::AssignPlace {

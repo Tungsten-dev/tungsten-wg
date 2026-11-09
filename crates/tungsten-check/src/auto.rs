@@ -11,6 +11,7 @@ pub enum AutoArgValue {
     I64(i64),
     F64(f64),
     Bool(bool),
+    Str(String),
 }
 
 impl AutoArgValue {
@@ -19,6 +20,7 @@ impl AutoArgValue {
             AutoArgValue::I64(_) => "i64",
             AutoArgValue::F64(_) => "f64",
             AutoArgValue::Bool(_) => "bool",
+            AutoArgValue::Str(_) => "str",
         }
     }
 
@@ -109,6 +111,9 @@ impl LowerMap {
                     .iter()
                     .map(|arg| match arg {
                         AutoArgSpec::I64(v) => AutoArgValue::I64(*v),
+                        AutoArgSpec::F64(v) => AutoArgValue::F64(*v),
+                        AutoArgSpec::Bool(v) => AutoArgValue::Bool(*v),
+                        AutoArgSpec::Str(v) => AutoArgValue::Str(v.clone()),
                         AutoArgSpec::Param(p) => bound[p.0].clone(),
                     })
                     .collect(),

@@ -51,6 +51,9 @@ pub fn print(p: &OptimizedProgram) -> String {
             .map(|arg| match arg {
                 AutoConstArg::Param(p) => format!("param({})", labels.auto_param(*p)),
                 AutoConstArg::I64(v) => format!("{v}L"),
+                AutoConstArg::F64(v) => f64_lit(*v),
+                AutoConstArg::Bool(v) => v.to_string(),
+                AutoConstArg::Str(v) => quote_string(v),
             })
             .collect();
         s.push_str(&format!(

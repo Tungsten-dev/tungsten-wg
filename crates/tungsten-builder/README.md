@@ -54,7 +54,7 @@ let program: OptimizedProgram = pb.build()?;
 | `Local` | A parameter or local of one function, from `param`, `local` (unique name), `temp` (name hint) or `anon` |
 | `Expr` | An IR expression with its type and any mistakes found so far. Handles and literals convert into it |
 | `Grid`, `InputSpec` | Dims and scales, and everything that describes an input |
-| `Decls` | Extern and record declarations from `extern_fns!` and `record_decls!` |
+| `Decls` | Extern, record and initializer declarations from `extern_fns!`, `record_decls!` and `auto_initializers!` |
 
 **Recursive lowering** needs nothing special. The program and the current function are separate
 values, so a lowering function takes both, and can open a new `FnBuilder` while another is open:
@@ -153,6 +153,27 @@ branches need `&mut ProgramBuilder`.
 Comparisons stay methods (`.lt()`, `.ge()`, `.eq_expr()`, …), as do the bit operators (`.bitand()`,
 `.shl()`, …).
 
+## Autoconsts
+
+An autoconst is built once, when the orchestration is created, by a runtime function the
+frontend names. The program only reads it. A param is a creation input of type `I64`, `F64` or
+`Bool`; creation takes one typed argument per param, in declaration order.
+
+```rust
+# use tungsten_wg::builder::prelude::*;
+let mut pb = ProgramBuilder::new();
+let seed = pb.param("seed", I64);
+let table = pb.auto_const("temperature", Handle("Table"), "make_table", [seed.into(), 1i64.into()]);
+let salt = pb.auto_const("salt", I64, "derive_salt", [seed.into(), "caves".into()]);
+// A handle is what externs take; a value reads like any expression.
+let read = Expr::from(salt).cast(F64);
+# let _ = (table, read);
+```
+
+Arguments are `AutoArg`s: a `Param`, an `i64`, an `f64`, a `bool` or a string. A handle's `t` is
+`Handle("Name")`, a value's is a scalar. `registry_from` knows the initializers from
+`auto_initializers!`, below.
+
 ## Externs and records
 
 Each signature is written once and gives both a typed call function and a declaration:
@@ -169,6 +190,17 @@ record_decls! {
     group records;
     Pair { a: F64, b: I32 },
 }
+// Handle types are written `handle "Name"`; initializers list argument kinds (`I64`, `F64`,
+// `Bool`, `Str`) and a return type.
+extern_fns! {
+    group table_externs;
+    table_get(t: handle "Table", i: I32): I32,
+}
+auto_initializers! {
+    group initializers;
+    make_table(I64, I64): handle "Table",
+    derive_salt(I64, Str): I64,
+}
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 # let mut pb = ProgramBuilder::new();
@@ -177,7 +209,7 @@ record_decls! {
 # let u = pb.finish_unit(f);
 # pb.entry(u, Grid::new((1, 1, 1)));
 # let program = pb.build()?;
-let registry = tungsten_wg::registry_from([surface_externs(), records()])?;
+let registry = tungsten_wg::registry_from([surface_externs(), records(), table_externs(), initializers()])?;
 let out = Compiler::new(program, registry, RustBackend::new(RustConfig::default())).compile()?;
 # Ok(())
 # }

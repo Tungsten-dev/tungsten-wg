@@ -359,8 +359,8 @@ program {
     entry top @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
 }
 
-@case "origin" origin(0, 0, 0) seed(1) host(scale = 2.0)
-@case "far"    origin(1000000, -64, 3) seed(1) host(scale = -0.0)
+@case "origin" origin(0, 0, 0) param(seed = 1) host(scale = 2.0)
+@case "far"    origin(1000000, -64, 3) param(seed = 1) host(scale = -0.0)
 @expect "origin" top[0, 0, 0] = 0.25
 @expect "far" error(OutOfBounds)
 ```
@@ -396,7 +396,7 @@ built alone, so a compile error only fails its own test.
 
 There is one process per (test, stage), with a fresh `Orchestration` per case. Protocol:
 little-endian binary on stdin and stdout, request/response per case. A case goes in as origin
-(3×f64), seed (u64), and host inputs as raw bits in declaration order. The result comes back as a
+(3×f64), the auto params in declaration order, and host inputs as raw bits in declaration order. The result comes back as a
 status byte, then either every entry's cells as raw bits, or an error kind and message. A driver
 responds only after the whole case succeeds. A watchdog (`TW_TIMEOUT_SECS`, default 10 per case) or
 a crash scores that case as a backend failure, and the run resumes from the next case in a new

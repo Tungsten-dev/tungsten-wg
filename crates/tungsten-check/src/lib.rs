@@ -40,7 +40,7 @@ pub use map::{
 };
 pub use tungsten_core::exec::{CaseResult, Failure};
 pub use tungsten_core::{Case, EvalError, ExternFail, Externs, StuckReason, Value};
-pub use registry::{Registry, RegistryBuilder, RegistryError};
+pub use registry::{AutoArgType, InitializerDecl, Registry, RegistryBuilder, RegistryError};
 
 use tungsten_ir::OptimizedProgram;
 

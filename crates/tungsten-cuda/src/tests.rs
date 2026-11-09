@@ -345,3 +345,41 @@ fn invalid_setter_value_is_an_error_not_a_panic() {
         Err(CompileError::Backend { source: BackendError::InvalidConfig(_), .. })
     ));
 }
+
+#[test]
+fn autoconst_arguments_and_values() {
+    let src = r#"
+program {
+    param seed: i64;
+    param scale: f64;
+    param buffers: bool;
+    auto t: handle Table = make_table(param(seed), -9223372036854775808L, 1.5, -0.0, true, "q\"\\? \u{e9} \u{1d11e}\n");
+    auto v: f64 = make_v(param(scale), param(buffers), nan, inf, -inf);
+    auto i: i64 = make_i(7L, false);
+    fn run() -> f64 {
+        return (ext sample::<(handle Table, f64) -> f64>(auto(t), auto(v)) + (auto(i) as f64));
+    }
+    unit u { main run; autos [t, v, i]; }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+    let output = generate(src, CudaConfig::default());
+    assert_contains("interface.cuh", &output.interface_header, &[
+        "tw::Table t;",
+        "double v;",
+        "long long i;",
+    ]);
+    // handles are read by address, values by copy
+    assert_contains("density.cu", &output.density_source, &[
+        "tw::sample(&ctx.auto_constants->t, ctx.auto_constants->v)",
+        "(double)ctx.auto_constants->i",
+    ]);
+    assert_contains("orchestration.cu", &output.orchestration_source, &[
+        // the copy to the device is a byte copy
+        "static_assert(std::is_trivially_copyable<dev::AutoConsts>::value",
+        // i64 is always hex; strings are UTF-8 with octal escapes and `?` escaped
+        "tw::make_table(seed, (long long)0x8000000000000000ULL, 1.5, -0.0, true, \"q\\\"\\\\\\? \\303\\251 \\360\\235\\204\\236\\012\")",
+        "tw::make_v(scale, buffers_1, TW_NAN_F64, TW_INF_F64, (-TW_INF_F64))",
+        "tw::make_i((long long)0x0000000000000007ULL, false)",
+    ]);
+}

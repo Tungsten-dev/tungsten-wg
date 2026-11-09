@@ -55,3 +55,15 @@ pub fn sample_state(state: u64, v: [f64; 3]) -> f64 {
     let h = fold(state, &[f2i(v[0].floor()), f2i(v[1].floor()), f2i(v[2].floor())]);
     (h >> 11) as f64 * (1.0 / 9007199254740992.0)
 }
+
+// ----- toy autoconst initializers (registry.toml `auto_initializer`) -----
+
+/// FNV-1a over the UTF-8 bytes of `name`, seeded with `seed`.
+pub fn toy_salt(seed: i64, name: &str) -> i64 {
+    let mut h = (seed as u64) ^ 0xcbf2_9ce4_8422_2325;
+    for b in name.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h as i64
+}

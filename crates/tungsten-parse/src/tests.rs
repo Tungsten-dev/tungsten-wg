@@ -1303,6 +1303,33 @@ fn auto_i64_argument_needs_the_suffix() {
 }
 
 #[test]
+fn auto_argument_kinds() {
+    let t = ok(r#"program {
+        auto a: i64 = make(-0.0, 1.5, true, false, "q\"\\ \u{e9} \u{1d11e}", nan, -inf, 7L);
+    }"#);
+    let a = t.program.auto_consts.values().next().unwrap();
+    assert_eq!(a.args.len(), 8);
+    assert!(matches!(a.args[0], AutoConstArg::F64(v) if v.to_bits() == (-0.0f64).to_bits()));
+    assert_eq!(a.args[1], AutoConstArg::F64(1.5));
+    assert_eq!(a.args[2], AutoConstArg::Bool(true));
+    assert_eq!(a.args[3], AutoConstArg::Bool(false));
+    assert_eq!(a.args[4], AutoConstArg::Str("q\"\\ \u{e9} \u{1d11e}".into()));
+    assert!(matches!(a.args[5], AutoConstArg::F64(v) if v.is_nan()));
+    assert_eq!(a.args[6], AutoConstArg::F64(f64::NEG_INFINITY));
+    assert_eq!(a.args[7], AutoConstArg::I64(7));
+    // `0.0` and `-0.0` are different arguments.
+    assert_ne!(AutoConstArg::F64(0.0), AutoConstArg::F64(-0.0));
+    assert_eq!(AutoConstArg::F64(f64::NAN), AutoConstArg::F64(f64::NAN));
+}
+
+#[test]
+fn auto_argument_errors() {
+    fails("program { auto t: i64 = make(1.5f); }", "an autoconst argument is");
+    fails("program { auto t: i64 = make(1_i8); }", "an autoconst argument is");
+    fails("program { auto t: i64 = make(param(nope)); }", "nope");
+}
+
+#[test]
 fn construct_forms() {
     let t = ok("program { fn f(x: f64) -> f64 {
         vars { v: vec3, p: pos3, r: extern Rec, a: [f64; 2], o: extern Opaque }

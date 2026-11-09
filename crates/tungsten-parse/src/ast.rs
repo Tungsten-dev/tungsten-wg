@@ -128,8 +128,9 @@ pub struct AutoItem {
 #[derive(Debug, Clone)]
 pub enum AutoArg {
     Param(Label),
-    /// A number literal; elaboration checks that it is an `i64`.
+    /// A number or bool literal; elaboration picks `i64`, `f64` or `bool` by its kind.
     Lit(Lit),
+    Str(String),
 }
 
 #[derive(Debug, Clone)]

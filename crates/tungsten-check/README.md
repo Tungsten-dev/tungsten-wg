@@ -57,7 +57,7 @@ record fields, a positional record construct with too few args, empty array lite
 and density reads of inputs the unit doesn't list (`InputNotListed`).
 
 Dropped during lowering (kept in `LowerMap` where it matters): every name, `canonical_name`,
-`source_hash` and table idents. A `Field`'s `base_type` is used only to pick
+`source_hash` and initializer names (the `LowerMap` keeps them). A `Field`'s `base_type` is used only to pick
 the selector.
 
 ## Files at a glance
@@ -117,8 +117,12 @@ problem. If that lookup returns `None`, the ref is stale or from another program
 **Pass 2: lower each table**, in this fixed order (which is also the order errors come out in):
 
 ```
-tables (no errors possible) → hosts → consts → functions → units → inputs → entries
+auto params → autoconsts → hosts → consts → functions → units → inputs → entries
 ```
+
+The auto params and autoconsts come first because they carry the registry checks of
+`specs/auto-consts.md` §3.2 (see [Autoconsts](#autoconsts-autors)): a handle autoconst becomes a core
+table, a value autoconst becomes one extra core host after the program's real hosts.
 
 Each step loops over the arena, calls `cx.enter(Item::…)` to say "errors from now on belong to
 this item", and builds the core struct.
@@ -195,8 +199,8 @@ The path is maintained by `Ctx`:
 - `cx.err(kind)` records an error at the current location.
 
 Names in a location come from `canonical_name` or the `Name`, falling back to `#<core id>`
-(`Ref`'s slot index isn't public). A unit's name is its main function's name, a Perlin table's
-is its `ident`, and an input's is its `name`.
+(`Ref`'s slot index isn't public). A unit's name is its main function's name, an autoconst's
+is its `name`, and an input's is its `name`.
 
 Errors come out in walk order (pass 2's order, then pre-order within an item: a node's own
 error before its children's). `lower` never stops early; you get all of them.
@@ -214,12 +218,47 @@ program also knows its externs and records, so it builds the registry with `Regi
 
 - `extern_fn(name, params, ret)` / `extern_fn_with_domain_error(…)`
 - `record(name, &[(field, type), …])`. Field types can name other records.
+- `auto_initializer(name, &[AutoArgType], ret)`: a host-side runtime function that builds an
+  autoconst once, when the orchestration is created. `AutoArgType` is `I64`, `F64`, `Bool` or
+  `Str`. Initializers have their own namespace, apart from externs. Handle type names aren't
+  declared: they're interned from the types the declarations mention.
 - `build()` resolves record names, assigns ids **in declaration order**, and rejects duplicate
-  names, duplicate fields, unknown record names, and records
+  names (externs, initializers, records), duplicate fields, unknown record names, and records
   that contain themselves by value (`find_record_cycle`).
 
-The registry is **strict**: an extern, record or field the program uses but the registry
-doesn't know is a lowering error.
+The registry is **strict**: an extern, record, field or initializer the program uses but the
+registry doesn't know is a lowering error.
+
+## Autoconsts (`auto.rs`)
+
+An autoconst is a value built once, when an orchestration is created, by calling a registry
+initializer with arguments (`Param` refs, `I64`, `F64`, `Bool` or `Str` literals). Lowering checks
+all of these and collects the errors like its others: `BadAutoParamType`, `DuplicateAutoParam`,
+`BadAutoConstType`, `HandleHost`, `UnknownAutoInitializer`, `AutoArgCount`, `AutoArgType { index }`,
+`AutoInitializerReturn`, `AutoArgHasNul { index }`, and `DanglingRef` for `Param` and
+`Expression::AutoConst` refs.
+
+| | Handle (`t = handle Name`) | Value (`bool`, `i8`, `i32`, `i64`, `f32`, `f64`) |
+| --- | --- | --- |
+| Core | A table. `map.tables` (`TableId`) | A host after the real ones. `map.auto_hosts`, named by `host_name` |
+| Read | `Expr::Table` | `Expr::Host`. A function's `hosts` gets it when its body reads it, a unit's from its `autos` list |
+| Unlisted read | `table … isn't in the tables of unit` | `autoconst … isn't in the autos of unit` |
+
+Core's rule that const initializers can't read hosts stays as it is, so no const can read a value
+autoconst. `Prepared` evaluates nothing about autoconsts; the frontend builds the values:
+
+```rust
+let inits = prep.map().resolved_auto_consts(&[("seed".into(), AutoArgValue::I64(1))])?;
+let (externs, auto_values) = my_build(&inits)?;   // handles into `externs`, values into `auto_values`
+let case = prep.case(&NamedCase { origin, hosts, auto_values })?;
+prep.eval(&case, &externs, opts)
+```
+
+`resolved_auto_consts` returns every autoconst in arena order, read or not, with params replaced
+by their values (`ParamBindError` for a missing, unknown, duplicate or wrongly typed param).
+`ResolvedAutoConst::core` says where each goes: `AutoCoreId::Table(TableId)` or
+`AutoCoreId::Host(HostId)`. `auto_values` is keyed by `HostId`, apart from `hosts`, so autoconst
+names can collide with host names.
 
 ## The side table (`map.rs`)
 
@@ -229,12 +268,13 @@ someone might still want:
 - `IdMap<T, Id>` works both ways: `get(id) → Ref<T>`, `name(id) → &str`, `id(ref) → Id`. There
   is one for units, functions, consts, hosts, tables and inputs, plus one per function for
   locals (`map.locals[fn_id]`, or `map.local(fn_id, var_ref)`).
-- Extras: `host_names` (the `Named` string, for binding host values by name), `table_idents`
-  (the original table, with `ident`/`subident`), extern names, record and field
+- Extras: `host_names` (the `Named` string, for binding host values by name; `None` for a value
+  autoconst's host), `auto_params`, `auto_consts` (every autoconst with its core id, initializer
+  and arguments), `handle_types` (the names behind `HandleTypeId`), extern names, record and field
   names.
 
 Use it to turn a core id back into something a human recognizes, as `check.rs` does for checker
-errors, or to resolve `ExternId → name` and `TableId → ident` in an `Externs` implementation.
+errors, or to resolve `ExternId → name` and `TableId → autoconst` in an `Externs` implementation.
 
 ## Checking and evaluating (`check.rs`, `eval.rs`)
 
@@ -242,7 +282,7 @@ The checker and the interpreter live in `tungsten-core` (verified). This crate w
 
 ```rust
 let prep = tungsten_check::prepare(&program, &registry)?;   // lower + check, once per program
-let case = prep.case(&NamedCase { origin: [0.0; 3], hosts: vec![("seed".into(), v)] })?;
+let case = prep.case(&NamedCase { origin: [0.0; 3], hosts: vec![("h".into(), v)], auto_values: vec![] })?;
 let result = prep.eval(&case, &my_externs, EvalOptions::default())?;  // once per case
 // or, one shot: tungsten_check::evaluate(&program, &registry, &named_case, &ext, opts)
 ```
@@ -251,8 +291,9 @@ let result = prep.eval(&case, &my_externs, EvalOptions::default())?;  // once pe
   errors are rendered with names: a `Location` (core path → `Item` + `Step`s; cycles are under
   `Item::Program`, a transitive missing const under `Step::WholeList`) and a message. The core
   `CheckErrorKind` is kept on each error.
-- `Prepared::case` binds hosts by `Named` string (unknown, missing and duplicate names are
-  `CaseBindError`s) and runs `check_case`.
+- `Prepared::case` binds hosts by `Named` string and value autoconsts by `HostId` (unknown,
+  missing and duplicate entries are `CaseBindError`s, and an unbound value autoconst is
+  `AutoValueMissing`), then runs `check_case`.
 - `Prepared::eval` runs `check_case`, then `eval_program`. Any `Stuck` in a cell or a failure
   diagnostic is `EvalFailure::Stuck`: an interpreter or checker bug, never a program error.
 - `EvalOptions { fuel, memo }`: fuel per `While` execution (`DEFAULT_FUEL = 1 << 20`), and
@@ -269,7 +310,7 @@ the result. `tests/mod.rs` has the helpers:
 
 - `TestEnv` / `registry()`: a matching parser environment and registry (`sin`, `sample`,
   record `Pair`).
-- `snippet(decls, body)`: wraps a function body in a small program with a host, tables, a
+- `snippet(decls, body)`: wraps a function body in a small program with a host, autoconsts, a
   constant and a density input, so a test only has to write the interesting line.
 - `snippet(decls, body)`: the body goes in `fn top(p: f64) -> f64`, a helper of unit `u`
   whose 0-param main `top_main` returns `top(1.0)`; every fn in `decls` is listed as a helper.

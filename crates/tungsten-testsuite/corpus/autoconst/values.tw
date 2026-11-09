@@ -1,0 +1,30 @@
+// Value autoconsts: every scalar type, built from every kind of literal argument. The i64
+// results show the exact bits of the f64 arguments (-0.0, NaN, infinities) and the UTF-8 bytes of
+// the strings (quotes, backslash, control characters, non-ASCII and non-BMP text).
+program {
+    auto pz: i64 = make_bits(0.0);
+    auto nz: i64 = make_bits(-0.0);
+    auto nan_bits: i64 = make_bits(nan);
+    auto inf_bits: i64 = make_bits(-inf);
+    auto big: i64 = make_bits(1.7976931348623157e308);
+    auto tiny: i64 = make_bits(5e-324);
+    auto s0: i64 = make_salt(-9223372036854775808L, "");
+    auto s1: i64 = make_salt(1L, "say \"hi\" \\ back");
+    auto s2: i64 = make_salt(1L, "héllo wörld");
+    auto s3: i64 = make_salt(1L, "𝄞 🦀");
+    auto s4: i64 = make_salt(7L, "line\nbreak\ttab ?? \"?\"");
+    auto s5: i64 = make_salt(0L, "");
+    fn bits() -> [i64; 6] {
+        return [auto(pz), auto(nz), auto(nan_bits), auto(inf_bits), auto(big), auto(tiny)];
+    }
+    fn salts() -> [i64; 6] {
+        return [auto(s0), auto(s1), auto(s2), auto(s3), auto(s4), auto(s5)];
+    }
+    unit ub { main bits; autos [pz, nz, nan_bits, inf_bits, big, tiny]; }
+    unit us { main salts; autos [s0, s1, s2, s3, s4, s5]; }
+    entry ub @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry us @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" ub[0, 0, 0] = [0L, -9223372036854775808L, 9221120237041090560L, -4503599627370496L, 9218868437227405311L, 1L]
+@expect "c" us[0, 0, 0] = [5472609002491880229L, 8435572913204735591L, -1669003618767292423L, 3439302243485323556L, -8155079136777701340L, -3750763034362895579L]

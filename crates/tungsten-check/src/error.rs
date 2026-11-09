@@ -108,9 +108,24 @@ pub enum LowerErrorKind {
     ConstructArity { expected: usize, found: usize },
     #[error("parameter {problem}")]
     Parameter { problem: ParameterProblem },
-    /// Only handle autoconsts are supported so far.
-    #[error("autoconst type `{t}` isn't a handle type")]
+    #[error("auto param type `{t}` isn't i64, f64 or bool")]
+    BadAutoParamType { t: String },
+    #[error("auto param `{0}` is declared twice")]
+    DuplicateAutoParam(String),
+    #[error("autoconst type `{t}` isn't a handle or one of bool, i8, i32, i64, f32, f64")]
     BadAutoConstType { t: String },
+    #[error("host type `{t}` is a handle type")]
+    HandleHost { t: String },
+    #[error("unknown auto initializer `{0}`")]
+    UnknownAutoInitializer(String),
+    #[error("auto initializer `{initializer}` takes {expected} arguments, found {found}")]
+    AutoArgCount { initializer: String, expected: usize, found: usize },
+    #[error("argument {index} of auto initializer `{initializer}` is `{expected}`, found `{found}`")]
+    AutoArgType { index: usize, initializer: String, expected: String, found: String },
+    #[error("auto initializer `{initializer}` returns `{returns}`, but the autoconst is `{declared}`")]
+    AutoInitializerReturn { initializer: String, returns: String, declared: String },
+    #[error("string argument {index} contains a NUL character")]
+    AutoArgHasNul { index: usize },
 }
 
 /// Where an error is: an item and a path inside it.
@@ -139,6 +154,7 @@ pub enum Item {
     Host { id: Option<HostId>, name: String },
     Input { id: Option<InputId>, name: String },
     AutoConst { id: Option<TableId>, name: String },
+    AutoParam { name: String },
     Entry { index: usize },
     /// Before the walk enters an item. No lowering error is reported here; checker wf errors
     /// in extern and record decls are.
@@ -156,6 +172,7 @@ impl fmt::Display for Item {
             Item::Host { name, .. } => write!(f, "host `{name}`"),
             Item::Input { name, .. } => write!(f, "input `{name}`"),
             Item::AutoConst { name, .. } => write!(f, "autoconst `{name}`"),
+            Item::AutoParam { name } => write!(f, "auto param `{name}`"),
             Item::Entry { index } => write!(f, "entry {index}"),
             Item::Registry => write!(f, "registry"),
             Item::Program => write!(f, "program"),

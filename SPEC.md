@@ -187,6 +187,16 @@ ret = "f64"
 domain_error = false
 ```
 
+Autoconst initializers are an `[[auto_initializer]]` list with `name`, `params` (`i64`, `f64`,
+`bool` or `str`) and `ret` (a type spelling, `handle Name` for a handle):
+
+```toml
+[[auto_initializer]]
+name = "make_salt"
+params = ["i64", "str"]
+ret = "i64"
+```
+
 Type spellings are those of `tungsten-parse` §5.4. The loader fills `RegistryBuilder` and backs
 `Env::extern_fn` and `Env::extern_type`. Names are unique, with no overloads, so `f32` variants take
 a `_f32` suffix.
@@ -224,9 +234,21 @@ sampler_sample(s, v)  = (h >>> 11) as f64 * 2^-53, where
                         h = fold splitmix64 over (state, f2i(floor v.x), f2i(floor v.y), f2i(floor v.z))
 ```
 
+Value initializers (`make_salt`, `make_bits`, `make_scale`, `make_flag`, `make_i8`, `make_i32`,
+`make_f32`) cover the remaining argument kinds and scalar types:
+
+```
+make_salt(seed: i64, s: str) -> i64   = FNV-1a over the UTF-8 bytes of s, starting from seed ^ 0xcbf29ce484222325
+make_bits(x: f64) -> i64              = the bits of x
+make_scale(x: f64, flip: bool) -> f64 = if flip { -x } else { x }
+make_flag(on: bool, n: i64) -> bool   = on && n > 0
+make_i8 / make_i32(v: i64)            = v truncated to the type, make_f32(v: f64) = v rounded to f32
+```
+
 `seed` is reinterpreted between `u64` and `i64` (bits). The interpreter computes the same inputs from
 `LowerMap::resolved_auto_consts` (the toy initializers take the ids as literal `i64` arguments), inside a
-per-case `Externs` value, since the core `Case` has no params. Every step is integer or exactly representable, so it's identical
+per-case `Externs` value, since the core `Case` has no params. The values of value autoconsts go into
+`NamedCase::auto_values`. Every step is integer or exactly representable, so it's identical
 across languages. All Base3D tables of one seed are identical; tests must not rely on them differing.
 
 ## 6. Differential comparison

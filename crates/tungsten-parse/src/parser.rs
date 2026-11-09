@@ -596,8 +596,10 @@ impl Parser {
                         let l = p.label()?;
                         p.expect(Tok::RParen)?;
                         Ok(AutoArg::Param(l))
+                    } else if matches!(p.tok(), Tok::Str(_)) {
+                        Ok(AutoArg::Str(p.string()?))
                     } else {
-                        Ok(AutoArg::Lit(p.num()?))
+                        Ok(AutoArg::Lit(p.literal(false)?))
                     }
                 })?;
                 self.expect(Tok::Semi)?;

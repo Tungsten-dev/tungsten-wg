@@ -454,22 +454,53 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
     let mut autos = vec![];
     for _ in 0..if lib { 0 } else { rng.below(3) } {
         let args = (0..rng.below(4))
-            .map(|_| {
-                let ints: Vec<_> = params
-                    .iter()
-                    .copied()
-                    .filter(|r| p.auto_params[*r].t == VariableType::I64)
-                    .collect();
-                if !ints.is_empty() && rng.chance(1, 2) {
-                    AutoConstArg::Param(*rng.pick(&ints))
-                } else {
-                    AutoConstArg::I64(*rng.pick(&[0, 1, -1, i64::MIN, i64::MAX, 4242]))
-                }
+            .map(|_| match rng.below(5) {
+                0 if !params.is_empty() => AutoConstArg::Param(*rng.pick(&params)),
+                1 => AutoConstArg::F64(*rng.pick(&[
+                    0.0,
+                    -0.0,
+                    1.5,
+                    -2.25e-7,
+                    1e300,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NAN,
+                    f64::from_bits(0x7ff8_0000_0000_1234),
+                    5e-324,
+                ])),
+                2 => AutoConstArg::Bool(rng.chance(1, 2)),
+                3 => AutoConstArg::Str(
+                    rng.pick(&[
+                        "",
+                        "plain",
+                        "quote\" and \\ backslash",
+                        "line\nbreak\ttab\r",
+                        "nul\0byte",
+                        "h\u{e9}llo w\u{f6}rld",
+                        "\u{1d11e} \u{1f980}",
+                        "minecraft:offset",
+                    ])
+                    .to_string(),
+                ),
+                _ => AutoConstArg::I64(*rng.pick(&[0, 1, -1, i64::MIN, i64::MAX, 4242])),
             })
             .collect();
+        let t = if rng.chance(1, 2) {
+            VariableType::Handle(rng.pick(&["PerlinNoiseSampler", "InterpolatedNoiseSampler"]))
+        } else {
+            rng.pick(&[
+                VariableType::Bool,
+                VariableType::I8,
+                VariableType::I32,
+                VariableType::I64,
+                VariableType::F32,
+                VariableType::F64,
+            ])
+            .clone()
+        };
         let a = AutoConst {
             name: name(rng),
-            t: VariableType::Handle(rng.pick(&["PerlinNoiseSampler", "InterpolatedNoiseSampler"])),
+            t,
             initializer: rng.pick(&["make_a", "make_b", "init_noise"]).to_string(),
             args,
         };

@@ -75,7 +75,7 @@ pub fn named_case(
         };
         hosts.push((name, to_core(v, &env.registry)?));
     }
-    Ok((NamedCase { origin: c.origin, hosts }, params))
+    Ok((NamedCase { origin: c.origin, hosts, auto_values: vec![] }, params))
 }
 
 pub fn run_case(
@@ -84,7 +84,6 @@ pub fn run_case(
     params: &[(String, Value)],
     opts: EvalOptions,
 ) -> Result<CaseResult, String> {
-    let case = prep.case(named).map_err(|e| e.to_string())?;
     let params = params
         .iter()
         .map(|(n, v)| {
@@ -98,7 +97,10 @@ pub fn run_case(
         })
         .collect::<Result<Vec<_>, String>>()?;
     let inits = prep.map().resolved_auto_consts(&params).map_err(|e| e.to_string())?;
-    let ext = CaseExterns::new(prep.map(), &inits)?;
+    let (ext, auto_values) = CaseExterns::new(prep.map(), &inits)?;
+    let mut named = named.clone();
+    named.auto_values = auto_values;
+    let case = prep.case(&named).map_err(|e| e.to_string())?;
     prep.eval(&case, &ext, opts).map_err(|e| match e {
         EvalFailure::Case(c) => format!("case doesn't fit: {c:?}"),
         s @ EvalFailure::Stuck { .. } => s.to_string(),

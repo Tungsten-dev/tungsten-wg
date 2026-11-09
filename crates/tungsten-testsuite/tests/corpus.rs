@@ -187,7 +187,7 @@ fn runtime_externs_registered() -> Result<(), Failed> {
                 }
             })
             .collect();
-        ext.call(tungsten_core::ExternId(i), &args)
+        ext.0.call(tungsten_core::ExternId(i), &args)
             .map_err(|_| Failed::from(format!("extern `{}` failed on sample arguments", e.name)))?;
     }
     Ok(())

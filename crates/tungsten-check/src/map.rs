@@ -126,15 +126,37 @@ impl CoreId for AutoParamId {
 /// Where the core program keeps an autoconst.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoCoreId {
+    /// A handle autoconst.
     Table(TableId),
+    /// A value autoconst: a host after the program's real hosts.
+    Host(HostId),
 }
 
 /// An argument of an autoconst initializer, with params as indices into `auto_params`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum AutoArgSpec {
     Param(AutoParamId),
     I64(i64),
+    F64(f64),
+    Bool(bool),
+    Str(String),
 }
+
+/// `F64` compares by bit pattern, as in the IR.
+impl PartialEq for AutoArgSpec {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Param(a), Self::Param(b)) => a == b,
+            (Self::I64(a), Self::I64(b)) => a == b,
+            (Self::F64(a), Self::F64(b)) => a.to_bits() == b.to_bits(),
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Str(a), Self::Str(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AutoArgSpec {}
 
 /// An autoconst as declared, with its place in the core program.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +179,10 @@ pub struct LowerMap {
     pub host_names: Vec<Option<String>>,
     /// The handle autoconsts, by `TableId`.
     pub tables: IdMap<AutoConst, TableId>,
+    /// The value autoconsts and the hosts they lower to. Their ids follow the real hosts.
+    pub auto_hosts: HashMap<Ref<AutoConst>, HostId>,
+    /// By value autoconst, in order: the name of host `hosts.len() + i`.
+    pub auto_host_names: Vec<String>,
     /// Auto params in declaration order.
     pub auto_params: IdMap<AutoParam, AutoParamId>,
     /// By `AutoParamId`.
@@ -175,6 +201,22 @@ pub struct LowerMap {
 }
 
 impl LowerMap {
+    /// The display name of a host: its name, or for a value autoconst's host, the autoconst's.
+    pub fn host_name(&self, h: HostId) -> Option<&str> {
+        match self.hosts.name(h) {
+            Some(n) => Some(n),
+            None => self
+                .auto_host_names
+                .get(h.0.checked_sub(self.hosts.len())?)
+                .map(String::as_str),
+        }
+    }
+
+    /// Whether `h` is the host of a value autoconst rather than a program host.
+    pub fn is_auto_host(&self, h: HostId) -> bool {
+        h.0 >= self.hosts.len() && h.0 - self.hosts.len() < self.auto_host_names.len()
+    }
+
     pub fn extern_name(&self, e: ExternId) -> Option<&str> {
         self.externs.get(e.0).map(String::as_str)
     }

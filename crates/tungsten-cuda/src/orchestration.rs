@@ -19,7 +19,7 @@ use super::{
 };
 use crate::backend::CudaConfig;
 use crate::model as cuda;
-use crate::model::codegen::{CudaCodeGenerator, split_c_array, type_string};
+use crate::model::codegen::{CudaCodeGenerator, double_literal, split_c_array, type_string};
 
 /// The four generated files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -335,6 +335,23 @@ fn hex_i64(v: i64) -> String {
     format!("(long long)0x{:016x}ULL", v as u64)
 }
 
+/// A C++ string literal holding `s` as UTF-8. Bytes outside printable ASCII are three-digit octal
+/// escapes, which can't swallow the digit that follows them. `?` is escaped against trigraphs.
+fn string_literal(s: &str) -> String {
+    let mut out = String::from("\"");
+    for &b in s.as_bytes() {
+        match b {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'?' => out.push_str("\\?"),
+            b' '..=b'~' => out.push(b as char),
+            b => out.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    out.push('"');
+    out
+}
+
 /// `long long seed, double salt, ` (with the trailing separator): the creation parameters.
 fn create_params(program: &OptimizedProgram, interface: &Interface) -> String {
     program
@@ -357,6 +374,9 @@ fn auto_const_assignments(program: &OptimizedProgram, interface: &Interface) -> 
             .map(|arg| match arg {
                 AutoConstArg::Param(p) => interface.auto_param(*p).to_string(),
                 AutoConstArg::I64(v) => hex_i64(*v),
+                AutoConstArg::F64(v) => double_literal(*v),
+                AutoConstArg::Bool(v) => v.to_string(),
+                AutoConstArg::Str(v) => string_literal(v),
             })
             .collect();
         let field = interface.auto_const_field(r);
@@ -383,7 +403,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
     let has_host_inputs = !host_inputs.is_empty();
 
     let includes = format!(
-        "#include \"{}\"\n#include \"{}\"\n\n#include <cuda_runtime.h>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <utility>",
+        "#include \"{}\"\n#include \"{}\"\n\n#include <cuda_runtime.h>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <type_traits>\n#include <utility>",
         config.public_header_name, config.interface_header_name
     );
     let check_macro = format!(
@@ -412,6 +432,10 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             a = axis
         ));
     }
+    asserts.push(format!(
+        "static_assert(std::is_trivially_copyable<dev::{a}>::value, \"{a} is copied to the device as bytes\");",
+        a = AUTO_CONSTS_STRUCT
+    ));
     asserts.push(format!(
         "static_assert(sizeof(HostConsts) == sizeof(dev::{d}) && alignof(HostConsts) == alignof(dev::{d}), \"HostConsts must mirror dev::{d}\");",
         d = DEVICE_HOST_CONSTS_STRUCT

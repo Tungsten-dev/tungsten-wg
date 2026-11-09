@@ -65,6 +65,8 @@ pub enum Expression {
     LongLit(i64),
     FloatLit(f32),
     DoubleLit(f64),
+    /// A string literal; escaped when printed.
+    StrLit(String),
     Null,
     /// A local, parameter or class name.
     Name(String),

@@ -14,7 +14,7 @@ mod function;
 mod macros;
 mod program;
 
-pub use decls::{Decls, ExternDecl, RecordDecl};
+pub use decls::{AutoInitializerDecl, Decls, ExternDecl, RecordDecl};
 pub use error::{BuildError, BuildErrorKind, BuildErrors, FieldProblem};
 pub use expr::{Expr, origin, origin_scale, pos3, position_scale};
 pub use function::{Block, FnBuilder, Local};
@@ -22,7 +22,7 @@ pub use program::{
     Auto, AutoArg, Constant, Grid, Helper, Host, Input, InputSpec, Param, ProgramBuilder, Unit,
 };
 
-pub use tungsten_ir::{OptimizedProgram, VariableType};
+pub use tungsten_ir::{AutoArgType, OptimizedProgram, VariableType};
 
 #[doc(hidden)]
 pub use tungsten_ir as __ir;
@@ -36,7 +36,7 @@ pub mod prelude {
         position_scale,
     };
     // `pos3` above brings both the ambient function and the `pos3!` macro.
-    pub use crate::{array, body, build, extern_fns, record_decls, vec3, vt};
+    pub use crate::{array, auto_initializers, body, build, extern_fns, record_decls, vec3, vt};
     pub use tungsten_ir::OptimizedProgram;
     pub use tungsten_ir::VariableType::{
         self, Bool, F32, F64, I8, I32, I64, Handle, Pos3, Vec3,

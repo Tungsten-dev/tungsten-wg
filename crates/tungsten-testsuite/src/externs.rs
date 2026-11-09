@@ -1,8 +1,9 @@
 //! `tungsten_check::Externs` over the shared runtime in `runtime/rust/`, plus the per-case toy
 //! tables (SPEC §5.3).
 
-use tungsten_check::{AutoArgValue, AutoCoreId, ExternFail, Externs, LowerMap, ResolvedAutoConst, Value};
-use tungsten_core::{ExternId, F64x3};
+use tungsten_check::{AutoCoreId, ExternFail, Externs, LowerMap, ResolvedAutoConst, Value};
+use tungsten_check::AutoArgValue::{Bool, F64, I64, Str};
+use tungsten_core::{ExternId, F64x3, HostId};
 
 #[path = "../runtime/rust/externs.rs"]
 pub mod rt_externs;
@@ -22,40 +23,68 @@ pub struct CaseExterns {
 }
 
 impl CaseExterns {
-    /// Builds the toy runtime objects of every handle autoconst (`inits` are in arena order).
-    /// The testsuite acts as a small frontend: it knows what its own initializers mean.
-    pub fn new(map: &LowerMap, inits: &[ResolvedAutoConst]) -> Result<Self, String> {
+    /// Builds the toy runtime objects of every autoconst (`inits` are in arena order): handles go
+    /// into the externs, values come back for `NamedCase::auto_values`. The testsuite acts as a
+    /// small frontend: it knows what its own initializers mean.
+    pub fn new(map: &LowerMap, inits: &[ResolvedAutoConst]) -> Result<(Self, Vec<(HostId, Value)>), String> {
         let mut tables: Vec<Option<Table>> = vec![];
+        let mut values = vec![];
         for a in inits {
-            let AutoCoreId::Table(id) = a.core;
-            let i64s = a
-                .args
-                .iter()
-                .map(|v| match v {
-                    AutoArgValue::I64(x) => Ok(*x),
-                    other => Err(format!("autoconst `{}`: unexpected argument {other:?}", a.name)),
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let table = match (a.initializer, i64s.as_slice()) {
-                ("make_permutation_table", [seed, id_lo, id_hi, idx, sub_lo, sub_hi]) => {
+            let bad = |what: &str| format!("autoconst `{}`: {what} for `{}`", a.name, a.initializer);
+            match (a.initializer, a.args.as_slice()) {
+                ("make_permutation_table", [I64(seed), I64(id_lo), I64(id_hi), I64(idx), I64(sub_lo), I64(sub_hi)]) => {
                     let st = rt_utils::perlin_state(*seed as u64, *id_lo, *id_hi, *idx, *sub_lo, *sub_hi);
-                    Table::Perm(Box::new(rt_utils::make_perm(st)))
+                    Self::put_table(&mut tables, a, Table::Perm(Box::new(rt_utils::make_perm(st))))?;
                 }
-                ("make_base3d_perm_table", [seed]) => Table::Sampler(rt_utils::base3d_state(*seed as u64)),
+                ("make_base3d_perm_table", [I64(seed)]) => {
+                    Self::put_table(&mut tables, a, Table::Sampler(rt_utils::base3d_state(*seed as u64)))?;
+                }
+                ("make_salt", [I64(seed), Str(name)]) => {
+                    values.push((Self::host(a)?, Value::I64(rt_utils::toy_salt(*seed, name))));
+                }
+                ("make_bits", [F64(x)]) => values.push((Self::host(a)?, Value::I64(x.to_bits() as i64))),
+                ("make_scale", [F64(base), Bool(flip)]) => {
+                    let v = if *flip { -*base } else { *base };
+                    values.push((Self::host(a)?, Value::F64(v.to_bits())));
+                }
+                ("make_flag", [Bool(on), I64(n)]) => {
+                    values.push((Self::host(a)?, Value::Bool(*on && *n > 0)));
+                }
+                ("make_i8", [I64(v)]) => values.push((Self::host(a)?, Value::I8(*v as i8))),
+                ("make_i32", [I64(v)]) => values.push((Self::host(a)?, Value::I32(*v as i32))),
+                ("make_f32", [F64(v)]) => values.push((Self::host(a)?, Value::F32((*v as f32).to_bits()))),
                 (name, args) => {
-                    return Err(format!("unknown initializer `{name}` with {} arguments", args.len()));
+                    return Err(format!(
+                        "unknown initializer `{name}` with {} arguments ({})",
+                        args.len(),
+                        bad("unexpected arguments")
+                    ));
                 }
-            };
-            if tables.len() <= id.0 {
-                tables.resize_with(id.0 + 1, || None);
             }
-            tables[id.0] = Some(table);
         }
         let tables = tables
             .into_iter()
             .map(|t| t.ok_or_else(|| "a table has no initializer".to_string()))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(CaseExterns { names: map.externs.clone(), tables })
+        Ok((CaseExterns { names: map.externs.clone(), tables }, values))
+    }
+
+    fn put_table(tables: &mut Vec<Option<Table>>, a: &ResolvedAutoConst, table: Table) -> Result<(), String> {
+        let AutoCoreId::Table(id) = a.core else {
+            return Err(format!("autoconst `{}` is a value, but `{}` builds a handle", a.name, a.initializer));
+        };
+        if tables.len() <= id.0 {
+            tables.resize_with(id.0 + 1, || None);
+        }
+        tables[id.0] = Some(table);
+        Ok(())
+    }
+
+    fn host(a: &ResolvedAutoConst) -> Result<HostId, String> {
+        match a.core {
+            AutoCoreId::Host(h) => Ok(h),
+            AutoCoreId::Table(_) => Err(format!("autoconst `{}` is a handle, but `{}` builds a value", a.name, a.initializer)),
+        }
     }
 }
 

@@ -147,7 +147,7 @@ pub(crate) fn walk_program(p: &mut OptimizedProgram, v: &mut impl RefVisitor) {
         for arg in &mut a.args {
             match arg {
                 AutoConstArg::Param(r) => v.auto_param(r),
-                AutoConstArg::I64(_) => {}
+                AutoConstArg::I64(_) | AutoConstArg::F64(_) | AutoConstArg::Bool(_) | AutoConstArg::Str(_) => {}
             }
         }
     }

@@ -70,6 +70,9 @@ fn auto_consts_class(program: &OptimizedProgram, interface: &Interface) -> java:
             .map(|arg| match arg {
                 AutoConstArg::Param(p) => J::name(interface.auto_param(*p)),
                 AutoConstArg::I64(v) => J::LongLit(*v),
+                AutoConstArg::F64(v) => J::DoubleLit(*v),
+                AutoConstArg::Bool(v) => J::BoolLit(*v),
+                AutoConstArg::Str(v) => J::StrLit(v.clone()),
             })
             .collect();
         assignments.push(S::Assign {

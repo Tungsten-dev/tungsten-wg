@@ -292,6 +292,9 @@ impl<'a> Ctx<'a> {
                 .map(|arg| match arg {
                     AutoConstArg::Param(p) => format!("param {}", self.program.auto_params[*p].name),
                     AutoConstArg::I64(v) => format!("{v}L"),
+                    AutoConstArg::F64(v) => format!("{v:?}"),
+                    AutoConstArg::Bool(v) => v.to_string(),
+                    AutoConstArg::Str(v) => format!("{v:?}"),
                 })
                 .collect();
             let display = format!("{}({})", a.initializer, args.join(", "));

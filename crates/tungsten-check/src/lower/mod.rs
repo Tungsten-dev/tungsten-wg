@@ -38,6 +38,8 @@ pub(crate) struct Ctx<'p, 'r> {
     pub locals: HashMap<Ref<Var>, tungsten_core::LocalId>,
     /// Handle type names by `HandleTypeId`: the registry's, then those only the program mentions.
     pub handles: Vec<String>,
+    /// The value autoconst hosts the current function reads, in first-read order.
+    pub auto_reads: Vec<tungsten_core::HostId>,
 }
 
 struct CtxNames<'a> {
@@ -80,10 +82,6 @@ impl<'p, 'r> Ctx<'p, 'r> {
     pub(crate) fn enter(&mut self, item: Item) {
         self.item = item;
         self.path.clear();
-    }
-
-    pub(crate) fn handle_type(&mut self, name: &str) -> HandleTypeId {
-        intern(&mut self.handles, name)
     }
 
     /// Lowers a type at the current location. Failures become errors and a placeholder.

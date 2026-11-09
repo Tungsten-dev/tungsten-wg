@@ -35,6 +35,10 @@ impl Default for EvalOptions {
 pub struct NamedCase {
     pub origin: [f64; 3],
     pub hosts: Vec<(String, Value)>,
+    /// The values of the value autoconsts, by the host they lower to
+    /// (`AutoConstInfo::core`). Separate from `hosts`, because autoconst names can collide with
+    /// host names and with each other.
+    pub auto_values: Vec<(HostId, Value)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -45,6 +49,11 @@ pub enum CaseBindError {
     Missing(String),
     #[error("host `{0}` is given more than once")]
     Duplicate(String),
+    #[error("no value for autoconst `{name}`")]
+    AutoValueMissing { name: String },
+    /// A `HostId` that isn't a value autoconst, or is given twice.
+    #[error("`auto_values` has an entry for host #{} that isn't a value autoconst, or has it twice", .0.0)]
+    AutoValueUnknown(HostId),
     /// The bound case fails `check_case` (a value of the wrong type).
     #[error("the case doesn't fit the program: {0:?}")]
     Invalid(CaseErrors),
@@ -119,13 +128,20 @@ impl Prepared {
     /// Binds hosts by name, then runs `check_case`.
     pub fn case(&self, c: &NamedCase) -> Result<Case, CaseBindError> {
         let n = self.program().hosts.len();
+        let real = self.map().hosts.len();
         let mut hosts: Vec<Option<Value>> = vec![None; n];
+        for (h, v) in &c.auto_values {
+            if h.0 < real || h.0 >= n || hosts[h.0].is_some() {
+                return Err(CaseBindError::AutoValueUnknown(*h));
+            }
+            hosts[h.0] = Some(v.clone());
+        }
         let mut given = HashSet::new();
         for (name, v) in &c.hosts {
             if !given.insert(name.as_str()) {
                 return Err(CaseBindError::Duplicate(name.clone()));
             }
-            let id = self.host_id(name).ok_or_else(|| CaseBindError::Unknown(name.clone()))?;
+            let id = self.host_id(name).filter(|h| h.0 < real).ok_or_else(|| CaseBindError::Unknown(name.clone()))?;
             hosts[id.0] = Some(v.clone());
         }
         let hosts = hosts
@@ -133,9 +149,12 @@ impl Prepared {
             .enumerate()
             .map(|(i, v)| {
                 v.ok_or_else(|| {
-                    CaseBindError::Missing(
-                        self.map().hosts.name(HostId(i)).unwrap_or("?").to_string(),
-                    )
+                    let name = self.map().host_name(HostId(i)).unwrap_or("?").to_string();
+                    if i >= real {
+                        CaseBindError::AutoValueMissing { name }
+                    } else {
+                        CaseBindError::Missing(name)
+                    }
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

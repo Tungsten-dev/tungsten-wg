@@ -276,6 +276,13 @@ fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
         triple(d.scaled_origin, &mut out);
         triple(d.scaled_position, &mut out);
     }
+    for a in p.auto_consts.values() {
+        for arg in &a.args {
+            if let AutoConstArg::F64(v) = arg {
+                out.push(v.to_bits());
+            }
+        }
+    }
     out
 }
 

@@ -98,8 +98,6 @@ pub const JAVA_RESERVED: &[&str] = &[
     "Pos3",
     "PositionIterator",
     "Helpers",
-    "PerlinNoiseSampler",
-    "InterpolatedNoiseSampler",
     "DoubleRef",
     "FloatRef",
     "IntRef",
@@ -156,7 +154,6 @@ pub const CUDA_RESERVED: &[&str] = &[
     // generated and runtime names
     "tw", "dev", "Ctx", "Config", "PositionIterator", "HostConsts", "DeviceHostConsts",
     "AutoConsts", "BufferLayout", "Orchestration", "Status", "Vec3", "Pos3", "Array", "Impl",
-    "PerlinNoiseSampler", "InterpolatedNoiseSampler",
     // uniform parameters and kernel locals
     "p", "ctx", "local", "origin", "buffers", "auto_constants", "host_consts", "r", "config",
 ];

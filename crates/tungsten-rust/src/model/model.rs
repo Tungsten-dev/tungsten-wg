@@ -110,6 +110,8 @@ pub enum Type {
     ArrayRef(Box<Type>, usize),
     MutArrayRef(Box<Type>, usize),
     Tuple(Vec<Type>),
+    /// `&'static str`, for string literals handed to initializers.
+    StaticStr,
 }
 
 impl Type {
@@ -144,6 +146,7 @@ impl std::fmt::Display for Type {
             Type::F32 => write!(f, "f32"),
             Type::F64 => write!(f, "f64"),
             Type::Bool => write!(f, "bool"),
+            Type::StaticStr => write!(f, "&'static str"),
             Type::Void => write!(f, "()"),
             Type::Pointer(t) => write!(f, "*{}", t),
             Type::Ref(t) => write!(f, "&{}", t),
@@ -250,6 +253,8 @@ pub enum Expression<'m> {
     F32Literal(f32),
     F64Literal(f64),
     BoolLiteral(bool),
+    /// A string literal, escaped when printed.
+    StrLiteral(String),
 
     // Binary operations
     BinaryOp {

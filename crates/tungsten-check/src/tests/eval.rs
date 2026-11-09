@@ -14,12 +14,13 @@ use crate::{
 /// `sin`, `sample`, `sqrt` (domain error below 0), `undeclared` (fails, but declares no domain
 /// error) and `bad` (returns the wrong shape), plus the record `Pair`.
 pub fn eval_registry() -> Registry {
-    RegistryBuilder::new()
+    super::corpus_initializers(RegistryBuilder::new())
         .extern_fn("sin", &[VariableType::F64], VariableType::F64)
         .extern_fn("sample", &[VariableType::Handle("PerlinNoiseSampler"), VariableType::F64], VariableType::F64)
         .extern_fn_with_domain_error("sqrt", &[VariableType::F64], VariableType::F64)
         .extern_fn("undeclared", &[VariableType::F64], VariableType::F64)
         .extern_fn("bad", &[VariableType::F64], VariableType::F64)
+        .auto_initializer("make_perm0", &[], VariableType::Handle("PerlinNoiseSampler"))
         .record("Pair", &[("a", VariableType::F64), ("b", VariableType::I32)])
         .build()
         .unwrap()
@@ -57,6 +58,7 @@ fn named(hosts: &[(&str, Value)]) -> NamedCase {
     NamedCase {
         origin: [0.0, 0.0, 0.0],
         hosts: hosts.iter().map(|(n, v)| (n.to_string(), v.clone())).collect(),
+        auto_values: vec![],
     }
 }
 
@@ -284,7 +286,7 @@ fn ambients_and_positions() {
         entry mu @dims(2, 1, 2) @origin_scale(2, 2, 2) @position_scale(0.5, 1, 1);
     }";
     let prep = prepare(&load(src), &eval_registry()).unwrap();
-    let case = prep.case(&NamedCase { origin: [10.0, 0.0, -1.0], hosts: vec![] }).unwrap();
+    let case = prep.case(&NamedCase { origin: [10.0, 0.0, -1.0], hosts: vec![], auto_values: vec![] }).unwrap();
     let r = prep.eval(&case, &Toy(&prep), EvalOptions::default()).unwrap();
     let v = |x: f64, y: f64, z: f64| Ok(Value::Vec3(F64x3 { x: x.to_bits(), y: y.to_bits(), z: z.to_bits() }));
     // Flat order: x fastest, then z.
@@ -458,7 +460,7 @@ fn canonical_input_error() {
 fn externs() {
     is("f64", "ext sqrt::<(f64) -> f64>(2.25)", f64v(1.5));
     let src = "program {
-        auto t0: handle PerlinNoiseSampler = make_perm();
+        auto t0: handle PerlinNoiseSampler = make_perm0();
         fn m() -> f64 { return ext sample(auto(t0), 3.0); }
         unit mu { main m; autos [t0]; }
         entry mu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);

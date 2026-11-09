@@ -37,6 +37,34 @@ pub fn make_base3d_perm_table(seed: i64) -> InterpolatedNoiseSampler {
     InterpolatedNoiseSampler { state: u::base3d_state(seed as u64) }
 }
 
+pub fn make_salt(seed: i64, name: &str) -> i64 {
+    u::toy_salt(seed, name)
+}
+
+pub fn make_bits(x: f64) -> i64 {
+    x.to_bits() as i64
+}
+
+pub fn make_scale(base: f64, flip: bool) -> f64 {
+    if flip { -base } else { base }
+}
+
+pub fn make_flag(on: bool, n: i64) -> bool {
+    on && n > 0
+}
+
+pub fn make_i8(v: i64) -> i8 {
+    v as i8
+}
+
+pub fn make_i32(v: i64) -> i32 {
+    v as i32
+}
+
+pub fn make_f32(v: f64) -> f32 {
+    v as f32
+}
+
 /// Zero-initialised, so buffers are deterministic. Unlike the upstream runtime, which hands out
 /// uninitialised memory. Never builds `T` on the stack.
 pub fn make_boxed<T>() -> Box<T> {

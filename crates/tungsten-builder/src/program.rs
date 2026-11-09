@@ -66,10 +66,37 @@ pub struct Auto {
 }
 
 /// An argument of an autoconst initializer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AutoArg {
     Param(Param),
     I64(i64),
+    F64(f64),
+    Bool(bool),
+    Str(String),
+}
+
+impl From<f64> for AutoArg {
+    fn from(v: f64) -> Self {
+        AutoArg::F64(v)
+    }
+}
+
+impl From<bool> for AutoArg {
+    fn from(v: bool) -> Self {
+        AutoArg::Bool(v)
+    }
+}
+
+impl From<&str> for AutoArg {
+    fn from(v: &str) -> Self {
+        AutoArg::Str(v.to_string())
+    }
+}
+
+impl From<String> for AutoArg {
+    fn from(v: String) -> Self {
+        AutoArg::Str(v)
+    }
 }
 
 impl From<Param> for AutoArg {
@@ -423,6 +450,9 @@ impl ProgramBuilder {
             .map(|a| match a {
                 AutoArg::Param(p) => AutoConstArg::Param(p.r),
                 AutoArg::I64(v) => AutoConstArg::I64(v),
+                AutoArg::F64(v) => AutoConstArg::F64(v),
+                AutoArg::Bool(v) => AutoConstArg::Bool(v),
+                AutoArg::Str(v) => AutoConstArg::Str(v),
             })
             .collect();
         let key = AutoConst {

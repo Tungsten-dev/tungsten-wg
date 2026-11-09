@@ -42,7 +42,8 @@ Known divergences from `tungsten-rust`, to rule out first in differential tests:
 
 ## Host orchestration contract
 
-- `create(seed, out)` uses the current device (the caller calls `cudaSetDevice` first) and its
+- `create(<params>, out)` takes one typed argument per auto param, in declaration order (a program with
+  only `seed: i64` has `create(long long seed, out)`). It uses the current device (the caller calls `cudaSetDevice` first) and its
   own non-blocking stream. On failure it releases what it acquired and leaves `out` null.
 - All work of an `Orchestration` runs on that one stream. Calls may be queued while earlier ones
   are in flight and run in order. No host syncs happen between waves.
@@ -51,7 +52,7 @@ Known divergences from `tungsten-rust`, to rule out first in differential tests:
 - The single device `HostConsts` copy is safe to reuse because each upload is stream-ordered after
   the previous call's kernels. A pinned staging slot is only reused after its event fires.
 - An `Orchestration` is not thread-safe. Use one per host thread. Several can coexist (e.g. with
-  different seeds).
+  different creation arguments).
 - Every CUDA call goes through `TUNGSTEN_CUDA_CHECK`, which returns a `Status` by default (works
   with `-fno-exceptions`, safe for JNI). Consumers can override it by defining it first or with
   `-DTUNGSTEN_CUDA_CHECK_HEADER="my_check.h"`. Device traps surface as a sticky error on the next
@@ -97,10 +98,11 @@ next to it, must provide:
 - `tw::Config { origin, origin_scale, position_scale, dimensions }` (aggregate, this order),
   `tw::PositionIterator { int3 pos; ... }`, `tw::make_position(config, local)` (same `pos` as the
   Rust `iter_3d` item), `tw::index(p)`.
-- `tw::PerlinNoiseSampler` / `tw::InterpolatedNoiseSampler`: flat, pointer-free, trivially
-  copyable, same layout on host and device. Host initializers `tw::make_permutation_table(seed,
-  id_lo, id_hi, subident_index, sub_lo, sub_hi)` and `tw::make_base3d_perm_table(seed)` must give
-  bit-identical tables to the Rust runtime in both profiles.
+- Handle types (`tw::<Name>` for `Handle("Name")`): flat, pointer-free, trivially copyable, same layout
+  on host and device. Host initializers are `tw::<initializer>(args)`, called in `create` with `i64`
+  arguments as `(long long)0x…ULL`, `f64` through the usual literal spelling, `bool` and strings as
+  `const char*` of UTF-8 (octal escapes). They must give values bit-identical to the other runtimes.
+  Value autoconsts are scalar fields of `AutoConsts`, which stays trivially copyable (asserted).
 - `__device__ tw::<cuda_sanitize(n)>` for every extern call (pointers where the IR passes `Ref`),
   and `tw::<cuda_sanitize(t)>` for every extern type: default- and constexpr-constructible, fields
   in IR order (checked by designated initializers), and a static `make(...)`.

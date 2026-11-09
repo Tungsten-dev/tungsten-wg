@@ -11,7 +11,7 @@ use tungsten_builder::prelude::*;
 
 extern_fns! {
     group noise_externs;
-    perm_get(t: (handle "PerlinNoiseSampler"), i: I32): I32,
+    perm_get(t: handle "PerlinNoiseSampler", i: I32): I32,
 }
 
 /// Stands in for vanilla's `DOUBLE_PERLIN_OFFSET`.

@@ -106,8 +106,8 @@ program {
     entry top @dims(1, 1, 1) @origin_scale(1.0, 1.0, 1.0) @position_scale(1.0, 1.0, 1.0);
 }
 
-@case "two"  origin(0, 0, 0) seed(1) host(divisor = 2)
-@case "zero" origin(0, 0, 0) seed(1) host(divisor = 0)
+@case "two"  origin(0, 0, 0) param(seed = 1) host(divisor = 2)
+@case "zero" origin(0, 0, 0) param(seed = 1) host(divisor = 0)
 
 @expect "two" top[0, 0, 0] = 3
 @expect "zero" error(DivByZero)

@@ -105,3 +105,42 @@ fn every_setter_sets_its_field() {
     let out = c.compile().unwrap();
     assert!(!out.orchestration_module.is_empty());
 }
+
+/// Every argument kind, a handle and value autoconsts of several types.
+const AUTO_KINDS: &str = r#"
+program {
+    param seed: i64;
+    param scale: f64;
+    param buffers: bool;
+    auto t: handle Table = make_table(param(seed), -9223372036854775808L, 1.5, -0.0, true, "q\"\\ \u{e9} \u{1d11e}\n");
+    auto v: f64 = make_v(param(scale), param(buffers), nan, inf, -inf);
+    auto i: i64 = make_i(7L, false);
+    auto b: bool = make_b(param(buffers));
+    auto s: i8 = make_s(1L);
+    fn run() -> f64 {
+        return (ext sample::<(handle Table, f64) -> f64>(auto(t), auto(v)) + (auto(i) as f64));
+    }
+    unit u { main run; autos [t, v, i]; }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+#[test]
+fn autoconst_arguments_and_values() {
+    let output = generate(AUTO_KINDS);
+    assert_contains(&output.full_source, &[
+        // fields: a handle by value, scalars by value
+        "pub t: Table,",
+        "pub v: f64,",
+        "pub s: i8,",
+        // reads: a handle by reference, a value by copy
+        "sample((&auto_constants.t), auto_constants.v)",
+        "(auto_constants.i as f64)",
+        // every argument kind; a param named like generated code is renamed
+        "fn make_auto_consts(seed: i64, scale: f64, buffers_1: bool, auto_consts: &mut AutoConsts)",
+        "auto_consts.t = make_table(seed, -9223372036854775808_i64, 1.5_f64, -0_f64, true, \"q\\\"\\\\ \\u{e9} \\u{1d11e}\\n\");",
+        "auto_consts.v = make_v(scale, buffers_1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY);",
+        "auto_consts.i = make_i(7_i64, false);",
+        "pub fn new(seed: i64, scale: f64, buffers_1: bool) -> Self",
+    ]);
+}

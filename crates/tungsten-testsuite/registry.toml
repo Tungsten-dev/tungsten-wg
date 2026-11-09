@@ -158,3 +158,55 @@ name = "test_domain"
 params = ["i32"]
 ret = "i32"
 domain_error = true
+
+# Autoconst initializers: host-side functions that build a handle or a scalar once, when an
+# orchestration is created. Argument types are i64, f64, bool and str.
+
+[[auto_initializer]]
+name = "make_permutation_table"
+params = ["i64", "i64", "i64", "i64", "i64", "i64"]
+ret = "handle PerlinNoiseSampler"
+
+[[auto_initializer]]
+name = "make_base3d_perm_table"
+params = ["i64"]
+ret = "handle InterpolatedNoiseSampler"
+
+# FNV-1a over the UTF-8 bytes of the string, seeded with the i64.
+[[auto_initializer]]
+name = "make_salt"
+params = ["i64", "str"]
+ret = "i64"
+
+# The bit pattern of the f64.
+[[auto_initializer]]
+name = "make_bits"
+params = ["f64"]
+ret = "i64"
+
+# The f64, negated when the flag is set.
+[[auto_initializer]]
+name = "make_scale"
+params = ["f64", "bool"]
+ret = "f64"
+
+# `on && n > 0`.
+[[auto_initializer]]
+name = "make_flag"
+params = ["bool", "i64"]
+ret = "bool"
+
+[[auto_initializer]]
+name = "make_i8"
+params = ["i64"]
+ret = "i8"
+
+[[auto_initializer]]
+name = "make_i32"
+params = ["i64"]
+ret = "i32"
+
+[[auto_initializer]]
+name = "make_f32"
+params = ["f64"]
+ret = "f32"

@@ -1,10 +1,16 @@
 #![allow(dead_code)]
 
 use tungsten_builder::prelude::*;
+use tungsten_builder::AutoArgType;
 use tungsten_check::{Registry, RegistryBuilder};
 
+/// No externs or records, only the initializers the tests' autoconsts call.
 pub fn empty_registry() -> Registry {
-    RegistryBuilder::new().build().unwrap()
+    RegistryBuilder::new()
+        .auto_initializer("make_perm", &[AutoArgType::I64, AutoArgType::I64], Handle("PerlinNoiseSampler"))
+        .auto_initializer("make_sampler", &[AutoArgType::I64], Handle("InterpolatedNoiseSampler"))
+        .build()
+        .unwrap()
 }
 
 /// Builds and runs the core checker, panicking with every message on failure.

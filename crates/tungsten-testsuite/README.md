@@ -74,7 +74,7 @@ program {
     unit u { main run; }
     entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0) param(seed = 1)
 @expect "c" u[0, 0, 0] = -2147483648
 ```
 
@@ -112,9 +112,11 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   listed in `registry.toml`. They are written once in `runtime/rust/`. `min` and `max` follow Java
   (`-0.0 < 0.0`, NaN wins). `test_domain` fails for negative input so the extern-domain error can be
   tested.
-- **Toy tables.** Real Perlin and Base3D noise are not tested here. Instead the permutation table and
-  sampler are simple functions of the case's seed and the table's name (see `SPEC.md` §5.3). They are
-  exact in every language, so backends can later be compared bit for bit.
+- **Toy tables and initializers.** The testsuite acts as a small frontend. Real Perlin and Base3D noise are
+  not tested here: the permutation table and sampler are simple functions of integer initializer
+  arguments, and the value initializers (`make_salt`, `make_bits`, …) cover the other argument kinds and
+  scalar types (see `SPEC.md` §5.3). They are exact in every language, so backends are compared bit for
+  bit. `tests/isolation.rs` fails if `perlin`, `base3d` or `md5` appear in the library crates.
 - **The prelude.** The transcendentals are series approximations built from `+ - * /`, so every backend
   compiles the same arithmetic. The tests check exact points and agreement with libm to 1e-9.
 - **Known backend gaps.** Integer overflow, `>>>`, float to `i8` casts and failing constants on the

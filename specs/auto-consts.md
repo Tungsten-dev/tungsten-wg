@@ -1,6 +1,6 @@
 # Generic autoconsts
 
-Status: design agreed. Milestones 1 and 2 are implemented (see "Implementation notes" at the end); 3 to 6 are not. Lands after `specs/compiler.md`, and so after milestone 5 of
+Status: implemented, all six milestones (see "Implementation notes" at the end). Lands after `specs/compiler.md`, and so after milestone 5 of
 `specs/program-level-inputs.md`, which deletes `tungsten-legacy`. It lands before `specs/workers.md`, which restates the
 creation API from §5.1 on its final types.
 
@@ -566,3 +566,44 @@ Milestones 1 and 2.
   now `Handle(HandleTypeId(..))`) and were regenerated.
 - **Not touched.** `specs/builder.md`, the READMEs of `tungsten-check` and `tungsten-core`'s `EXEC.md`
   still describe tables; that is milestone 6.
+
+Milestones 3 to 6.
+
+- **`AutoArgType` lives in `tungsten-ir`.** `tungsten-check` re-exports it, so `RegistryBuilder::auto_initializer`
+  takes the type §3.1 shows. The builder's `Decls` can't depend on the checker, and both need the type.
+  `AutoConstArg` implements `PartialEq`, `Eq` and `Hash` by hand (`F64` by bits), as does `AutoArgSpec` in
+  `LowerMap`. `AutoArg` in the builder stopped being `Copy`, because of `Str`.
+- **Lowering checks.** They run in a pass of their own, auto params first, then autoconsts, before hosts.
+  `Item::AutoParam` locates the two param errors. `HandleHost` also catches a handle inside an array.
+  `AutoArgType`'s `found` and `AutoInitializerReturn` print types the way the parser does (`i64`, `handle Name`).
+  A dangling `Param` ref is reported only as `DanglingRef`, not also as a type mismatch.
+- **Value autoconsts.** `LowerMap` gains `auto_hosts` (`Ref<AutoConst>` to `HostId`), `auto_host_names`,
+  `host_name(HostId)` (which names a value autoconst's host after the autoconst) and `is_auto_host`.
+  `host_names` has a `None` entry for each of those hosts, so `host(name = …)` can't bind them, and
+  `LowerMap.tables` now holds the handle autoconsts only. A function's `hosts` is its listed hosts, then the
+  value autoconsts its body reads, in first-read order. `CaseBindError::AutoValueUnknown` carries the `HostId`.
+  The checker's message for an unlisted read says `autoconst `x` isn't in the autos of unit `u``.
+- **`F64`, `Bool`, `Str`.** In `.tw`, an argument is read as a literal of its own kind, so `0.0` and `-0.0`
+  are different arguments, and `nan`, `inf` and `-inf` work. An unsuffixed integer, or an `f32` or other
+  integer kind, is an error. Backends spell `F64` with their usual literal formatter, which writes NaN as the
+  canonical NaN: a non-canonical payload in an argument doesn't survive to generated code. Strings are
+  escaped by `escape_default` in Rust, as UTF-16 units (`\uXXXX`) in Java, and as three-digit octal UTF-8
+  bytes with `?` escaped in CUDA. Rust gets `rcl::Type::StaticStr` and `Expression::StrLiteral`, Java
+  `Expression::StrLit`.
+- **CUDA.** The generated layout checks gain `static_assert(std::is_trivially_copyable<dev::AutoConsts>)`.
+- **Toy initializers.** `registry.toml` declares them (`[[auto_initializer]]`), and `SPEC.md` §5.3 defines
+  them: `make_salt` (FNV-1a over the UTF-8 bytes), `make_bits`, `make_scale`, `make_flag`, `make_i8`,
+  `make_i32` and `make_f32`. `CaseExterns::new` returns the externs and the `auto_values`.
+- **Builder.** `extern_fns!` takes `handle "Name"` unparenthesized (a token muncher), the parenthesized
+  spelling still works, and `record_decls!` still takes one token per field type. `auto_initializers!`
+  and `Decls::initializers` are new, and `registry_from` passes them on.
+- **Reserved names.** `PerlinNoiseSampler` and `InterpolatedNoiseSampler` left the reserved-name lists in
+  `tungsten-interface/naming.rs`: a handle type is the frontend's name.
+- **Isolation.** `tungsten-testsuite/tests/isolation.rs` scans library code (everything outside
+  `tungsten-testsuite`, tests and docs, and the part of a file after `#[cfg(test)]`) for `perlin`,
+  `base3d` and `md5`. It skips `random.rs` (below) and `rcl_new.rs`, a file a Java test writes.
+- **Not done: `crates/tungsten-rust/src/random.rs`.** It's unreferenced and still mentions MD5, but the
+  tool refused to delete it. Delete it by hand, then drop the skip in `isolation.rs`.
+- **Corpus.** `corpus/autoconst/{values,mixed,param_names,unread,no_params,inlined_helpers}.tw` cover the
+  §10 corpus row, including `i64::MIN`, `-0.0`, NaN, `true`/`false` and strings with quotes, a backslash,
+  non-ASCII and non-BMP text. The expected values were computed separately in Python.

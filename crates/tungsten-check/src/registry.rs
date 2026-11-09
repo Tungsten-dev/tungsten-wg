@@ -8,6 +8,15 @@ use tungsten_ir::VariableType;
 
 use crate::lower::types::{TypeFail, TypeNames, lower_type};
 
+pub use tungsten_ir::AutoArgType;
+
+/// A declared autoconst initializer: a host-side runtime function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitializerDecl {
+    pub params: Vec<AutoArgType>,
+    pub ret: tungsten_core::Type,
+}
+
 /// Extern and record declarations with their names. Build one with [`RegistryBuilder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registry {
@@ -18,6 +27,8 @@ pub struct Registry {
     pub(crate) records: Vec<RecordDecl>,
     pub(crate) record_ids: HashMap<String, RecordId>,
     pub(crate) field_names: Vec<Vec<String>>,
+    pub(crate) initializer_ids: HashMap<String, usize>,
+    pub(crate) initializers: Vec<InitializerDecl>,
     /// Handle type names the declarations mention, in order of first appearance. Their index is
     /// the `HandleTypeId`; lowering continues the numbering for names only programs mention.
     pub(crate) handle_names: Vec<String>,
@@ -51,6 +62,11 @@ pub(crate) fn intern(names: &mut Vec<String>, name: &str) -> HandleTypeId {
 }
 
 impl Registry {
+    /// The declaration of the autoconst initializer `name`.
+    pub fn initializer(&self, name: &str) -> Option<&InitializerDecl> {
+        self.initializer_ids.get(name).map(|&i| &self.initializers[i])
+    }
+
     pub fn extern_id(&self, name: &str) -> Option<ExternId> {
         self.extern_ids.get(name).copied()
     }
@@ -95,6 +111,8 @@ impl Registry {
 pub enum RegistryError {
     #[error("extern `{0}` is declared twice")]
     DuplicateExtern(String),
+    #[error("auto initializer `{0}` is declared twice")]
+    DuplicateInitializer(String),
     #[error("record `{0}` is declared twice")]
     DuplicateRecord(String),
     #[error("record `{record}` has field `{field}` twice")]
@@ -114,6 +132,12 @@ struct ExternEntry {
     domain_error: bool,
 }
 
+struct InitializerEntry {
+    name: String,
+    params: Vec<AutoArgType>,
+    ret: VariableType,
+}
+
 struct RecordEntry {
     name: String,
     fields: Vec<(String, VariableType)>,
@@ -125,6 +149,7 @@ struct RecordEntry {
 pub struct RegistryBuilder {
     externs: Vec<ExternEntry>,
     records: Vec<RecordEntry>,
+    initializers: Vec<InitializerEntry>,
 }
 
 impl RegistryBuilder {
@@ -161,6 +186,16 @@ impl RegistryBuilder {
         self
     }
 
+    /// Declares an autoconst initializer. They have their own namespace, apart from externs.
+    pub fn auto_initializer(mut self, name: &str, params: &[AutoArgType], ret: VariableType) -> Self {
+        self.initializers.push(InitializerEntry {
+            name: name.to_string(),
+            params: params.to_vec(),
+            ret,
+        });
+        self
+    }
+
     pub fn record(mut self, name: &str, fields: &[(&str, VariableType)]) -> Self {
         self.records.push(RecordEntry {
             name: name.to_string(),
@@ -172,13 +207,19 @@ impl RegistryBuilder {
         self
     }
 
-    /// Checks, in this order: duplicate externs, duplicate records, duplicate fields, record
+    /// Checks, in this order: duplicate externs, duplicate initializers, duplicate records, duplicate fields, record
     /// field types, extern types, record cycles. Returns the first error.
     pub fn build(self) -> Result<Registry, RegistryError> {
         let mut extern_ids = HashMap::new();
         for (i, e) in self.externs.iter().enumerate() {
             if extern_ids.insert(e.name.clone(), ExternId(i)).is_some() {
                 return Err(RegistryError::DuplicateExtern(e.name.clone()));
+            }
+        }
+        let mut initializer_ids = HashMap::new();
+        for (i, e) in self.initializers.iter().enumerate() {
+            if initializer_ids.insert(e.name.clone(), i).is_some() {
+                return Err(RegistryError::DuplicateInitializer(e.name.clone()));
             }
         }
         let mut record_ids = HashMap::new();
@@ -232,6 +273,12 @@ impl RegistryBuilder {
             });
         }
 
+        let mut initializers = Vec::with_capacity(self.initializers.len());
+        for e in &self.initializers {
+            let ret = resolve(&e.ret, &|| e.name.clone())?;
+            initializers.push(InitializerDecl { params: e.params.clone(), ret });
+        }
+
         let names: Vec<String> = self.records.iter().map(|r| r.name.clone()).collect();
         if let Some(cycle) = find_record_cycle(&records) {
             return Err(RegistryError::RecordCycle(
@@ -252,6 +299,8 @@ impl RegistryBuilder {
                 .iter()
                 .map(|r| r.fields.iter().map(|(f, _)| f.clone()).collect())
                 .collect(),
+            initializer_ids,
+            initializers,
             handle_names,
         })
     }

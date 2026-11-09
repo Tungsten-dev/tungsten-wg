@@ -377,23 +377,34 @@ impl<'a> Ctx<'a> {
         for arg in &a.args {
             args.push(match arg {
                 ast::AutoArg::Param(l) => AutoConstArg::Param(self.lookup_auto_param(l)?),
+                ast::AutoArg::Str(v) => AutoConstArg::Str(v.clone()),
                 ast::AutoArg::Lit(l) => {
-                    if let ast::LitKind::Num { raw, .. } = &l.kind
-                        && raw.kind == NumKind::Int
-                        && !raw.suffixed
-                    {
-                        return err(
-                            l.span,
-                            format!(
-                                "an i64 argument needs the `L` suffix: write `{}L`",
-                                raw.digits
-                            ),
-                        );
-                    }
-                    match numlit::convert(&l.kind, Some(NumKind::Long)) {
-                        Ok(numlit::Num::Long(v)) => AutoConstArg::I64(v),
-                        Ok(_) => unreachable!(),
-                        Err(m) => return err(l.span, m),
+                    if let ast::LitKind::Bool(v) = &l.kind {
+                        AutoConstArg::Bool(*v)
+                    } else {
+                        if let ast::LitKind::Num { raw, .. } = &l.kind
+                            && raw.kind == NumKind::Int
+                            && !raw.suffixed
+                        {
+                            return err(
+                                l.span,
+                                format!(
+                                    "an i64 argument needs the `L` suffix: write `{}L`",
+                                    raw.digits
+                                ),
+                            );
+                        }
+                        match numlit::convert(&l.kind, None) {
+                            Ok(numlit::Num::Long(v)) => AutoConstArg::I64(v),
+                            Ok(numlit::Num::Double(v)) => AutoConstArg::F64(v),
+                            Ok(_) => {
+                                return err(
+                                    l.span,
+                                    "an autoconst argument is an `L` integer, an f64, a bool or a string",
+                                );
+                            }
+                            Err(m) => return err(l.span, m),
+                        }
                     }
                 }
             });

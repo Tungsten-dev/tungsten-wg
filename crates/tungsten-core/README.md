@@ -91,7 +91,7 @@ pub struct Program {
     pub functions: Vec<Function>,   // every function, main or helper
     pub consts: Vec<ConstDecl>,     // constant initializers
     pub hosts: Vec<HostDecl>,       // host inputs (values the caller passes in)
-    pub tables: Vec<TableDecl>,     // permutation tables / noise samplers
+    pub tables: Vec<TableDecl>,     // opaque handles, typed by `HandleTypeId`
     pub inputs: Vec<InputDecl>,     // density inputs (one unit reading another)
     pub entries: Vec<Entry>,        // what the caller actually evaluates
     pub externs: Vec<ExternDecl>,   // extern function signatures

@@ -24,6 +24,31 @@ fn decimal(debug: String) -> String {
 }
 
 /// `double` literal; specials become `Double.*`, negatives are parenthesized.
+/// A string literal. Java translates `\uXXXX` before lexing, so quotes, backslashes and line
+/// breaks use their own escapes. Everything outside printable ASCII is written as UTF-16 code
+/// units, which makes non-BMP text a surrogate pair.
+pub fn string_literal(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ' '..='~' => out.push(c),
+            c => {
+                let mut buf = [0u16; 2];
+                for unit in c.encode_utf16(&mut buf) {
+                    out.push_str(&format!("\\u{:04x}", unit));
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
+}
+
 pub fn double_literal(v: f64) -> String {
     if v.is_nan() {
         "Double.NaN".to_string()
@@ -119,6 +144,7 @@ pub fn expression(e: &Expression) -> String {
         Expression::LongLit(v) => long_literal(*v),
         Expression::FloatLit(v) => float_literal(*v),
         Expression::DoubleLit(v) => double_literal(*v),
+        Expression::StrLit(v) => string_literal(v),
         Expression::Null => "null".into(),
         Expression::Name(n) => n.clone(),
         Expression::Field { base, field } => format!("{}.{}", expression(base), field),

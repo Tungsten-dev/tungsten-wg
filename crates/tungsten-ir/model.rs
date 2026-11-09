@@ -407,10 +407,63 @@ pub struct AutoConst {
     pub args: Vec<AutoConstArg>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// The type of an initializer argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AutoArgType {
+    I64,
+    F64,
+    Bool,
+    Str,
+}
+
+impl std::fmt::Display for AutoArgType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AutoArgType::I64 => "i64",
+            AutoArgType::F64 => "f64",
+            AutoArgType::Bool => "bool",
+            AutoArgType::Str => "str",
+        })
+    }
+}
+
+/// An argument of an initializer. `F64` compares and hashes by bit pattern, so `0.0` and `-0.0`
+/// are different arguments and NaN equals itself.
+#[derive(Debug, Clone)]
 pub enum AutoConstArg {
     Param(Ref<AutoParam>),
     I64(i64),
+    F64(f64),
+    Bool(bool),
+    Str(String),
+}
+
+impl PartialEq for AutoConstArg {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Param(a), Self::Param(b)) => a == b,
+            (Self::I64(a), Self::I64(b)) => a == b,
+            (Self::F64(a), Self::F64(b)) => a.to_bits() == b.to_bits(),
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Str(a), Self::Str(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AutoConstArg {}
+
+impl std::hash::Hash for AutoConstArg {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Self::Param(r) => r.hash(state),
+            Self::I64(v) => v.hash(state),
+            Self::F64(v) => v.to_bits().hash(state),
+            Self::Bool(v) => v.hash(state),
+            Self::Str(v) => v.hash(state),
+        }
+    }
 }
 
 /// Input from the host environment, either statically computed, or dynamically computed at runtime.
