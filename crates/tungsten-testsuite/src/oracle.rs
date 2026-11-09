@@ -1,7 +1,7 @@
 //! Interpreter runs and `@expect` matching (SPEC §3.3, §4.1).
 
 use tungsten_check::{
-    CaseResult, EvalError, EvalFailure, EvalOptions, Invalid, NamedCase, Prepared, Value,
+    AutoArgValue, CaseResult, EvalError, EvalFailure, EvalOptions, Invalid, NamedCase, Prepared, Value,
     prepare, DEFAULT_FUEL,
 };
 use tungsten_ir::{HostInput, Name};
@@ -56,8 +56,17 @@ pub fn check_reject(tf: &TestFile, env: &TestEnv) -> Result<(), String> {
 }
 
 /// Binds hosts by name (SPEC §3.3), so inlining can't invalidate them.
-pub fn named_case(tf: &TestFile, i: usize, env: &TestEnv) -> Result<NamedCase, String> {
+pub fn named_case(
+    tf: &TestFile,
+    i: usize,
+    env: &TestEnv,
+) -> Result<(NamedCase, Vec<(String, Value)>), String> {
     let c = &tf.cases[i];
+    let params = c
+        .params
+        .iter()
+        .map(|(r, v)| Ok((tf.program.auto_params[*r].name.clone(), to_core(v, &env.registry)?)))
+        .collect::<Result<Vec<_>, String>>()?;
     let mut hosts = vec![];
     for (r, v) in &c.hosts {
         let name = match &tf.program.host_inputs[*r] {
@@ -66,17 +75,30 @@ pub fn named_case(tf: &TestFile, i: usize, env: &TestEnv) -> Result<NamedCase, S
         };
         hosts.push((name, to_core(v, &env.registry)?));
     }
-    Ok(NamedCase { origin: c.origin, hosts })
+    Ok((NamedCase { origin: c.origin, hosts }, params))
 }
 
 pub fn run_case(
     prep: &Prepared,
     named: &NamedCase,
-    seed: u64,
+    params: &[(String, Value)],
     opts: EvalOptions,
 ) -> Result<CaseResult, String> {
     let case = prep.case(named).map_err(|e| e.to_string())?;
-    let ext = CaseExterns::new(prep.map(), seed);
+    let params = params
+        .iter()
+        .map(|(n, v)| {
+            let v = match v {
+                Value::I64(x) => AutoArgValue::I64(*x),
+                Value::F64(b) => AutoArgValue::F64(f64::from_bits(*b)),
+                Value::Bool(b) => AutoArgValue::Bool(*b),
+                other => return Err(format!("param `{n}`: {other:?} isn't a param value")),
+            };
+            Ok((n.clone(), v))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let inits = prep.map().resolved_auto_consts(&params).map_err(|e| e.to_string())?;
+    let ext = CaseExterns::new(prep.map(), &inits)?;
     prep.eval(&case, &ext, opts).map_err(|e| match e {
         EvalFailure::Case(c) => format!("case doesn't fit: {c:?}"),
         s @ EvalFailure::Stuck { .. } => s.to_string(),
@@ -95,11 +117,11 @@ pub fn run_all(tf: &TestFile, env: &TestEnv) -> Result<Interp, String> {
     let prepared = prepare(&tf.program, &env.registry).map_err(|e| format!("rejected:\n{e}"))?;
     let mut results = vec![];
     for (i, c) in tf.cases.iter().enumerate() {
-        let named = named_case(tf, i, env)?;
+        let (named, params) = named_case(tf, i, env)?;
         let on = EvalOptions { fuel: fuel(tf), memo: true };
         let off = EvalOptions { fuel: fuel(tf), memo: false };
-        let a = run_case(&prepared, &named, c.seed, on).map_err(|e| format!("case `{}`: {e}", c.name))?;
-        let b = run_case(&prepared, &named, c.seed, off).map_err(|e| format!("case `{}`: {e}", c.name))?;
+        let a = run_case(&prepared, &named, &params, on).map_err(|e| format!("case `{}`: {e}", c.name))?;
+        let b = run_case(&prepared, &named, &params, off).map_err(|e| format!("case `{}`: {e}", c.name))?;
         if a != b {
             return Err(format!("case `{}`: memo on and off differ:\n{a:?}\n{b:?}", c.name));
         }
@@ -243,9 +265,9 @@ pub fn check_inline(tf: &TestFile, env: &TestEnv, run: &Interp) -> Result<(), St
     tungsten_optimizer::perform_inline(&mut program);
     let prepared = prepare(&program, &env.registry).map_err(|e| format!("inlined program rejected:\n{e}"))?;
     for (i, c) in tf.cases.iter().enumerate() {
-        let named = named_case(tf, i, env)?;
+        let (named, params) = named_case(tf, i, env)?;
         let opts = EvalOptions { fuel: fuel(tf), memo: true };
-        let r = run_case(&prepared, &named, c.seed, opts).map_err(|e| format!("case `{}` (inlined): {e}", c.name))?;
+        let r = run_case(&prepared, &named, &params, opts).map_err(|e| format!("case `{}` (inlined): {e}", c.name))?;
         same_entries(&run.results[i], &r).map_err(|m| format!("case `{}`: inlined differs: {m}", c.name))?;
     }
     Ok(())

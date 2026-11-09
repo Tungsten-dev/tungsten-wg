@@ -103,7 +103,8 @@ fn build(cx: &mut Ctx, name: &str, ast: &File) -> R<Lib> {
             Item::Fn(f) => add(&mut lib.fns, own(f, name), |f| &f.label)?,
             Item::Const(c) => add(&mut lib.consts, own(c, name), |c| &c.label)?,
             Item::Host(HostItem { span, .. })
-            | Item::Table(TableItem { span, .. })
+            | Item::Param(ParamItem { span, .. })
+            | Item::Auto(AutoItem { span, .. })
             | Item::Unit(UnitItem { span, .. })
             | Item::Input(InputItem { span, .. }) => {
                 return Err(Diagnostic::elab(
@@ -225,10 +226,10 @@ fn walk_expr<'a>(e: &'a Expr, refs: &mut Refs<'a>) -> R<()> {
             ExprKind::Call { callee, .. } => refs.calls.push(callee),
             ExprKind::Const(l) => refs.consts.push(l),
             ExprKind::Name(l) if !refs.vars.contains(&l.key()) => refs.consts.push(l),
-            ExprKind::Host(_) | ExprKind::Table(_) | ExprKind::Density { .. } => {
+            ExprKind::Host(_) | ExprKind::Auto(_) | ExprKind::Density { .. } => {
                 return Err(Diagnostic::elab(
                     e.span,
-                    "library code can't use host inputs, tables or density inputs",
+                    "library code can't use host inputs, autoconsts or density inputs",
                 ));
             }
             _ => {}

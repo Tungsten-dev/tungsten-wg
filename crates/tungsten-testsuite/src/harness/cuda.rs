@@ -157,19 +157,30 @@ pub fn driver_source(
     let mut ids = Ids(0);
     let mut s = String::new();
     writeln!(s, "namespace {id} {{\n").unwrap();
-    writeln!(s, "static constexpr size_t REQUEST_LEN = {};", 32 + io.host_bytes(env)?).unwrap();
+    writeln!(s, "static constexpr size_t REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
     s.push_str("static bool fail(std::string& err, const char* what, Status st) {\n");
     s.push_str("    err = std::string(what) + \": \" + st.message();\n    return false;\n}\n\n");
     s.push_str("static bool run_case(tw::proto::Reader& r, tw::proto::Writer& w, std::string& err) {\n");
     s.push_str("    Vec3 origin; origin.x = r.f64(); origin.y = r.f64(); origin.z = r.f64();\n");
-    s.push_str("    const long long seed = (long long)r.u64();\n    HostConsts host{};\n");
+    for (i, (_, t)) in io.params.iter().enumerate() {
+        let ty = match t {
+            VariableType::I64 => "long long",
+            VariableType::F64 => "double",
+            VariableType::Bool => "bool",
+            other => panic!("no CUDA creation parameter type for {other:?}"),
+        };
+        writeln!(s, "    {ty} ap{i};").unwrap();
+        decode_into(&mut s, &format!("ap{i}"), t, &mut ids, spec);
+    }
+    s.push_str("    HostConsts host{};\n");
     for (r, h) in program.host_inputs.iter() {
         if let HostInput::Static { t, .. } = h {
             decode_into(&mut s, &format!("host.{}", interface.host_field(r)), t, &mut ids, spec);
         }
     }
     s.push_str("    std::unique_ptr<Orchestration> orch;\n");
-    s.push_str("    { Status st = Orchestration::create(seed, orch); if (!st.ok()) return fail(err, \"create\", st); }\n");
+    let creation_args: String = (0..io.params.len()).map(|i| format!("ap{i}, ")).collect();
+    writeln!(s, "    {{ Status st = Orchestration::create({creation_args}orch); if (!st.ok()) return fail(err, \"create\", st); }}").unwrap();
     for b in entry_bases {
         writeln!(s, "    {{ Status st = orch->enqueue_{b}(origin, host); if (!st.ok()) return fail(err, \"enqueue {b}\", st); }}").unwrap();
     }

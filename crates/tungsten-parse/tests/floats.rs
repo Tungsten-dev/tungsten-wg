@@ -23,7 +23,8 @@ fn roundtrip(values: Vec<ConstExpr>) {
                     entry_points: vec![],
                     constants: tungsten_ir::Arena::new(),
                     host_inputs: tungsten_ir::Arena::new(),
-                    permutation_tables: tungsten_ir::Arena::new(),
+                    auto_params: tungsten_ir::Arena::new(),
+                    auto_consts: tungsten_ir::Arena::new(),
                     density_inputs: tungsten_ir::Arena::new(),
                 };
                 p.constants.insert(tungsten_ir::Constant {

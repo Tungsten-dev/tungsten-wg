@@ -4,8 +4,9 @@
 program {
     host seed: i64;
     host scale: f64;
-    table noise = perlin("minecraft:noise", none, 0);
-    table b3 = base3d;
+    param seed: i64;
+    auto noise: handle PerlinNoiseSampler @name("minecraft:noise_0_") = make_permutation_table(param(seed), -2513675050255227118L, 7927812441784134696L, 0L, 0L, 0L);
+    auto b3: handle InterpolatedNoiseSampler = make_base3d_perm_table(param(seed));
     const two = 2.0;
     const four = (const(two) * two);
 
@@ -52,6 +53,6 @@ program {
     }
     entry top = root_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c1" origin(0, 0, 0) seed(7) host(seed = 5L, scale = 2)
+@case "c1" origin(0, 0, 0) param(seed = 7) host(seed = 5L, scale = 2)
 @expect "c1" top[0, 0, 0] = 1.5
 @expect "c1" top[1, 0, 0] = nan

@@ -43,7 +43,7 @@ pub const RUSTC_FLAGS: &[&str] = &[
 
 /// A valid module name for a test: `t_` and a hash of its corpus name.
 pub fn test_id(corpus_name: &str) -> String {
-    format!("t_{:x}", md5::compute(corpus_name.as_bytes()))[..18].to_string()
+    format!("t_{:x}", crate::hash::compute(corpus_name.as_bytes()))[..18].to_string()
 }
 
 fn rust_type(t: &VariableType) -> String {
@@ -152,9 +152,12 @@ pub fn driver_source(
     let spec = env.spec();
     let mut s = String::new();
     s.push_str("pub mod driver {\n    use super::*;\n    use super::orchestration::*;\n");
-    writeln!(s, "    pub const REQUEST_LEN: usize = {};", 32 + io.host_bytes(env)?).unwrap();
+    writeln!(s, "    pub const REQUEST_LEN: usize = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
     s.push_str("    pub fn run_case(r: &mut crate::proto::Reader) -> Vec<u8> {\n");
-    s.push_str("        let origin = Vec3::new(r.f64(), r.f64(), r.f64());\n        let seed = r.u64();\n");
+    s.push_str("        let origin = Vec3::new(r.f64(), r.f64(), r.f64());\n");
+    for (i, (_, t)) in io.params.iter().enumerate() {
+        writeln!(s, "        let ap{i} = {};", decode_expr(t, spec)).unwrap();
+    }
     s.push_str("        let host_consts = HostConsts {\n");
     for (r, h) in program.host_inputs.iter() {
         if let HostInput::Static { t, .. } = h {
@@ -162,7 +165,8 @@ pub fn driver_source(
         }
     }
     s.push_str("        };\n");
-    s.push_str("        let mut orch = Orchestration::new(seed as i64);\n");
+    let creation_args: Vec<String> = (0..io.params.len()).map(|i| format!("ap{i}")).collect();
+    writeln!(s, "        let mut orch = Orchestration::new({});", creation_args.join(", ")).unwrap();
     s.push_str("        let mut w = crate::proto::Writer::new();\n");
     for (e, name) in io.entries.iter().zip(method_names) {
         writeln!(s, "        {{ let res = orch.{name}(origin, &host_consts);").unwrap();

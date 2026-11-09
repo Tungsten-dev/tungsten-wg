@@ -5,7 +5,8 @@
 //! shadows it, so code inside a block can use it (and other `&mut` values such as the program
 //! builder) freely.
 
-/// A `VariableType` from a short spelling: `F64`, `I32`, `"Record"`, `[F64; 3]`, `(…)`.
+/// A `VariableType` from a short spelling: `F64`, `I32`, `"Record"`, `handle "Name"`, `[F64; 3]`, `(…)`.
+/// In `extern_fns!` signatures a handle type needs parentheses: `(handle "Name")`.
 #[macro_export]
 macro_rules! vt {
     ([$t:tt; $n:expr]) => {
@@ -13,6 +14,9 @@ macro_rules! vt {
     };
     ($s:literal) => {
         $crate::__ir::VariableType::Extern($s)
+    };
+    (handle $s:literal) => {
+        $crate::__ir::VariableType::Handle($s)
     };
     (($($inner:tt)*)) => {
         $crate::vt!($($inner)*)

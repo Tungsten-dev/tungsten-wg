@@ -303,8 +303,7 @@ pub fn clone_type(t: &Type) -> Type
         Type::Pos3 => Type::Pos3,
         Type::Array(inner, n) => Type::Array(Box::new(clone_type(inner)), *n),
         Type::Record(r) => Type::Record(*r),
-        Type::PermTable => Type::PermTable,
-        Type::Sampler => Type::Sampler,
+        Type::Handle(h) => Type::Handle(*h),
     }
 }
 
@@ -337,8 +336,7 @@ pub fn type_eq(a: &Type, b: &Type) -> bool
         (Type::Pos3, Type::Pos3) => true,
         (Type::Array(x, n), Type::Array(y, m)) => *n == *m && type_eq(x, y),
         (Type::Record(r), Type::Record(s)) => r.0 == s.0,
-        (Type::PermTable, Type::PermTable) => true,
-        (Type::Sampler, Type::Sampler) => true,
+        (Type::Handle(x), Type::Handle(y)) => x.0 == y.0,
         _ => false,
     }
 }

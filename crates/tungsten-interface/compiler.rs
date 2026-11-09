@@ -242,7 +242,7 @@ mod tests {
         ComputeUnit::DensityFunction {
             function,
             density_inputs: vec![],
-            permutation_table_inputs: vec![],
+            auto_consts: vec![],
             host_inputs: vec![],
             helper_functions: vec![],
             constants: vec![],
@@ -257,7 +257,8 @@ mod tests {
             entry_points: vec![],
             constants: Arena::new(),
             host_inputs: Arena::new(),
-            permutation_tables: Arena::new(),
+            auto_params: Arena::new(),
+            auto_consts: Arena::new(),
             density_inputs: Arena::new(),
         };
         let main = p.functions.insert(Function {

@@ -14,7 +14,7 @@ use tungsten_ir::{
 
 use crate::error::{BuildError, BuildErrorKind, FieldProblem};
 use crate::function::Local;
-use crate::program::{Constant, Helper, Host, Input, Table};
+use crate::program::{Auto, Constant, Helper, Host, Input};
 
 /// An interned type. Handles stay `Copy` because they hold these instead of `VariableType`s.
 pub(crate) type Ty = &'static VariableType;
@@ -636,9 +636,9 @@ impl From<Host> for Expr {
     }
 }
 
-impl From<Table> for Expr {
-    fn from(t: Table) -> Self {
-        Expr::typed(Expression::PermutationTable(t.r), Some(t.ty))
+impl From<Auto> for Expr {
+    fn from(t: Auto) -> Self {
+        Expr::typed(Expression::AutoConst(t.r), Some(t.ty))
     }
 }
 
@@ -744,7 +744,7 @@ macro_rules! handle_methods {
         }
     )*};
 }
-handle_methods!(Local, Host, Table, Constant, Input);
+handle_methods!(Local, Host, Auto, Constant, Input);
 
 // ---- operators -----------------------------------------------------------------------------
 
@@ -757,7 +757,7 @@ macro_rules! arith {
                 Expr::binary(BinaryOperator::$op, self, rhs.into())
             }
         }
-        arith!(@handles $trait $method $op; Local, Host, Table, Constant, Input);
+        arith!(@handles $trait $method $op; Local, Host, Auto, Constant, Input);
         arith!(@lits $trait $method $op; f32, f64, i8, i32, i64);
     )*};
     (@handles $trait:ident $method:ident $op:ident; $($h:ty),*) => {$(
@@ -770,7 +770,7 @@ macro_rules! arith {
         }
     )*};
     (@lits $trait:ident $method:ident $op:ident; $($l:ty),*) => {$(
-        arith!(@lit $trait $method $op $l; Expr, Local, Host, Table, Constant, Input);
+        arith!(@lit $trait $method $op $l; Expr, Local, Host, Auto, Constant, Input);
     )*};
     (@lit $trait:ident $method:ident $op:ident $l:ty; $($r:ty),*) => {$(
         impl std::ops::$trait<$r> for $l {
@@ -802,4 +802,4 @@ macro_rules! unops {
         }
     )*};
 }
-unops!(Expr, Local, Host, Table, Constant, Input);
+unops!(Expr, Local, Host, Auto, Constant, Input);

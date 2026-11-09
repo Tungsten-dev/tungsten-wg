@@ -446,7 +446,7 @@ pass that makes each `If`/`While` condition call a trace extern, so verified cod
   cover it.
 - **Toy builders**: defined over the arguments generated code already passes, since it never sees
   the name strings. A Perlin table folds splitmix64 over `(seed, id_lo, id_hi, subident_index,
-  sub_lo, sub_hi)`, with the ids from `xoroshiro_seed`; a Base3D table is `splitmix64(seed)`, so all
+  sub_lo, sub_hi)`, with the ids given as literal `i64` initializer arguments (the corpus files write them out); a Base3D table is `splitmix64(seed)`, so all
   Base3D tables of one seed are identical. `perm_get` reads `perm[i & 255]` and has no domain error.
   Full definition in `SPEC.md` §5.3. Each language has an identical implementation.
 - **Extern types**: declared records with typed fields, with definitions generated per language

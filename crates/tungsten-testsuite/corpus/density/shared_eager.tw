@@ -29,5 +29,5 @@ program {
     entry lister @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     entry reader @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0)
 @expect "c" error(DivByZero)

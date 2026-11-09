@@ -112,7 +112,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 let index = index.as_ref().map(|i| self.boxed(Step::Index, i));
                 Expr::Density { input, index }
             }
-            Expression::PermutationTable(r) => Expr::Table(self.table_ref(*r)),
+            Expression::AutoConst(r) => Expr::Table(self.table_ref(*r)),
             Expression::HostInput(r) => Expr::Host(self.host_ref(*r)),
             Expression::Ambient(k) => Expr::Ambient(match k {
                 AmbientKind::Origin => Ambient::Origin,

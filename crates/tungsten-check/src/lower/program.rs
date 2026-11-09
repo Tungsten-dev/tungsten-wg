@@ -6,12 +6,12 @@ use std::collections::{HashMap, HashSet};
 use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
-    ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram, PermutationTableInput,
+    AutoConst, AutoConstArg, ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram,
 };
 
 use super::{Ctx, get};
 use crate::error::{EntityKind, Item, LowerError, LowerErrorKind, ParameterProblem, Step};
-use crate::map::{IdMap, LowerMap};
+use crate::map::{AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, IdMap, LowerMap};
 use crate::registry::Registry;
 use super::const_to_expr;
 
@@ -36,17 +36,9 @@ pub(crate) fn run(
         path: vec![],
         func: None,
         locals: HashMap::new(),
+        handles: reg.handle_names.clone(),
     };
-    let tables = p
-        .permutation_tables
-        .values()
-        .map(|t| core::TableDecl {
-            kind: match t {
-                PermutationTableInput::PerlinNoise { .. } => core::TableKind::Perm,
-                PermutationTableInput::Base3DNoise => core::TableKind::Sampler,
-            },
-        })
-        .collect();
+    let tables = cx.auto_consts();
     let hosts = cx.hosts();
     let consts = cx.consts();
     let functions = cx.functions();
@@ -64,6 +56,7 @@ pub(crate) fn run(
         externs: vec![],
         records: vec![],
     };
+    cx.map.handle_types = std::mem::take(&mut cx.handles);
     (program, cx.map, cx.errors)
 }
 
@@ -98,13 +91,12 @@ fn build_ids(p: &OptimizedProgram) -> LowerMap {
         m.hosts.push(r, name.unwrap_or_else(|| format!("#{i}")));
         m.host_names.push(named);
     }
-    for (i, (r, t)) in p.permutation_tables.iter().enumerate() {
-        let name = match t {
-            PermutationTableInput::PerlinNoise { ident, .. } => ident.clone(),
-            PermutationTableInput::Base3DNoise => format!("#{i}"),
-        };
-        m.tables.push(r, name);
-        m.table_idents.push(t.clone());
+    for (r, p) in p.auto_params.iter() {
+        m.auto_params.push(r, p.name.clone());
+        m.auto_param_types.push(p.t.clone());
+    }
+    for (r, a) in p.auto_consts.iter() {
+        m.tables.push(r, a.name.clone());
     }
     for (i, (r, d)) in p.density_inputs.iter().enumerate() {
         let name = name_str(&d.name)
@@ -154,9 +146,49 @@ impl<'p, 'r> Ctx<'p, 'r> {
         self.id_or_dangling(id, EntityKind::Constant, ConstId(0))
     }
 
-    pub(super) fn table_ref(&mut self, r: tungsten_ir::Ref<PermutationTableInput>) -> TableId {
+    pub(super) fn table_ref(&mut self, r: tungsten_ir::Ref<AutoConst>) -> TableId {
         let id = self.map.tables.id(r);
-        self.id_or_dangling(id, EntityKind::PermutationTable, TableId(0))
+        self.id_or_dangling(id, EntityKind::AutoConst, TableId(0))
+    }
+
+    /// One core table per autoconst, in arena order. Also fills `map.auto_consts`.
+    fn auto_consts(&mut self) -> Vec<core::TableDecl> {
+        let p = self.p;
+        let mut out = vec![];
+        for (i, (_, a)) in p.auto_consts.iter().enumerate() {
+            let id = TableId(i);
+            self.enter(Item::AutoConst { id: Some(id), name: a.name.clone() });
+            let ty = match &a.t {
+                tungsten_ir::VariableType::Handle(name) => self.handle_type(name),
+                other => {
+                    self.err(LowerErrorKind::BadAutoConstType { t: format!("{other:?}") });
+                    self.handle_type("")
+                }
+            };
+            let args = a
+                .args
+                .iter()
+                .enumerate()
+                .map(|(k, arg)| match arg {
+                    AutoConstArg::I64(v) => AutoArgSpec::I64(*v),
+                    AutoConstArg::Param(r) => {
+                        let id = self.map.auto_params.id(*r);
+                        AutoArgSpec::Param(self.at(Step::Arg(k), |cx| {
+                            cx.id_or_dangling(id, EntityKind::AutoParam, AutoParamId(0))
+                        }))
+                    }
+                })
+                .collect();
+            self.map.auto_consts.push(AutoConstInfo {
+                core: AutoCoreId::Table(id),
+                name: a.name.clone(),
+                t: a.t.clone(),
+                initializer: a.initializer.clone(),
+                args,
+            });
+            out.push(core::TableDecl { ty });
+        }
+        out
     }
 
     fn input_ref(&mut self, r: tungsten_ir::Ref<DensityInput>) -> InputId {
@@ -292,7 +324,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
             let ComputeUnit::DensityFunction {
                 function,
                 density_inputs,
-                permutation_table_inputs,
+                auto_consts,
                 host_inputs,
                 helper_functions,
                 constants,
@@ -304,10 +336,10 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 .enumerate()
                 .map(|(i, &r)| self.at(Step::List { list: "inputs", index: i }, |cx| cx.input_ref(r)))
                 .collect();
-            let tables = permutation_table_inputs
+            let tables = auto_consts
                 .iter()
                 .enumerate()
-                .map(|(i, &r)| self.at(Step::List { list: "tables", index: i }, |cx| cx.table_ref(r)))
+                .map(|(i, &r)| self.at(Step::List { list: "autos", index: i }, |cx| cx.table_ref(r)))
                 .collect();
             let hosts = host_inputs
                 .iter()

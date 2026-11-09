@@ -68,6 +68,9 @@ pub fn parse_type(s: &str) -> Result<VariableType, String> {
     if let Some(name) = s.strip_prefix("extern ") {
         return Ok(VariableType::Extern(intern(name.trim())));
     }
+    if let Some(name) = s.strip_prefix("handle ") {
+        return Ok(VariableType::Handle(intern(name.trim())));
+    }
     Ok(match s {
         "bool" => VariableType::Bool,
         "i8" => VariableType::I8,
@@ -77,8 +80,6 @@ pub fn parse_type(s: &str) -> Result<VariableType, String> {
         "f64" => VariableType::F64,
         "vec3" => VariableType::Vec3,
         "pos3" => VariableType::Pos3,
-        "perm_table" => VariableType::PermutationTable,
-        "interpolated_noise_sampler" => VariableType::InterpolatedNoiseSampler,
         _ => return Err(format!("unknown type `{s}`")),
     })
 }

@@ -36,7 +36,10 @@ fn check_test_file(t: &TestFile) {
     assert_eq!(t2.cases.len(), t.cases.len());
     for (a, b) in t.cases.iter().zip(&t2.cases) {
         assert_eq!(a.name, b.name);
-        assert_eq!(a.seed, b.seed);
+        assert_eq!(a.params.len(), b.params.len());
+        for ((_, x), (_, y)) in a.params.iter().zip(&b.params) {
+            assert_eq!(x, y);
+        }
         assert_eq!(a.origin.map(f64::to_bits), b.origin.map(f64::to_bits));
         assert_eq!(a.hosts.len(), b.hosts.len());
         for ((_, x), (_, y)) in a.hosts.iter().zip(&b.hosts) {

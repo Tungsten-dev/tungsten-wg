@@ -1,6 +1,6 @@
 //! `VariableType` → core `Type`.
 
-use tungsten_core::{RecordId, Type};
+use tungsten_core::{HandleTypeId, RecordId, Type};
 use tungsten_ir::VariableType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,14 +9,17 @@ pub(crate) enum TypeFail {
     UnknownRecord(&'static str),
 }
 
-/// Lowers a type, resolving record names with `record`. Stops at the first failure.
-pub(crate) fn lower_type(
-    t: &VariableType,
-    record: &mut dyn FnMut(&'static str) -> Option<RecordId>,
-) -> Result<Type, TypeFail> {
+/// Resolves the names a type mentions.
+pub(crate) trait TypeNames {
+    fn record(&mut self, name: &'static str) -> Option<RecordId>;
+    /// Handle names are interned in order of first appearance.
+    fn handle(&mut self, name: &'static str) -> HandleTypeId;
+}
+
+/// Lowers a type, resolving names with `names`. Stops at the first failure.
+pub(crate) fn lower_type(t: &VariableType, names: &mut dyn TypeNames) -> Result<Type, TypeFail> {
     Ok(match t {
-        VariableType::PermutationTable => Type::PermTable,
-        VariableType::InterpolatedNoiseSampler => Type::Sampler,
+        VariableType::Handle(name) => Type::Handle(names.handle(name)),
         VariableType::Vec3 => Type::Vec3,
         VariableType::Pos3 => Type::Pos3,
         VariableType::F32 => Type::F32,
@@ -25,9 +28,9 @@ pub(crate) fn lower_type(
         VariableType::I32 => Type::I32,
         VariableType::I64 => Type::I64,
         VariableType::Bool => Type::Bool,
-        VariableType::Array(elem, n) => Type::Array(Box::new(lower_type(elem, record)?), *n),
+        VariableType::Array(elem, n) => Type::Array(Box::new(lower_type(elem, names)?), *n),
         VariableType::Extern(name) => {
-            Type::Record(record(name).ok_or(TypeFail::UnknownRecord(name))?)
+            Type::Record(names.record(name).ok_or(TypeFail::UnknownRecord(name))?)
         }
     })
 }

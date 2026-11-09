@@ -528,7 +528,7 @@ impl DagBuilder<'_> {
                 let host_input = self.ctx.host_inputs[h].id.clone();
                 self.leaf(NodeKind::HostInput { host_input }, region)
             }
-            Expression::PermutationTable(t) => {
+            Expression::AutoConst(t) => {
                 let table = self.ctx.tables[t].id.clone();
                 self.leaf(NodeKind::PermTable { table }, region)
             }

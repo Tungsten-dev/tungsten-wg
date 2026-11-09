@@ -66,9 +66,9 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
         Artifact::Binary { path, id } => {
             let mut requests = vec![];
             for &i in &eligible {
-                let named = oracle::named_case(&tf, i, &env)?;
+                let (named, params) = oracle::named_case(&tf, i, &env)?;
                 let c = &tf.cases[i];
-                requests.push(io.encode_request(&env, c.origin, c.seed, &named.hosts)?);
+                requests.push(io.encode_request(&env, c.origin, &params, &named.hosts)?);
             }
             let large = tf.tier.as_deref() == Some("large");
             let make = || h.command(&path, &id);

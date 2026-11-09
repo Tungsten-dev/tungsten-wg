@@ -49,8 +49,6 @@ pub use backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePolicy
 pub use orchestration::TransformCudaOrchestration;
 
 /// Runtime types the generated code refers to by name.
-pub const PERLIN_NOISE_SAMPLER_TYPE: &str = "tw::PerlinNoiseSampler";
-pub const BASE3D_NOISE_SAMPLER_TYPE: &str = "tw::InterpolatedNoiseSampler";
 pub const CONFIG_TYPE: &str = "tw::Config";
 pub const POSITION_ITERATOR_TYPE: &str = "tw::PositionIterator";
 

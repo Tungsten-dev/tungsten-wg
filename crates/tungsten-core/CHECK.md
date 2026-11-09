@@ -143,7 +143,7 @@ the annotations the program carries.
 | `Local(l)` | — | The local's declared type |
 | `Const(c)` | — | The constant's derived type (§4.4) |
 | `Host(h)` | — | The host's declared type |
-| `Table(t)` | — | `PermTable` or `Sampler`, by the table's kind |
+| `Table(t)` | — | `Handle(ty)`, with the table's handle type |
 | `Ambient` | — | `Pos3` for `Pos3`, `Vec3` for the other three |
 | `Density { input, index }` | `index`, if present, is an `I32` | The return type of the source unit's `main` |
 | `Call { func, args }` | As many arguments as `func` has parameters (`Arity`); argument `k` has the type of parameter `k` (`TypeMismatch`) | `func`'s return type |
@@ -476,11 +476,11 @@ the interpreter's layout code can never overflow.
 
 "Has its type" (`value_has_type`) means: the shapes match, an array has exactly the declared
 length and every element has the element type, a record has its declaration's field count and
-every field has its type, and a table handle points at an existing table **of the right kind**.
+every field has its type, and a handle points at an existing table **of the right handle type**.
 
-*Why check tables?* Host types can be anything, including `PermTable` and `Sampler`. A
-`PermTable` value that actually points at a sampler would be passed to an extern that expects a
-permutation table.
+*Why check tables?* Host types can be anything, including handle types. A handle value that
+actually points at a table of another handle type (a sampler where a permutation table is
+expected) would be passed to an extern that expects the other type.
 
 The origin needs no check: any three `f64`s are fine.
 

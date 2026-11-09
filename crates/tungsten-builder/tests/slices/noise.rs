@@ -11,7 +11,7 @@ use tungsten_builder::prelude::*;
 
 extern_fns! {
     group noise_externs;
-    perm_get(t: PermutationTable, i: I32): I32,
+    perm_get(t: (handle "PerlinNoiseSampler"), i: I32): I32,
 }
 
 /// Stands in for vanilla's `DOUBLE_PERLIN_OFFSET`.
@@ -28,6 +28,17 @@ enum Lowered {
     Function(Helper),
 }
 
+/// What a frontend's string-to-seed derivation gives (the builder knows no hashing). Here the
+/// three names the slice uses, as vanilla's MD5 split.
+fn name_seed(name: &str) -> (i64, i64) {
+    match name {
+        "n" => (8902374405288272100, 1924477296749798305),
+        "octave_-1" => (-2882966581331622803, -8741388887387168150),
+        "octave_1" => (7612244814648660239, 6262469271084829834),
+        other => panic!("no seed for `{other}`"),
+    }
+}
+
 fn lower_normal_noise(
     pb: &mut ProgramBuilder,
     noise: &NormalNoise,
@@ -35,6 +46,7 @@ fn lower_normal_noise(
     name: &str,
     as_density: bool,
 ) -> Lowered {
+    let seed = pb.param("seed", I64);
     let mut f = FnBuilder::new(name, F64);
     let rpos3 = if as_density {
         let rpos3 = f.local("rpos3", Vec3);
@@ -48,10 +60,15 @@ fn lower_normal_noise(
     f.assign(n, 0.0);
     for &(freq, amp, octave) in &noise.octaves {
         let sub = format!("octave_{octave}");
-        let tables = [
-            pb.perlin_table(permutation_name, Some(&sub), 0),
-            pb.perlin_table(permutation_name, Some(&sub), 1),
-        ];
+        let (id, sub_id) = (name_seed(permutation_name), name_seed(&sub));
+        let tables = [0i64, 1].map(|index| {
+            pb.auto_const(
+                &format!("{permutation_name}_{index}_{sub}"),
+                Handle("PerlinNoiseSampler"),
+                "make_permutation_table",
+                [seed.into(), id.0.into(), id.1.into(), index.into(), sub_id.0.into(), sub_id.1.into()],
+            )
+        });
         for (table, factor) in tables.into_iter().zip([1.0, SECOND_SAMPLER_FACTOR]) {
             let fr = freq * factor;
             // No scalar broadcast: the frontend's `rpos3 * freq` becomes a vec3 product.

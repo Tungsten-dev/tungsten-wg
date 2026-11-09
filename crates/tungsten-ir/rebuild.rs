@@ -72,7 +72,8 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
         entry_points: p.entry_points.clone(),
         constants: Arena::new(),
         host_inputs: Arena::new(),
-        permutation_tables: Arena::new(),
+        auto_params: Arena::new(),
+        auto_consts: Arena::new(),
         density_inputs: Arena::new(),
     };
     let mut m = Remap::default();
@@ -85,11 +86,18 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
         HostInput::clone,
     );
     copy_arena(
-        &p.permutation_tables,
-        &mut out.permutation_tables,
-        &mut m.tables,
+        &p.auto_params,
+        &mut out.auto_params,
+        &mut m.auto_params,
         order,
-        PermutationTableInput::clone,
+        AutoParam::clone,
+    );
+    copy_arena(
+        &p.auto_consts,
+        &mut out.auto_consts,
+        &mut m.auto_consts,
+        order,
+        AutoConst::clone,
     );
     copy_arena(
         &p.constants,
@@ -138,7 +146,7 @@ pub fn compact(p: &OptimizedProgram) -> OptimizedProgram {
     rebuild(p, &mut |n| (0..n).collect())
 }
 
-/// Shuffles the slot order of every arena (hosts, tables, consts, density inputs, fns, vars of
+/// Shuffles the slot order of every arena (hosts, auto params, autoconsts, consts, density inputs, fns, vars of
 /// each fn, units) and rewrites all refs. The program means the same afterwards.
 pub fn permute(p: &mut OptimizedProgram, seed: u64) {
     let mut state = seed;
@@ -197,7 +205,7 @@ fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
             | Expression::Int(_)
             | Expression::Long(_)
             | Expression::Bool(_)
-            | Expression::PermutationTable(_)
+            | Expression::AutoConst(_)
             | Expression::HostInput(_)
             | Expression::Ambient(_) => {}
         }
@@ -287,8 +295,11 @@ fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
     for (i, (r, _)) in c.host_inputs.iter().enumerate() {
         f.hosts.insert(r, i as u64);
     }
-    for (i, (r, _)) in c.permutation_tables.iter().enumerate() {
-        f.tables.insert(r, i as u64);
+    for (i, (r, _)) in c.auto_params.iter().enumerate() {
+        f.auto_params.insert(r, i as u64);
+    }
+    for (i, (r, _)) in c.auto_consts.iter().enumerate() {
+        f.auto_consts.insert(r, i as u64);
     }
     for (fi, (_, func)) in c.functions.iter().enumerate() {
         for (vi, (r, _)) in func.variables.iter().enumerate() {
@@ -301,10 +312,11 @@ fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
     walk_program(&mut c, &mut f);
     let floats = float_bits(&c);
     let text = format!(
-        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
         c.entry_points,
         c.host_inputs.values().collect::<Vec<_>>(),
-        c.permutation_tables.values().collect::<Vec<_>>(),
+        c.auto_params.values().collect::<Vec<_>>(),
+        c.auto_consts.values().collect::<Vec<_>>(),
         c.density_inputs.values().collect::<Vec<_>>(),
         c.constants.values().collect::<Vec<_>>(),
         c.functions.values().collect::<Vec<_>>(),

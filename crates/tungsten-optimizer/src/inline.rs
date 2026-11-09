@@ -355,7 +355,7 @@ impl<'m> Inliner<'m> {
         let ComputeUnit::DensityFunction {
             function: callee_fn,
             density_inputs: callee_inputs,
-            permutation_table_inputs: callee_perms,
+            auto_consts: callee_autos,
             host_inputs: callee_hosts,
             helper_functions: callee_helpers,
             constants: callee_consts,
@@ -366,7 +366,7 @@ impl<'m> Inliner<'m> {
         {
             let ComputeUnit::DensityFunction {
                 density_inputs,
-                permutation_table_inputs,
+                auto_consts,
                 host_inputs,
                 helper_functions,
                 constants,
@@ -379,7 +379,7 @@ impl<'m> Inliner<'m> {
             // shared as they are.
             density_inputs.retain(|r| *r != plan.input);
             extend_unique(density_inputs, callee_inputs.iter().copied());
-            extend_unique(permutation_table_inputs, callee_perms.iter().copied());
+            extend_unique(auto_consts, callee_autos.iter().copied());
             extend_unique(host_inputs, callee_hosts.iter().copied());
             extend_unique(constants, callee_consts.iter().copied());
             extend_unique(
@@ -581,7 +581,7 @@ fn visit_expr(e: &Expression, f: &mut dyn FnMut(&Expression)) {
         | Expression::Int(_)
         | Expression::Long(_)
         | Expression::Bool(_)
-        | Expression::PermutationTable(_)
+        | Expression::AutoConst(_)
         | Expression::Ambient(_)
         | Expression::HostInput(_) => {}
     }
@@ -658,7 +658,7 @@ fn visit_expr_mut(e: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
         | Expression::Int(_)
         | Expression::Long(_)
         | Expression::Bool(_)
-        | Expression::PermutationTable(_)
+        | Expression::AutoConst(_)
         | Expression::Ambient(_)
         | Expression::HostInput(_) => {}
     }

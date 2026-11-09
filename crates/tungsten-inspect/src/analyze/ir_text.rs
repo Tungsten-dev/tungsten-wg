@@ -174,7 +174,7 @@ impl Printer<'_, '_> {
                     Some(i) => format!("{name}[{}]", self.expr(i)),
                 }
             }
-            Expression::PermutationTable(t) => format!("table {}", ctx.tables[t].display),
+            Expression::AutoConst(t) => format!("auto {}", ctx.tables[t].display),
             Expression::HostInput(h) => format!("host {}", ctx.host_inputs[h].display),
             Expression::BinaryOp { op, left, right } => format!(
                 "({} {} {})",

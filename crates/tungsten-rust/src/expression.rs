@@ -220,9 +220,13 @@ impl<'a> FunctionConverter<'a> {
                     index: Box::new(index),
                 }
             }
-            Expression::PermutationTable(r) => {
+            Expression::AutoConst(r) => {
                 let name = self.naming.auto_const_field(*r);
-                R::Ref(Box::new(field(&self.uniform.auto_consts, name)))
+                let value = field(&self.uniform.auto_consts, name);
+                match &self.program.auto_consts[*r].t {
+                    VariableType::Handle(_) => R::Ref(Box::new(value)),
+                    _ => value,
+                }
             }
             Expression::HostInput(r) => {
                 field(&self.uniform.host_consts, self.naming.host_field(*r))

@@ -16,7 +16,7 @@ use crate::{
 pub fn eval_registry() -> Registry {
     RegistryBuilder::new()
         .extern_fn("sin", &[VariableType::F64], VariableType::F64)
-        .extern_fn("sample", &[VariableType::PermutationTable, VariableType::F64], VariableType::F64)
+        .extern_fn("sample", &[VariableType::Handle("PerlinNoiseSampler"), VariableType::F64], VariableType::F64)
         .extern_fn_with_domain_error("sqrt", &[VariableType::F64], VariableType::F64)
         .extern_fn("undeclared", &[VariableType::F64], VariableType::F64)
         .extern_fn("bad", &[VariableType::F64], VariableType::F64)
@@ -458,9 +458,9 @@ fn canonical_input_error() {
 fn externs() {
     is("f64", "ext sqrt::<(f64) -> f64>(2.25)", f64v(1.5));
     let src = "program {
-        table t0 = perlin(\"n\", none, 0);
-        fn m() -> f64 { return ext sample(table(t0), 3.0); }
-        unit mu { main m; tables [t0]; }
+        auto t0: handle PerlinNoiseSampler = make_perm();
+        fn m() -> f64 { return ext sample(auto(t0), 3.0); }
+        unit mu { main m; autos [t0]; }
         entry mu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     }";
     assert_eq!(run(src).entries[0][0], Ok(f64v(1.5)));

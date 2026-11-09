@@ -462,6 +462,10 @@ impl Parser {
                     p.bump();
                     TyKind::Extern(p.plain_name("an extern type name")?.0)
                 }
+                Tok::Kw(Kw::Handle) => {
+                    p.bump();
+                    TyKind::Handle(p.plain_name("a handle type name")?.0)
+                }
                 Tok::Kw(k) => {
                     let Some(t) = tables::prim_type(*k) else {
                         return p.unexpected("a type");
@@ -557,36 +561,53 @@ impl Parser {
                     ty,
                 }))
             }
-            Tok::Kw(Kw::Table) => {
+            Tok::Kw(Kw::Param) => {
                 self.bump();
                 let label = self.label()?;
-                self.expect(Tok::Assign)?;
-                let def = if self.eat_kw(Kw::Base3d) {
-                    TableDef::Base3d
-                } else {
-                    self.expect_kw(Kw::Perlin)?;
-                    self.expect(Tok::LParen)?;
-                    let ident = self.string()?;
-                    self.expect(Tok::Comma)?;
-                    let subident = if self.eat_kw(Kw::None) {
-                        None
-                    } else {
-                        Some(self.string()?)
-                    };
-                    self.expect(Tok::Comma)?;
-                    let index = self.uint()?;
-                    self.expect(Tok::RParen)?;
-                    TableDef::Perlin {
-                        ident,
-                        subident,
-                        index,
-                    }
-                };
+                self.expect(Tok::Colon)?;
+                let ty = self.ty()?;
                 self.expect(Tok::Semi)?;
-                Ok(Item::Table(TableItem {
+                Ok(Item::Param(ParamItem {
                     span: start.to(self.prev_span()),
                     label,
-                    def,
+                    ty,
+                }))
+            }
+            Tok::Kw(Kw::Auto) => {
+                self.bump();
+                let label = self.label()?;
+                self.expect(Tok::Colon)?;
+                let ty = self.ty()?;
+                let mut name = None;
+                if let Some((a, span)) = self.attr() {
+                    if a != "name" {
+                        return self.fail(span, format!("unknown autoconst attribute `@{a}`"));
+                    }
+                    self.expect(Tok::LParen)?;
+                    name = Some(self.string()?);
+                    self.expect(Tok::RParen)?;
+                }
+                self.expect(Tok::Assign)?;
+                let (initializer, _) = self.plain_name("an initializer name")?;
+                self.expect(Tok::LParen)?;
+                let args = self.comma_list(Tok::RParen, |p| {
+                    if p.eat_kw(Kw::Param) {
+                        p.expect(Tok::LParen)?;
+                        let l = p.label()?;
+                        p.expect(Tok::RParen)?;
+                        Ok(AutoArg::Param(l))
+                    } else {
+                        Ok(AutoArg::Lit(p.num()?))
+                    }
+                })?;
+                self.expect(Tok::Semi)?;
+                Ok(Item::Auto(AutoItem {
+                    span: start.to(self.prev_span()),
+                    label,
+                    ty,
+                    name,
+                    initializer,
+                    args,
                 }))
             }
             Tok::Kw(Kw::Const) => {
@@ -639,7 +660,7 @@ impl Parser {
             }
             _ => {
                 self.unexpected(
-                    "an item (`fn`, `unit`, `input`, `entry`, `const`, `host`, `table`, `use`)",
+                    "an item (`fn`, `unit`, `input`, `entry`, `const`, `host`, `param`, `auto`, `use`)",
                 )
             }
         }
@@ -723,7 +744,7 @@ impl Parser {
             hash: None,
             main: None,
             helpers: None,
-            tables: None,
+            autos: None,
             hosts: None,
             consts: None,
             inputs: None,
@@ -748,14 +769,14 @@ impl Parser {
                     u.main = Some(self.label()?);
                     self.expect(Tok::Semi)?;
                 }
-                Tok::Kw(k @ (Kw::Helpers | Kw::Tables | Kw::Hosts | Kw::Consts | Kw::Inputs)) => {
+                Tok::Kw(k @ (Kw::Helpers | Kw::Autos | Kw::Hosts | Kw::Consts | Kw::Inputs)) => {
                     self.bump();
                     self.expect(Tok::LBracket)?;
                     let list = self.labels(Tok::RBracket)?;
                     self.expect(Tok::Semi)?;
                     let slot = match k {
                         Kw::Helpers => &mut u.helpers,
-                        Kw::Tables => &mut u.tables,
+                        Kw::Autos => &mut u.autos,
                         Kw::Hosts => &mut u.hosts,
                         Kw::Consts => &mut u.consts,
                         _ => &mut u.inputs,
@@ -1127,13 +1148,13 @@ impl Parser {
                     ExprKind::Name(label)
                 }
             }
-            Tok::Kw(k @ (Kw::Const | Kw::Host | Kw::Table)) => {
+            Tok::Kw(k @ (Kw::Const | Kw::Host | Kw::Auto)) => {
                 self.bump();
                 let l = self.paren_label()?;
                 match k {
                     Kw::Const => ExprKind::Const(l),
                     Kw::Host => ExprKind::Host(l),
-                    _ => ExprKind::Table(l),
+                    _ => ExprKind::Auto(l),
                 }
             }
             Tok::Kw(Kw::Density) => {
@@ -1328,10 +1349,15 @@ impl Parser {
                 let name = self.string()?;
                 self.expect_word("origin")?;
                 let origin = self.triple()?;
-                self.expect_word("seed")?;
-                self.expect(Tok::LParen)?;
-                let seed = self.uint()?;
-                self.expect(Tok::RParen)?;
+                let mut params = vec![];
+                while self.eat_kw(Kw::Param) {
+                    self.expect(Tok::LParen)?;
+                    params.extend(self.comma_list(Tok::RParen, |p| {
+                        let l = p.label()?;
+                        p.expect(Tok::Assign)?;
+                        Ok((l, p.value()?))
+                    })?);
+                }
                 let mut hosts = vec![];
                 while self.eat_kw(Kw::Host) {
                     self.expect(Tok::LParen)?;
@@ -1344,7 +1370,7 @@ impl Parser {
                 DirectiveKind::Case {
                     name,
                     origin,
-                    seed,
+                    params,
                     hosts,
                 }
             }

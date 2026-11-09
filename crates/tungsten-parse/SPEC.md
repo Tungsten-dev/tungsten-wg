@@ -25,14 +25,14 @@ form that is fully explicit, deterministic, and a fixpoint of `print ∘ parse`.
 | Architecture | `parse` → AST, then `elaborate(ast, &dyn Env)`. Besides `tungsten-ir`, tungsten-parse uses well-maintained crates where they replace hand-written infrastructure: `logos` (lexer), `codespan-reporting` (diagnostics), `stacker` (stack growth). The parser, elaborator and printer are hand-written. The testsuite implements `Env` (registry + prelude). |
 | Printer scope | Total over any program whose refs resolve: weird names, duplicate names, `HostInput::Dynamic`, unregistered externs, density reads from helpers, shared fns. Dangling refs panic, like `Arena::get`. |
 | Top-level shape | Flat. Every fn is top level. A unit names its main fn (`main f;`) and lists its inputs. Inputs are top-level items, and density reads are `density(input)`, so a read can sit in any fn, including a helper shared between units. |
-| Fn labels | Label ⇔ `canonical_name`: `f` ⇔ `Some("f")`, `` `a:b/c` `` quoted, `%N` ⇔ `None`, `f#N` when the name is duplicated. Unit, table and entry labels are syntax only. Input labels follow the host rule (§5.2). |
+| Fn labels | Label ⇔ `canonical_name`: `f` ⇔ `Some("f")`, `` `a:b/c` `` quoted, `%N` ⇔ `None`, `f#N` when the name is duplicated. Unit and entry labels are syntax only. Param labels are the param's `name`. An autoconst's name defaults to its label (`@name("…")` overrides it), and the printer labels autoconsts `a<N>`. Input labels follow the host rule (§5.2). |
 | Variables | Canonical: declared in slot order (typed params first when they're a slot prefix, then a `vars { }` block). Lenient: `let x: T [= e];` appends a slot. Arena order should be semantically insignificant, and a metamorphic test checks that (§12). |
-| Namespaces | Separate per kind. Bare identifiers in expressions are vars. Other references are wrapped: `const(c)`, `host(h)`, `table(t)`, `density(d)`, `ambient(k)`. Lenient: a bare name that isn't a var falls back to a constant. |
+| Namespaces | Separate per kind. Bare identifiers in expressions are vars. Other references are wrapped: `const(c)`, `host(h)`, `auto(a)`, `density(d)`, `ambient(k)`. Lenient: a bare name that isn't a var falls back to a constant. |
 | Statements | Mandatory `;` after every simple statement and simple item. Whitespace is fully free. |
 | Precedence | Rust precedence. Comparisons don't associate. Shift and bitwise ops (`<< >> >>> & ^ \|`) can't mix unparenthesized with any other binary operator. Canonical form fully parenthesizes. |
 | Negative literals | A `-` glued to a digit or `inf` in operand position is part of the literal. `Negate` prints as `-(e)`. |
 | Literal typing | The suffix alone decides inside bodies and const exprs. Contextual int→float only in attribute and envelope positions. |
-| Derived fields | Only: extern signatures (from `Env`), `Field` type and base type (from `type_of(base)`), `source_hash = 0`. Lists (`helpers`, `tables`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
+| Derived fields | Only: extern signatures (from `Env`), `Field` type and base type (from `type_of(base)`), `source_hash = 0`. Lists (`helpers`, `autos`, `hosts`, `consts`, fn `@hosts`) are never derived. Omitted means empty. |
 | Failed derivation | `ElabError` with a span. `@expect reject` tests write those fields explicitly. |
 | Prelude | `use lib::{a, b};` copies the named fns plus their transitive library fns and consts. `print` emits them expanded. |
 | `&'static str` | A global leaking interner, one copy per distinct string. |
@@ -83,7 +83,7 @@ impl Labels {
     pub fn function(&self, f: Ref<Function>) -> &str;
     pub fn unit(&self, u: Ref<ComputeUnit>) -> &str;
     pub fn var(&self, f: Ref<Function>, v: Ref<Var>) -> &str;
-    // … const, host, table, input, entry
+    // … const, host, auto, input, entry
 }
 pub fn print_function(p: &OptimizedProgram, labels: &Labels, f: Ref<Function>) -> String;
 
@@ -116,10 +116,11 @@ program is compact by construction: no holes, and every generation is 0.
   identifier or a quoted identifier. `N` is a decimal slot number. Their meaning per namespace is
   in §5.2. The parser never gives `N` semantics: it only uses it for uniqueness. Slot order always
   comes from textual order.
-- **Strings**: `"…"` with `\\ \" \n \t \u{hex}`. Used for perlin idents, case names and reasons.
-- **Keywords**: `program fn unit main input entry host table const use let vars return break if
-  else while repeat true false as new extern ext mut dynamic none perlin base3d ambient
-  helpers tables hosts consts inputs inf nan` and the type names (§5.4).
+- **Strings**: `"…"` with `\\ \" \n \t \u{hex}`. Used for `@name`, case names and reasons.
+- **Keywords**: `program fn unit main input entry host param auto const use let vars return break
+  if else while repeat true false as new extern ext mut dynamic density ambient
+  helpers autos hosts consts inputs inf nan` and the type names (§5.4). `table`, `tables`,
+  `perlin`, `base3d` and `none` are gone, with no compatibility form.
 
 ### 4.1 Numeric literals
 
@@ -169,11 +170,13 @@ Rules:
 ```ebnf
 file      = directive* program directive* ;
 program   = "program" "{" item* "}" ;
-item      = use | host | table | const | fn | input | unit | entry ;
+item      = use | host | param | auto | const | fn | input | unit | entry ;
 
 use       = "use" IDENT "::" "{" label ("," label)* ","? "}" ";" ;
 host      = "host" label ( ":" type | "dynamic" ) ";" ;
-table     = "table" label "=" ( "perlin" "(" STRING "," (STRING | "none") "," UINT ")" | "base3d" ) ";" ;
+param     = "param" label ":" type ";" ;
+auto      = "auto" label ":" type ("@name" "(" STRING ")")? "=" IDENT "(" (autoarg ("," autoarg)*)? ")" ";" ;
+autoarg   = "param" "(" label ")" | LONG ;                 (* `12` is an i32: write `12L` *)
 const     = "const" label "=" cexpr ";" ;
 fn        = "fn" label "(" (param ("," param)* ","?)? ")" "->" type fn_attr* "{" vars? stmt* "}" ;
 param     = label (":" type)? ;
@@ -182,7 +185,7 @@ fn_attr   = "@hash" "(" UINT ")" | "@hosts" "(" labels? ")" ;
 unit      = "unit" label ("@hash" "(" UINT ")")? "{" unit_item* "}" ;
 input     = "input" label "=" label grid_attrs ";" ;
 unit_item = "main" label ";"
-          | ("helpers" | "tables" | "hosts" | "consts" | "inputs") "[" labels? "]" ";" ;
+          | ("helpers" | "autos" | "hosts" | "consts" | "inputs") "[" labels? "]" ";" ;
 entry     = "entry" (label "=")? label grid_attrs ";" ;
 grid_attrs= "@dims" "(" INT "," INT "," INT ")"
             "@origin_scale" "(" num "," num "," num ")"
@@ -220,7 +223,7 @@ per fn. The input namespace is program-wide.
 
 **Printer-generated labels** for syntax-only kinds:
 
-- tables: `t<N>`.
+- autoconsts: `a<N>`. Params use their name.
 - units: the main fn's label, if it's a plain identifier, not of the form `u<digits>`, and unique
   among units. Otherwise `u<N>`.
 - entries: the unit label, if the unit has exactly one entry and the label isn't of the form
@@ -253,7 +256,7 @@ per fn. The input namespace is program-wide.
 ### 5.4 Types
 
 ```
-bool i8 i32 i64 f32 f64 vec3 pos3 perm_table interpolated_noise_sampler
+bool i8 i32 i64 f32 f64 vec3 pos3 handle IDENT
 [T; n]                 // Array(T, n)
 extern Name            // Extern(&'static str); Name is an identifier or quoted
 ```
@@ -290,7 +293,7 @@ they're binary ops, §10).
 | `Variable(v)` | `x` | `x` |
 | `Constant(c)` | `const(c)`, or bare `c` if no var `c` exists | `const(c)` |
 | `HostInput(h)` | `host(h)` | `host(h)` |
-| `PermutationTable(t)` | `table(t)` | `table(t)` |
+| `AutoConst(a)` | `auto(a)` | `auto(a)` |
 | `DensityVariable(d, None)` | `density(d)` | `density(d)` |
 | `DensityVariable(d, Some(i))` | `density(d, i)` | `density(d, i)` |
 | `Ambient(k)` | `ambient(origin \| pos3 \| origin_scale \| position_scale)` | same |
@@ -354,7 +357,7 @@ These are the only derivations. Anything else that's missing is a syntax error.
 | var / const / host | declared type / `type_of(const expr)` / declared type |
 | literal, `Ambient` | its type (`origin`, `origin_scale`, `position_scale`: `vec3`; `pos3`: `pos3`) |
 | `density(…)`, with or without index | return type of the target unit's main fn |
-| `table(…)` | `perm_table` |
+| `auto(…)` | the autoconst's type |
 | fn call / ext call | return type |
 | binary arithmetic | identical operand types → that type. `vec3`∘`pos3` either way → `vec3` |
 | comparison, `&&`, `\|\|` | `bool` |
@@ -413,7 +416,7 @@ directive = "@knownfail" "(" IDENT "," STRING ("," "case" "=" STRING)? ("," "sta
           | "@fuel" "(" UINT ")"
           | "@tier" "(" IDENT ")"
           | "@cells" "(" "sample" "=" UINT "," "seed" "=" UINT ")"
-          | "@case" STRING "origin" "(" num "," num "," num ")" "seed" "(" UINT ")" ("host" "(" binding ("," binding)* ")")*
+          | "@case" STRING "origin" "(" num "," num "," num ")" ("param" "(" binding ("," binding)* ")")* ("host" "(" binding ("," binding)* ")")*
           | "@expect" "reject" ("(" IDENT ")")?
           | "@expect" STRING expectation ;
 binding     = label "=" value ;
@@ -428,7 +431,7 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
 - **`@knownfail`**: the backend is stored as a string and the harness validates it (`rust`, `java`
   or `cuda`). `case` and `stage` narrow the scope. The harness requires every covered
   (backend, case, stage) to fail, and a covered combination that passes is an error.
-- **`@case`**: the name is unique. `seed` is `u64` (decimal or hex). Every `Static` host must be
+- **`@case`**: the name is unique. Every declared param is bound exactly once with `param(name = value)`, by its label, and `param(…)` is left out when the program has no params. An `i64` param takes an unsuffixed or `L` literal, decimal or hex up to `u64::MAX` (reinterpreted as bits). Every `Static` host must be
   bound exactly once per case, a binding to an unknown or `dynamic` host is an error, and values
   are checked against the host's type. `origin` is an attribute position (ints are allowed).
 - **`@expect reject[(Kind)]`**: `Kind` is stored as a string, so the parser doesn't depend on the
@@ -445,8 +448,8 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
   Without a registry entry (under `NoEnv`, say) it keeps the written order and each field is
   typed by how it's written. Canonical text spells every kind unambiguously (`1`, `1b`, `1L`,
   `1.0`, `1.0f`), so P3 holds without the registry.
-  `nan` is a valid expected value, and the comparison rule makes any NaN match it. `perm_table` and
-  `interpolated_noise_sampler` have no literal values, so binding them is an error.
+  `nan` is a valid expected value, and the comparison rule makes any NaN match it. `handle` types
+  have no literal values, so binding them is an error.
 
 ### 9.2 `TestFile`
 
@@ -455,7 +458,7 @@ pub struct TestFile {
     pub program: OptimizedProgram,
     pub source_map: SourceMap,
     pub entry_labels: Vec<String>,          // index = entry_points index; informational only
-    pub cases: Vec<Case>,                   // name, origin [f64; 3], seed u64, hosts Vec<(Ref<HostInput>, Value)>
+    pub cases: Vec<Case>,                   // name, origin [f64; 3], params Vec<(Ref<AutoParam>, Value)>, hosts Vec<(Ref<HostInput>, Value)>
     pub expects: Vec<Expect>,               // case index, entry index, ExpectKind (Cell | All | Grid | Error(String))
     pub reject: Option<Option<String>>,
     pub knownfails: Vec<KnownFail>,
@@ -480,14 +483,14 @@ use the canonical expression spellings. Floats use §10.2.
 
 - 4-space indent, LF line endings, a trailing newline, one item or statement per line, and one
   blank line between fns and between units.
-- Item order: `host`s, `table`s, `const`s, `fn`s, `unit`s, `entry`s, each in arena iteration
+- Item order: `host`s, `param`s, `auto`s, `const`s, `fn`s, `unit`s, `entry`s, each in arena iteration
   order. Because the order is slot order, `parse(print(m))` reproduces the compacted slot order.
 - **Fn header**: if `parameters` are exactly the first `k` slots, in order, they print typed
   (`(a: f64, b: f64)`), and `vars { }` lists the remaining slots. Otherwise params print untyped
   and `vars { }` lists every slot. `vars { }` is omitted when it would be empty, and has one entry
   per line with a trailing comma. No `let` in canonical output.
 - `@hosts(...)` is printed when non-empty. `@hash(0x…)` is always printed (lowercase hex, no
-  padding). Unit lists are printed when non-empty, in the order `main`, `helpers`, `tables`,
+  padding). Unit lists are printed when non-empty, in the order `main`, `helpers`, `autos`,
   `hosts`, `consts`, then `inputs`. `input` items are printed after the functions and before the units.
 - Every binary op, cast and unary op is parenthesized as in §6.1, including the outermost
   expression of a statement. The `if` / `while` condition is printed as a plain expression, so it

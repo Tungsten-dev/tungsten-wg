@@ -41,7 +41,6 @@ repository = "https://github.com/Tungsten-dev/tungsten-wg"
 bumpalo = "3.19.0"
 codespan-reporting = { version = "0.13.1", default-features = false, features = ["std"] }
 logos = "0.16.1"
-md5 = "0.8.0"
 proptest = "1.12.0"
 stacker = "0.1.25"
 serde = { version = "1.0", features = ["derive"] }

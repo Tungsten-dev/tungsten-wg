@@ -67,7 +67,7 @@ crates/tungsten-testsuite/        # publish = false
 ```
 
 Dependencies: `tungsten-parse`, `tungsten-check`, `tungsten-ir`, `tungsten-interface`,
-`tungsten-optimizer`, `tungsten-rust`, `tungsten-java`, `tungsten-cuda`, `md5`, `serde`, `toml`,
+`tungsten-optimizer`, `tungsten-rust`, `tungsten-java`, `tungsten-cuda`, `serde`, `toml`,
 `proptest`, `libtest-mimic`, `insta`. New workspace dependencies: `toml`, `libtest-mimic`, `insta`.
 
 ### Required change outside the crate
@@ -225,8 +225,8 @@ sampler_sample(s, v)  = (h >>> 11) as f64 * 2^-53, where
 ```
 
 `seed` is reinterpreted between `u64` and `i64` (bits). The interpreter computes the same inputs from
-`map.table_idents` via `tungsten_rust::random::xoroshiro_seed`, inside a per-case `Externs` value,
-since the core `Case` has no seed. Every step is integer or exactly representable, so it's identical
+`LowerMap::resolved_auto_consts` (the toy initializers take the ids as literal `i64` arguments), inside a
+per-case `Externs` value, since the core `Case` has no params. Every step is integer or exactly representable, so it's identical
 across languages. All Base3D tables of one seed are identical; tests must not rely on them differing.
 
 ## 6. Differential comparison
@@ -308,7 +308,7 @@ Each test lives in its own namespace, `t_<hash>`:
 
 - A batch is `(backend, top-level corpus dir, stage)`. L6 has its own batch per run. A filter that
   selects any test in a batch builds the whole batch, so filtering never changes its hash.
-- Location: `$CARGO_TARGET_TMPDIR/tw-cache/<backend>/<hash>/`. The md5 hash covers generated sources,
+- Location: `$CARGO_TARGET_TMPDIR/tw-cache/<backend>/<hash>/`. The hash (a small FNV-based one in `src/hash.rs`) covers generated sources,
   runtime files, flags and the compiler's version string. Builds go to a temp directory and are
   renamed into place, so concurrent test binaries are safe.
 - Each batch sits behind a `OnceLock`, so the first trial that needs it builds it.
@@ -491,10 +491,10 @@ Applied to `TESTING.md`:
 | Toolchains | Auto-detect; CI sets `TW_REQUIRE` | CUDA opt-in: risks going stale. All explicit: Java regressions only seen in CI. |
 | Extern impl | One shared Rust source | Two copies: drift gives false alarms for one-line functions. |
 | Records | Generated from `registry.toml` | Hand-written: three edits per record, and mismatches surface only in tests that use them. |
-| Toy tables | Over generated arguments (MD5 ids) | Passing strings: changes production backends purely for tests. |
+| Toy tables | Over the initializer's integer arguments | Passing strings: changes production backends purely for tests. |
 
 Decided without an interview question, and easy to revisit: a fresh `Orchestration` per case, direct
-`rustc`, `_f32` suffix instead of overloads, `@cells` comparing after a full run, md5 for cache keys,
+`rustc`, `_f32` suffix instead of overloads, `@cells` comparing after a full run, a small stable hash for cache keys,
 a 10-second watchdog, the default L6 count of 64, and `TW_SHRINK_COUNT`.
 
 ## 12. Validation plan

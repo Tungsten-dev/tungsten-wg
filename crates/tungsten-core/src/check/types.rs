@@ -215,10 +215,7 @@ pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<Ch
                 return None;
             }
             match get(&p.tables, t.0) {
-                Some(d) => match d.kind {
-                    TableKind::Perm => Some(Type::PermTable),
-                    TableKind::Sampler => Some(Type::Sampler),
-                },
+                Some(d) => Some(Type::Handle(HandleTypeId(d.ty.0))),
                 None => None,
             }
         },

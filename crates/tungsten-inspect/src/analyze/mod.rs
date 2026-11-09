@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
-    ComputeUnit, ConstExpr, Constant, DensityInput, Expression, Function, HostInput, Name,
-    OptimizedProgram, PermutationTableInput, Ref, Statement, Var, VariableType,
+    AutoConst, AutoConstArg, ComputeUnit, ConstExpr, Constant, DensityInput, Expression, Function, HostInput, Name,
+    OptimizedProgram, Ref, Statement, Var, VariableType,
 };
 
 use crate::backend::ElementSizes;
@@ -121,7 +121,7 @@ pub(crate) struct Ctx<'a> {
     pub entries: Vec<Named>,
     pub functions: HashMap<Ref<Function>, Named>,
     pub constants: HashMap<Ref<Constant>, Named>,
-    pub tables: HashMap<Ref<PermutationTableInput>, Named>,
+    pub tables: HashMap<Ref<AutoConst>, Named>,
     pub host_inputs: HashMap<Ref<HostInput>, Named>,
     pub inputs: HashMap<Ref<DensityInput>, InputName>,
     /// Main function → its unit.
@@ -285,20 +285,16 @@ impl<'a> Ctx<'a> {
                 },
             );
         }
-        for (r, t) in self.program.permutation_tables.iter() {
-            let display = match t {
-                PermutationTableInput::PerlinNoise {
-                    ident,
-                    subident,
-                    subident_index,
-                } => format!(
-                    "perlin {ident}[{subident_index}] {}",
-                    subident.as_deref().unwrap_or("")
-                )
-                .trim_end()
-                .to_string(),
-                PermutationTableInput::Base3DNoise => "base3d".to_string(),
-            };
+        for (r, a) in self.program.auto_consts.iter() {
+            let args: Vec<String> = a
+                .args
+                .iter()
+                .map(|arg| match arg {
+                    AutoConstArg::Param(p) => format!("param {}", self.program.auto_params[*p].name),
+                    AutoConstArg::I64(v) => format!("{v}L"),
+                })
+                .collect();
+            let display = format!("{}({})", a.initializer, args.join(", "));
             let id = format!("table:{}", self.interface.auto_const_field(r));
             self.tables.insert(r, Named { id, display });
         }
@@ -416,9 +412,7 @@ impl<'a> Ctx<'a> {
             VariableType::Vec3 => s.vec3,
             VariableType::Pos3 => s.pos3,
             VariableType::Array(t, n) => self.element_size(t)? * n,
-            VariableType::PermutationTable
-            | VariableType::InterpolatedNoiseSampler
-            | VariableType::Extern(_) => return None,
+            VariableType::Handle(_) | VariableType::Extern(_) => return None,
         })
     }
 
@@ -588,7 +582,7 @@ pub(crate) fn expr_children(e: &Expression) -> Vec<&Expression> {
         | Expression::Int(_)
         | Expression::Long(_)
         | Expression::Bool(_)
-        | Expression::PermutationTable(_)
+        | Expression::AutoConst(_)
         | Expression::Ambient(_)
         | Expression::HostInput(_) => vec![],
     }

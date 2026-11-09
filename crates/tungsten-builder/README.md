@@ -49,7 +49,7 @@ let program: OptimizedProgram = pb.build()?;
 
 | Type | What it is |
 | --- | --- |
-| `ProgramBuilder` | Owns the program. Hands out `Copy` handles: `Unit`, `Helper`, `Input`, `Host`, `Table`, `Constant` |
+| `ProgramBuilder` | Owns the program. Hands out `Copy` handles: `Unit`, `Helper`, `Input`, `Host`, `Param`, `Auto`, `Constant` |
 | `FnBuilder` | One function, owned and borrowing nothing, so several can be open at once. `finish_unit` or `finish_helper` decides what it becomes |
 | `Local` | A parameter or local of one function, from `param`, `local` (unique name), `temp` (name hint) or `anon` |
 | `Expr` | An IR expression with its type and any mistakes found so far. Handles and literals convert into it |
@@ -113,7 +113,7 @@ anything by hand.
 | --- | --- | --- |
 | `Function.host_inputs` | Hosts the function reads itself | First use |
 | Unit helpers | Everything reachable from `main` | Callees before callers |
-| Unit hosts, tables, inputs | Read by `main` or any helper | First use |
+| Unit hosts, autoconsts, inputs | Read by `main` or any helper | First use |
 | Unit constants | Constants read, and those their values reach | Dependencies first |
 
 First use follows evaluation order and enters a callee at its first call, after the call's
@@ -126,7 +126,8 @@ never listed.
 | --- | --- | --- |
 | Input | Same source, dims, and scales by bits | The existing input. The first name wins |
 | Host | Same name | The existing host. Another type is `HostTypeConflict` |
-| Table | Equal `PermutationTableInput` | The existing table |
+| Param | Name | Same type: the existing param. Other type: `AutoParamConflict` |
+| Autoconst | Equal type, initializer and arguments | The existing autoconst. The first name wins |
 | Constant, helper, unit | Never | |
 
 So two units that each ask for the same input share it. Scales compare by bits, so `0.0` and `-0.0`

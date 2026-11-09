@@ -12,6 +12,7 @@ pub fn var_type(t: &Ty) -> VariableType {
         TyKind::Prim(v) => v.clone(),
         TyKind::Array(e, n) => VariableType::Array(Box::new(var_type(e)), *n),
         TyKind::Extern(name) => VariableType::Extern(intern(name)),
+        TyKind::Handle(name) => VariableType::Handle(intern(name)),
     }
 }
 

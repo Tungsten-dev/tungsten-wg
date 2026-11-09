@@ -16,6 +16,8 @@ use tungsten_ir::*;
 
 use crate::ast::{self, Item, Label, LabelKey, LabelKind};
 use crate::intern::intern;
+use crate::numlit;
+use crate::tables::NumKind;
 use crate::source_map::SourceMap;
 use crate::span::{Diagnostic, FileId, SourceFiles, Span};
 use types::var_type;
@@ -100,7 +102,8 @@ impl PartialEq for Value {
 pub struct Case {
     pub name: String,
     pub origin: [f64; 3],
-    pub seed: u64,
+    /// Every auto param, in program order.
+    pub params: Vec<(Ref<AutoParam>, Value)>,
     pub hosts: Vec<(Ref<HostInput>, Value)>,
     pub span: Span,
 }
@@ -166,7 +169,8 @@ pub(crate) struct Ctx<'a> {
     pub prog: OptimizedProgram,
     pub map: SourceMap,
     pub hosts: HashMap<LabelKey, Ref<HostInput>>,
-    pub tables: HashMap<LabelKey, Ref<PermutationTableInput>>,
+    pub auto_params: HashMap<LabelKey, Ref<AutoParam>>,
+    pub autos: HashMap<LabelKey, Ref<AutoConst>>,
     pub consts: HashMap<LabelKey, Ref<Constant>>,
     pub fns: HashMap<LabelKey, Ref<Function>>,
     pub fn_vars: HashMap<Ref<Function>, HashMap<LabelKey, Ref<Var>>>,
@@ -192,12 +196,14 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
             entry_points: vec![],
             constants: Arena::new(),
             host_inputs: Arena::new(),
-            permutation_tables: Arena::new(),
+            auto_params: Arena::new(),
+            auto_consts: Arena::new(),
             density_inputs: Arena::new(),
         },
         map: SourceMap::default(),
         hosts: HashMap::new(),
-        tables: HashMap::new(),
+        auto_params: HashMap::new(),
+        autos: HashMap::new(),
         consts: HashMap::new(),
         fns: HashMap::new(),
         fn_vars: HashMap::new(),
@@ -257,8 +263,13 @@ impl<'a> Ctx<'a> {
             }
         }
         for item in &file.program.items {
-            if let Item::Table(t) = item {
-                self.declare_table(t)?;
+            if let Item::Param(p) = item {
+                self.declare_param(p)?;
+            }
+        }
+        for item in &file.program.items {
+            if let Item::Auto(a) = item {
+                self.declare_auto(a)?;
             }
         }
         let local_consts = file.program.items.iter().filter_map(|i| match i {
@@ -351,22 +362,50 @@ impl<'a> Ctx<'a> {
         Ok(())
     }
 
-    fn declare_table(&mut self, t: &ast::TableItem) -> R<()> {
-        let value = match &t.def {
-            ast::TableDef::Base3d => PermutationTableInput::Base3DNoise,
-            ast::TableDef::Perlin {
-                ident,
-                subident,
-                index,
-            } => PermutationTableInput::PerlinNoise {
-                ident: ident.clone(),
-                subident: subident.clone(),
-                subident_index: *index as usize,
-            },
-        };
-        let r = self.prog.permutation_tables.insert(value);
-        declare(&mut self.tables, &t.label, r, "table")?;
-        self.map.tables.insert(r, t.span);
+    fn declare_param(&mut self, p: &ast::ParamItem) -> R<()> {
+        let r = self.prog.auto_params.insert(AutoParam {
+            name: p.label.name.clone(),
+            t: var_type(&p.ty),
+        });
+        declare(&mut self.auto_params, &p.label, r, "param")?;
+        self.map.auto_params.insert(r, p.span);
+        Ok(())
+    }
+
+    fn declare_auto(&mut self, a: &ast::AutoItem) -> R<()> {
+        let mut args = vec![];
+        for arg in &a.args {
+            args.push(match arg {
+                ast::AutoArg::Param(l) => AutoConstArg::Param(self.lookup_auto_param(l)?),
+                ast::AutoArg::Lit(l) => {
+                    if let ast::LitKind::Num { raw, .. } = &l.kind
+                        && raw.kind == NumKind::Int
+                        && !raw.suffixed
+                    {
+                        return err(
+                            l.span,
+                            format!(
+                                "an i64 argument needs the `L` suffix: write `{}L`",
+                                raw.digits
+                            ),
+                        );
+                    }
+                    match numlit::convert(&l.kind, Some(NumKind::Long)) {
+                        Ok(numlit::Num::Long(v)) => AutoConstArg::I64(v),
+                        Ok(_) => unreachable!(),
+                        Err(m) => return err(l.span, m),
+                    }
+                }
+            });
+        }
+        let r = self.prog.auto_consts.insert(AutoConst {
+            name: a.name.clone().unwrap_or_else(|| a.label.display()),
+            t: var_type(&a.ty),
+            initializer: a.initializer.clone(),
+            args,
+        });
+        declare(&mut self.autos, &a.label, r, "autoconst")?;
+        self.map.auto_consts.insert(r, a.span);
         Ok(())
     }
 
@@ -394,8 +433,11 @@ impl<'a> Ctx<'a> {
     pub(crate) fn lookup_host(&self, l: &Label) -> R<Ref<HostInput>> {
         Self::lookup(&self.hosts, l, "host")
     }
-    pub(crate) fn lookup_table(&self, l: &Label) -> R<Ref<PermutationTableInput>> {
-        Self::lookup(&self.tables, l, "table")
+    pub(crate) fn lookup_auto(&self, l: &Label) -> R<Ref<AutoConst>> {
+        Self::lookup(&self.autos, l, "autoconst")
+    }
+    pub(crate) fn lookup_auto_param(&self, l: &Label) -> R<Ref<AutoParam>> {
+        Self::lookup(&self.auto_params, l, "param")
     }
     pub(crate) fn lookup_const(&self, l: &Label) -> R<Ref<Constant>> {
         Self::lookup(&self.consts, l, "constant")
@@ -498,7 +540,7 @@ impl<'a> Ctx<'a> {
         };
         let main = self.lookup_fn(main_label)?;
         let helpers = Self::label_list(&self.fns, u.helpers.as_deref(), "function")?;
-        let tables = Self::label_list(&self.tables, u.tables.as_deref(), "table")?;
+        let autos = Self::label_list(&self.autos, u.autos.as_deref(), "autoconst")?;
         let hosts = Self::label_list(&self.hosts, u.hosts.as_deref(), "host")?;
         let consts = Self::label_list(&self.consts, u.consts.as_deref(), "constant")?;
         let r = self
@@ -507,7 +549,7 @@ impl<'a> Ctx<'a> {
             .insert(ComputeUnit::DensityFunction {
                 function: main,
                 density_inputs: vec![],
-                permutation_table_inputs: tables,
+                auto_consts: autos,
                 host_inputs: hosts,
                 helper_functions: helpers,
                 constants: consts,
@@ -606,7 +648,7 @@ impl<'a> Ctx<'a> {
         use ast::ExprKind::*;
         let check = |e: &ast::Expr| match &e.kind {
             Host(_)
-            | Table(_)
+            | Auto(_)
             | Density { .. }
             | Ambient(_)
             | Call { .. }

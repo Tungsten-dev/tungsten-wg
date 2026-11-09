@@ -188,7 +188,7 @@ fn key_of(
     records: &str,
     tests: &[&TestSource],
 ) -> String {
-    let mut ctx = md5::Context::new();
+    let mut ctx = crate::hash::Context::new();
     ctx.consume(version.as_bytes());
     ctx.consume(flags.join(" ").as_bytes());
     for (name, text) in runtime {
@@ -476,7 +476,7 @@ impl Harness {
         std::fs::create_dir_all(&obj_dir).map_err(io)?;
         let flag_key = format!("{} {}", cuda::NVCC_FLAGS.join(" "), self.arch);
         let obj_key = |t: &TestSource| {
-            let mut ctx = md5::Context::new();
+            let mut ctx = crate::hash::Context::new();
             ctx.consume(self.compiler_version.as_bytes());
             ctx.consume(flag_key.as_bytes());
             for (n, text) in cuda::RUNTIME_FILES {

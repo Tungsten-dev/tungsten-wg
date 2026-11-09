@@ -34,7 +34,7 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
     n("functions", ir.functions.iter().count(), p.functions.len())?;
     n("consts", ir.constants.iter().count(), p.consts.len())?;
     n("hosts", ir.host_inputs.iter().count(), p.hosts.len())?;
-    n("tables", ir.permutation_tables.iter().count(), p.tables.len())?;
+    n("tables", ir.auto_consts.iter().count(), p.tables.len())?;
     n("entries", ir.entry_points.len(), p.entries.len())?;
     for (i, f) in p.functions.iter().enumerate() {
         let id = tungsten_core::FnId(i);

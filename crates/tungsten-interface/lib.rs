@@ -7,9 +7,9 @@ host inputs and auto consts. Computed once so callers and callees agree.
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use tungsten_ir::model::{
+use tungsten_ir::model::{AutoConst, AutoParam,
     ComputeUnit, Constant, DensityInput, EntryPoint, Function, HostInput, OptimizedProgram,
-    PermutationTableInput, Ref,
+    Ref,
 };
 
 pub mod compiler;
@@ -19,7 +19,7 @@ pub mod scale;
 pub use compiler::{CompileError, Compiler, Inline, Passes};
 pub use scale::Scale;
 
-use naming::{auto_const_field_name, host_field_name, unique, unit_base_name};
+use naming::{CREATION_RESERVED, auto_const_field_name, host_field_name, unique, unit_base_name};
 
 use crate::naming::NamingRules;
 
@@ -165,7 +165,8 @@ pub struct Interface {
     kernels: HashMap<Instance, String>,
     helpers: HashMap<Ref<Function>, String>,
     constants: HashMap<Ref<Constant>, String>,
-    auto_consts: HashMap<Ref<PermutationTableInput>, String>,
+    auto_consts: HashMap<Ref<AutoConst>, String>,
+    auto_params: HashMap<Ref<AutoParam>, String>,
     host_fields: HashMap<Ref<HostInput>, String>,
 }
 
@@ -228,8 +229,16 @@ impl Interface {
 
         let mut auto_consts = HashMap::new();
         let mut used_auto = HashSet::new();
-        for (r, t) in program.permutation_tables.iter() {
-            auto_consts.insert(r, unique(&mut used_auto, auto_const_field_name(rules, t)));
+        for (r, a) in program.auto_consts.iter() {
+            auto_consts.insert(r, unique(&mut used_auto, auto_const_field_name(rules, a)));
+        }
+
+        // Params are parameters of the creation functions, next to the names those use.
+        let mut auto_params = HashMap::new();
+        let mut used_params = rules.used_set();
+        used_params.extend(CREATION_RESERVED.iter().map(|s| s.to_string()));
+        for (r, p) in program.auto_params.iter() {
+            auto_params.insert(r, unique(&mut used_params, (rules.sanitize)(&p.name)));
         }
 
         let mut host_fields = HashMap::new();
@@ -250,6 +259,7 @@ impl Interface {
             helpers,
             constants,
             auto_consts,
+            auto_params,
             host_fields,
         }
     }
@@ -323,8 +333,13 @@ impl Interface {
         &self.constants[&c]
     }
 
-    pub fn auto_const_field(&self, t: Ref<PermutationTableInput>) -> &str {
-        &self.auto_consts[&t]
+    pub fn auto_const_field(&self, a: Ref<AutoConst>) -> &str {
+        &self.auto_consts[&a]
+    }
+
+    /// Parameter name of an auto param in the creation functions.
+    pub fn auto_param(&self, p: Ref<AutoParam>) -> &str {
+        &self.auto_params[&p]
     }
 
     /// Field of `HostConsts` for a static host input.

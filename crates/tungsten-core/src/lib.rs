@@ -103,7 +103,7 @@ mod tests {
             }],
             consts: vec![ConstDecl { init: Expr::Lit(Lit::F32((-0.0f32).to_bits())) }],
             hosts: vec![HostDecl { ty: Type::I64 }],
-            tables: vec![TableDecl { kind: TableKind::Perm }],
+            tables: vec![TableDecl { ty: HandleTypeId(0) }],
             inputs: vec![],
             entries: vec![Entry {
                 unit: UnitId(0),

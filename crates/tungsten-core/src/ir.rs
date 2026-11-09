@@ -41,6 +41,10 @@ pub struct InputId(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ExternId(pub usize);
 
+/// Identifies an opaque handle type. There is no declaration table: core only compares ids.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct HandleTypeId(pub usize);
+
 /// Index into `Program.records`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordId(pub usize);
@@ -66,10 +70,8 @@ pub enum Type {
     Array(Box<Type>, usize),
     /// From `VariableType::Extern(name)`.
     Record(RecordId),
-    /// From `VariableType::PermutationTable`.
-    PermTable,
-    /// From `VariableType::InterpolatedNoiseSampler`.
-    Sampler,
+    /// From `VariableType::Handle(name)`. Only the id is kept: core compares ids and nothing else.
+    Handle(HandleTypeId),
 }
 
 /// Floats are stored as their bits (`to_bits()`), so equality is exact and NaN payloads are kept.
@@ -253,16 +255,10 @@ pub struct HostDecl {
     pub ty: Type,
 }
 
-/// `PerlinNoise` → `Perm`, `Base3DNoise` → `Sampler`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TableKind {
-    Perm,
-    Sampler,
-}
-
+/// An opaque runtime object of the handle type `ty`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TableDecl {
-    pub kind: TableKind,
+    pub ty: HandleTypeId,
 }
 
 /// No declared type: the checker derives it.

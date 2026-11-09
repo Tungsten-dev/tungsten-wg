@@ -236,7 +236,7 @@ fn attribute_positions_check_literals_against_the_expected_kind() {
         unit u { main f; }
         entry u @dims(1, 1, 1) @origin_scale(3000000000, 1, 1) @position_scale(1, 1, 1);
     }
-    @case \"c\" origin(3000000000, 0, 0) seed(1)");
+    @case \"c\" origin(3000000000, 0, 0)");
     assert_eq!(t.program.entry_points[0].scaled_origin.0, 3e9);
     assert_eq!(t.cases[0].origin[0], 3e9);
 }
@@ -701,7 +701,8 @@ fn empty_program() -> OptimizedProgram {
         entry_points: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
-        permutation_tables: Arena::new(),
+        auto_params: Arena::new(),
+        auto_consts: Arena::new(),
         density_inputs: Arena::new(),
     }
 }
@@ -897,8 +898,8 @@ fn labels_must_be_unique_per_namespace() {
     );
     fails("program { const c = 1; const c = 2; }", "duplicate const");
     fails(
-        "program { table t = base3d; table t = base3d; }",
-        "duplicate table",
+        "program { auto t: handle H = make(); auto t: handle H = make(); }",
+        "duplicate autoconst",
     );
     fails(
         "program { fn f() -> f64 { return 1.0; } unit u { main f; } unit u { main f; } }",
@@ -910,7 +911,7 @@ fn labels_must_be_unique_per_namespace() {
     );
     // the same name in different namespaces is fine
     ok(
-        "program { host a: f64; table a = base3d; const a = 1; fn a() -> f64 { return 1.0; } unit a { main a; } }",
+        "program { host a: f64; auto a: handle H = make(); const a = 1; fn a() -> f64 { return 1.0; } unit a { main a; } }",
     );
     // and `x` / `x#1` / `` `x` `` are different or equal as written
     ok("program { host x: f64; host x#1: f64; host x##1: f64; }");
@@ -1240,49 +1241,65 @@ fn constants_are_restricted() {
 }
 
 #[test]
-fn hosts_tables_and_extras() {
+fn hosts_autos_and_extras() {
     let t = ok(r#"program {
         host a: [vec3; 2];
         host b dynamic;
-        table n = perlin("minecraft:x", "sub", 3);
-        table m = perlin("y", none, 0);
-        table z = base3d;
+        param seed: i64;
+        param k: f64;
+        auto n: handle Noise @name("minecraft:x") = make_noise(param(seed), 3L, -4L, 0x10_i64);
+        auto m: handle Noise = make_noise(param(seed), 0L);
+        auto z: handle Other = make_other();
         fn f() -> f64 @hash(0xdeadbeef) @hosts(a) { return 1.0; }
-        unit u @hash(18446744073709551615) { main f; tables [n, z]; hosts [a, b]; }
+        unit u @hash(18446744073709551615) { main f; autos [n, z]; hosts [a, b]; }
     }"#);
     assert!(matches!(
         t.program.host_inputs.values().nth(1),
         Some(HostInput::Dynamic)
     ));
-    let tables: Vec<_> = t.program.permutation_tables.values().cloned().collect();
+    let params: Vec<_> = t.program.auto_params.values().cloned().collect();
     assert_eq!(
-        tables[0],
-        PermutationTableInput::PerlinNoise {
-            ident: "minecraft:x".into(),
-            subident: Some("sub".into()),
-            subident_index: 3
+        params,
+        vec![
+            AutoParam { name: "seed".into(), t: VariableType::I64 },
+            AutoParam { name: "k".into(), t: VariableType::F64 },
+        ]
+    );
+    let seed = t.program.auto_params.iter().next().unwrap().0;
+    let autos: Vec<_> = t.program.auto_consts.values().cloned().collect();
+    assert_eq!(
+        autos[0],
+        AutoConst {
+            name: "minecraft:x".into(),
+            t: VariableType::Handle("Noise"),
+            initializer: "make_noise".into(),
+            args: vec![
+                AutoConstArg::Param(seed),
+                AutoConstArg::I64(3),
+                AutoConstArg::I64(-4),
+                AutoConstArg::I64(16)
+            ],
         }
     );
-    assert_eq!(
-        tables[1],
-        PermutationTableInput::PerlinNoise {
-            ident: "y".into(),
-            subident: None,
-            subident_index: 0
-        }
-    );
-    assert_eq!(tables[2], PermutationTableInput::Base3DNoise);
+    assert_eq!(autos[1].name, "m", "the name defaults to the label");
+    assert_eq!(autos[2].t, VariableType::Handle("Other"));
+    assert!(autos[2].args.is_empty());
     let (_, f) = find_fn(&t, "f");
     assert_eq!(f.source_hash, 0xdeadbeef);
     assert_eq!(f.host_inputs.len(), 1);
     let ComputeUnit::DensityFunction {
         source_hash,
-        permutation_table_inputs,
+        auto_consts,
         host_inputs,
         ..
     } = t.program.compute_units.values().next().unwrap();
     assert_eq!(*source_hash, u64::MAX);
-    assert_eq!((permutation_table_inputs.len(), host_inputs.len()), (2, 2));
+    assert_eq!((auto_consts.len(), host_inputs.len()), (2, 2));
+}
+
+#[test]
+fn auto_i64_argument_needs_the_suffix() {
+    fails("program { auto t: handle H = make(12); }", "write `12L`");
 }
 
 #[test]
@@ -1454,7 +1471,7 @@ const ENV_PROG: &str = "program {
     entry top = u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     entry pair = w @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }";
-const CASE: &str = "@case \"c\" origin(0, 0, 0) seed(1) host(h = 1.5, v = vec3(1.0, 2.0, 3.0))\n";
+const CASE: &str = "@case \"c\" origin(0, 0, 0) host(h = 1.5, v = vec3(1.0, 2.0, 3.0))\n";
 
 fn env_ok(directives: &str) -> TestFile {
     ok(&format!("{ENV_PROG}\n{directives}"))
@@ -1469,7 +1486,7 @@ fn envelope_happy_path() {
         "{CASE}@expect \"c\" top[0, 0, 0] = 1.0
          @expect \"c\" top[1, 0, 0] = nan
          @expect \"c\" pair[*] = [1, 2]
-         @case \"d\" origin(1.5, -2, 16) seed(0xFF) host(h = 2, v = vec3(0.0, 0.0, 0.0))
+         @case \"d\" origin(1.5, -2, 16) host(h = 2, v = vec3(0.0, 0.0, 0.0))
          @expect \"d\" top = [1.0, 2.0]
          @expect \"d\" pair = [[1, 2]]
          @knownfail(java, \"because\")
@@ -1478,7 +1495,6 @@ fn envelope_happy_path() {
     ));
     assert_eq!(t.cases.len(), 2);
     assert_eq!(t.cases[1].origin, [1.5, -2.0, 16.0]);
-    assert_eq!(t.cases[1].seed, 255);
     assert_eq!(t.cases[0].hosts[0].1, Value::F64(1.5));
     assert_eq!(
         t.cases[1].hosts[0].1,
@@ -1513,45 +1529,45 @@ fn envelope_happy_path() {
 fn envelope_case_errors() {
     env_fails(&format!("{CASE}{CASE}"), "duplicate case");
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1.0)",
+        "@case \"c\" origin(0,0,0) host(h = 1.0)",
         "doesn't bind the host input `v`",
     );
     env_fails(
         &format!(
-            "{CASE} @case \"d\" origin(0,0,0) seed(1) host(h = 1.0, h = 2.0, v = vec3(0.0,0.0,0.0))"
+            "{CASE} @case \"d\" origin(0,0,0) host(h = 1.0, h = 2.0, v = vec3(0.0,0.0,0.0))"
         ),
         "bound twice",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1.0, v = vec3(0.0,0.0,0.0), nope = 1)",
+        "@case \"c\" origin(0,0,0) host(h = 1.0, v = vec3(0.0,0.0,0.0), nope = 1)",
         "unknown host",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1.0, v = vec3(0.0,0.0,0.0), dyn = 1)",
+        "@case \"c\" origin(0,0,0) host(h = 1.0, v = vec3(0.0,0.0,0.0), dyn = 1)",
         "dynamic",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1L, v = vec3(0.0,0.0,0.0))",
+        "@case \"c\" origin(0,0,0) host(h = 1L, v = vec3(0.0,0.0,0.0))",
         "expected a f64 literal",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1.0f, v = vec3(0.0,0.0,0.0))",
+        "@case \"c\" origin(0,0,0) host(h = 1.0f, v = vec3(0.0,0.0,0.0))",
         "expected a f64 literal",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = true, v = vec3(0.0,0.0,0.0))",
+        "@case \"c\" origin(0,0,0) host(h = true, v = vec3(0.0,0.0,0.0))",
         "expected a number",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(1) host(h = 1.0, v = [1.0, 2.0, 3.0])",
+        "@case \"c\" origin(0,0,0) host(h = 1.0, v = [1.0, 2.0, 3.0])",
         "vec3",
     );
     env_fails(
-        "@case \"c\" origin(0,0,0) seed(-1) host(h = 1.0, v = vec3(0.0,0.0,0.0))",
-        "unsigned integer",
+        "@case \"c\" origin(0,0,0) param(nope = 1) host(h = 1.0, v = vec3(0.0,0.0,0.0))",
+        "unknown param",
     );
     env_fails(
-        "@case \"c\" origin(true,0,0) seed(1) host(h = 1.0, v = vec3(0.0,0.0,0.0))",
+        "@case \"c\" origin(true,0,0) host(h = 1.0, v = vec3(0.0,0.0,0.0))",
         "expected a number",
     );
 }
@@ -1629,7 +1645,7 @@ fn envelope_expectation_errors() {
     );
     // same cell in different cases or entries is fine
     env_ok(&format!(
-        "{CASE}@case \"d\" origin(0,0,0) seed(1) host(h = 1.0, v = vec3(0.0,0.0,0.0))
+        "{CASE}@case \"d\" origin(0,0,0) host(h = 1.0, v = vec3(0.0,0.0,0.0))
          @expect \"c\" top[0,0,0] = 1.0 @expect \"d\" top[0,0,0] = 1.0 @expect \"c\" pair[0,0,0] = [1, 2]"
     ));
 }
@@ -1672,7 +1688,7 @@ fn envelope_record_values() {
         unit u { main f; }
         entry u @dims(1,1,1) @origin_scale(1,1,1) @position_scale(1,1,1);
     }
-    @case \"c\" origin(0,0,0) seed(1) host(r = new Rec { im: 7, re: 1.5 })
+    @case \"c\" origin(0,0,0) host(r = new Rec { im: 7, re: 1.5 })
     @expect \"c\" u[0,0,0] = new Rec { re: 1.0, im: 2 }";
     let t = ok(src);
     assert_eq!(
@@ -1946,7 +1962,7 @@ fn printing_is_total_for_unusual_programs() {
     let leaf_u = p.compute_units.insert(ComputeUnit::DensityFunction {
         function: leaf_f,
         density_inputs: vec![],
-        permutation_table_inputs: vec![],
+        auto_consts: vec![],
         host_inputs: vec![],
         helper_functions: vec![],
         constants: vec![],
@@ -1981,7 +1997,7 @@ fn printing_is_total_for_unusual_programs() {
         p.compute_units.insert(ComputeUnit::DensityFunction {
             function: main,
             density_inputs: if main == shared_f { vec![d] } else { vec![] },
-            permutation_table_inputs: vec![],
+            auto_consts: vec![],
             host_inputs: vec![],
             helper_functions: vec![shared_f],
             constants: vec![],
@@ -2059,4 +2075,40 @@ fn labels_api_matches_printed_text() {
     );
     assert!(text.contains("density(d)"), "{text}");
     assert!(text.ends_with("}\n"));
+}
+
+#[test]
+fn case_params() {
+    let prog = "program { param seed: i64; param k: f64; param on: bool; fn f() -> f64 { return 1.0; } unit u { main f; } entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }\n";
+    let case = |bindings: &str| format!("{prog}@case \"c\" origin(0, 0, 0) {bindings}");
+    let t = ok(&case("param(seed = 1, k = 2.5, on = true)"));
+    let values: Vec<_> = t.cases[0].params.iter().map(|(_, v)| v.clone()).collect();
+    assert_eq!(values, [Value::I64(1), Value::F64(2.5), Value::Bool(true)]);
+    // The whole u64 range is accepted for an i64, as bits. Hex too.
+    for (text, want) in [
+        ("18446744073709551615", -1),
+        ("9223372036854775808", i64::MIN),
+        ("-5", -5),
+        ("0xFFFFFFFFFFFFFFFF", -1),
+        ("7L", 7),
+    ] {
+        let t = ok(&case(&format!("param(seed = {text}, k = 0.0, on = false)")));
+        assert_eq!(t.cases[0].params[0].1, Value::I64(want), "{text}");
+    }
+    fails(&case("param(seed = 1, k = 2.5)"), "doesn't bind the param `on`");
+    fails(&case("param(seed = 1, seed = 2, k = 2.5, on = true)"), "bound twice");
+    fails(&case("param(seed = 1.5, k = 2.5, on = true)", ), "i64");
+    fails(&case("param(seed = 1, k = true, on = true)"), "expected a number");
+    fails(&case("param(seed = 18446744073709551616, k = 0.0, on = true)"), "out of range");
+    // The printer writes params by label and reads them back.
+    let t = ok(&case("param(seed = 18446744073709551615, k = 2.5, on = true)"));
+    let text = crate::print_test_file(&t);
+    assert!(text.contains("param(seed = -1, k = 2.5, on = true)"), "{text}");
+}
+
+#[test]
+fn removed_table_syntax_fails() {
+    fails("program { table t = base3d; }", "expected an item");
+    fails("program { fn f() -> f64 { return 1.0; } unit u { main f; tables [t]; } }", "main` or a list");
+    fails("program { param seed: i64; fn f() -> f64 { return 1.0; } unit u { main f; } }\n@case \"c\" origin(0, 0, 0) seed(1)", "seed");
 }

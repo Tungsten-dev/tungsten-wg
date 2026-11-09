@@ -10,7 +10,7 @@ use tungsten_interface::Interface;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
     AmbientKind, ComputeUnit, Constant, Expression, Function, Name, OptimizedProgram,
-    PermutationTableInput, Ref, Var, VariableType,
+    Ref, Var, VariableType,
 };
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
 use super::uniform_parameters;
@@ -143,10 +143,7 @@ impl<'a> FunctionConverter<'a> {
             E::DensityVariable(input, _) => {
                 self.unit_return_type(self.program.density_inputs[*input].density_function).clone()
             }
-            E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
-                PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,
-                PermutationTableInput::Base3DNoise => VariableType::InterpolatedNoiseSampler,
-            },
+            E::AutoConst(r) => self.program.auto_consts[*r].t.clone(),
             E::HostInput(r) => self.program.host_inputs[*r].get_type(),
             E::Ambient(k) => match k {
                 AmbientKind::Pos3 => VariableType::Pos3,

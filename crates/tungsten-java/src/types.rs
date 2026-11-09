@@ -3,8 +3,6 @@ use crate::model as java;
 use tungsten_ir::model::VariableType;
 use tungsten_ir::model as opt;
 
-use super::{BASE3D_NOISE_SAMPLER_CLASS, PERLIN_NOISE_SAMPLER_CLASS};
-
 /// Java type of a value.
 pub fn convert_type(t: &VariableType) -> java::Type {
     use java::Type as J;
@@ -17,8 +15,7 @@ pub fn convert_type(t: &VariableType) -> java::Type {
         VariableType::I32 => J::Int,
         VariableType::I64 => J::Long,
         VariableType::Bool => J::Boolean,
-        VariableType::PermutationTable => J::class(PERLIN_NOISE_SAMPLER_CLASS),
-        VariableType::InterpolatedNoiseSampler => J::class(BASE3D_NOISE_SAMPLER_CLASS),
+        VariableType::Handle(name) => J::Class(java_sanitize(name)),
         VariableType::Extern(name) => J::Class(java_sanitize(name)),
         VariableType::Array(element, _) => J::Array(Box::new(convert_type(element))),
     }
@@ -61,12 +58,9 @@ pub fn holder_class(t: &java::Type) -> &'static str {
     }
 }
 
-/// Type of a permutation table field in `AutoConsts`.
-pub fn auto_const_type(table: &opt::PermutationTableInput) -> java::Type {
-    match table {
-        opt::PermutationTableInput::PerlinNoise { .. } => java::Type::class(PERLIN_NOISE_SAMPLER_CLASS),
-        opt::PermutationTableInput::Base3DNoise => java::Type::class(BASE3D_NOISE_SAMPLER_CLASS),
-    }
+/// Type of an autoconst field in `AutoConsts`.
+pub fn auto_const_type(t: &VariableType) -> java::Type {
+    convert_type(t)
 }
 
 pub fn convert_binary_op(op: opt::BinaryOperator) -> java::BinaryOperator {

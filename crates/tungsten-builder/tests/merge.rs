@@ -78,17 +78,34 @@ fn hosts_merge_by_name() {
 }
 
 #[test]
-fn tables_merge_by_value() {
+fn autoconsts_merge_by_value() {
     let mut pb = ProgramBuilder::new();
-    let a = pb.perlin_table("noise", Some("x"), 0);
-    assert_eq!(a, pb.perlin_table("noise", Some("x"), 0));
-    assert_ne!(a, pb.perlin_table("noise", Some("x"), 1));
-    assert_ne!(a, pb.perlin_table("noise", None, 0));
-    assert_ne!(a, pb.perlin_table("other", Some("x"), 0));
-    let s = pb.sampler_table();
-    assert_eq!(s, pb.sampler_table());
+    let seed = pb.param("seed", I64);
+    let other = pb.param("other", I64);
+    let h = |pb: &mut ProgramBuilder, name: &str, init: &str, args: Vec<AutoArg>| {
+        pb.auto_const(name, Handle("Noise"), init, args)
+    };
+    let a = h(&mut pb, "first", "make", vec![seed.into(), 1i64.into()]);
+    // Equal type, initializer and arguments: the existing one, and the first name wins.
+    assert_eq!(a, h(&mut pb, "second", "make", vec![seed.into(), 1i64.into()]));
+    assert_ne!(a, h(&mut pb, "a", "make", vec![seed.into(), 2i64.into()]));
+    assert_ne!(a, h(&mut pb, "a", "make", vec![other.into(), 1i64.into()]));
+    assert_ne!(a, h(&mut pb, "a", "other_init", vec![seed.into(), 1i64.into()]));
+    assert_ne!(a, pb.auto_const("a", Handle("Other"), "make", [seed.into(), 1i64.into()]));
     let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(p.permutation_tables.iter().count(), 5);
+    assert_eq!(p.auto_consts.iter().count(), 5);
+    assert_eq!(p.auto_consts.values().next().unwrap().name, "first");
+}
+
+#[test]
+fn params_merge_by_name() {
+    let mut pb = ProgramBuilder::new();
+    let a = pb.param("seed", I64);
+    assert_eq!(a, pb.param("seed", I64));
+    assert_ne!(a, pb.param("salt", I64));
+    pb.param("seed", F64);
+    let Err(errs) = pb.build() else { panic!("a conflicting param type must be an error") };
+    assert!(matches!(errs.0[0].kind, BuildErrorKind::AutoParamConflict { .. }), "{errs}");
 }
 
 #[test]

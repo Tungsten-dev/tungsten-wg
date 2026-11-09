@@ -156,8 +156,7 @@ macro_rules! prim_types {
 
 prim_types! {
     Bool => Bool, I8 => I8, I32 => I32, I64 => I64, F32 => F32, F64 => F64, Vec3 => Vec3,
-    Pos3 => Pos3, PermTable => PermutationTable,
-    InterpolatedNoiseSampler => InterpolatedNoiseSampler,
+    Pos3 => Pos3,
 }
 
 macro_rules! ambient_kinds {

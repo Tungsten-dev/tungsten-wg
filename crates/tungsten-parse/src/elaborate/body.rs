@@ -205,10 +205,11 @@ impl<'a> Ctx<'a> {
                 };
                 (Expression::HostInput(h), t)
             }
-            ExprKind::Table(l) => (
-                Expression::PermutationTable(self.lookup_table(l)?),
-                Some(VariableType::PermutationTable),
-            ),
+            ExprKind::Auto(l) => {
+                let a = self.lookup_auto(l)?;
+                let ty = self.prog.auto_consts[a].t.clone();
+                (Expression::AutoConst(a), Some(ty))
+            }
             ExprKind::Ambient(k) => (Expression::Ambient(*k), Some(ambient_type(*k))),
             ExprKind::Density { input, index } => {
                 if sc.f.is_none() {

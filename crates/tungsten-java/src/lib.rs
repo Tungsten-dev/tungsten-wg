@@ -45,8 +45,6 @@ pub use backend::{JavaBackend, JavaCompile, JavaConfig, JavaOutput};
 pub use orchestration::TransformJavaOrchestration;
 
 /// Names of runtime and generated classes that the generated code refers to by name.
-pub const PERLIN_NOISE_SAMPLER_CLASS: &str = "PerlinNoiseSampler";
-pub const BASE3D_NOISE_SAMPLER_CLASS: &str = "InterpolatedNoiseSampler";
 pub const HELPERS_CLASS: &str = "Helpers";
 pub const CONFIG_CLASS: &str = "Config";
 pub const POSITION_ITERATOR_CLASS: &str = "PositionIterator";

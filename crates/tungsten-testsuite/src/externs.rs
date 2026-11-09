@@ -1,10 +1,8 @@
 //! `tungsten_check::Externs` over the shared runtime in `runtime/rust/`, plus the per-case toy
 //! tables (SPEC §5.3).
 
-use tungsten_check::{ExternFail, Externs, LowerMap, Value};
+use tungsten_check::{AutoArgValue, AutoCoreId, ExternFail, Externs, LowerMap, ResolvedAutoConst, Value};
 use tungsten_core::{ExternId, F64x3};
-use tungsten_ir::PermutationTableInput;
-use tungsten_rust::random::xoroshiro_seed;
 
 #[path = "../runtime/rust/externs.rs"]
 pub mod rt_externs;
@@ -24,30 +22,40 @@ pub struct CaseExterns {
 }
 
 impl CaseExterns {
-    pub fn new(map: &LowerMap, seed: u64) -> Self {
-        let tables = map
-            .table_idents
-            .iter()
-            .map(|t| match t {
-                PermutationTableInput::PerlinNoise { ident, subident, subident_index } => {
-                    let id = xoroshiro_seed(ident);
-                    let sub = subident.as_deref().map(xoroshiro_seed).unwrap_or((0, 0));
-                    let st = rt_utils::perlin_state(
-                        seed,
-                        id.0 as i64,
-                        id.1 as i64,
-                        *subident_index as i64,
-                        sub.0 as i64,
-                        sub.1 as i64,
-                    );
+    /// Builds the toy runtime objects of every handle autoconst (`inits` are in arena order).
+    /// The testsuite acts as a small frontend: it knows what its own initializers mean.
+    pub fn new(map: &LowerMap, inits: &[ResolvedAutoConst]) -> Result<Self, String> {
+        let mut tables: Vec<Option<Table>> = vec![];
+        for a in inits {
+            let AutoCoreId::Table(id) = a.core;
+            let i64s = a
+                .args
+                .iter()
+                .map(|v| match v {
+                    AutoArgValue::I64(x) => Ok(*x),
+                    other => Err(format!("autoconst `{}`: unexpected argument {other:?}", a.name)),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let table = match (a.initializer, i64s.as_slice()) {
+                ("make_permutation_table", [seed, id_lo, id_hi, idx, sub_lo, sub_hi]) => {
+                    let st = rt_utils::perlin_state(*seed as u64, *id_lo, *id_hi, *idx, *sub_lo, *sub_hi);
                     Table::Perm(Box::new(rt_utils::make_perm(st)))
                 }
-                PermutationTableInput::Base3DNoise => {
-                    Table::Sampler(rt_utils::base3d_state(seed))
+                ("make_base3d_perm_table", [seed]) => Table::Sampler(rt_utils::base3d_state(*seed as u64)),
+                (name, args) => {
+                    return Err(format!("unknown initializer `{name}` with {} arguments", args.len()));
                 }
-            })
-            .collect();
-        CaseExterns { names: map.externs.clone(), tables }
+            };
+            if tables.len() <= id.0 {
+                tables.resize_with(id.0 + 1, || None);
+            }
+            tables[id.0] = Some(table);
+        }
+        let tables = tables
+            .into_iter()
+            .map(|t| t.ok_or_else(|| "a table has no initializer".to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CaseExterns { names: map.externs.clone(), tables })
     }
 }
 
@@ -111,14 +119,14 @@ impl Externs for CaseExterns {
             "bits_to_double" => mk64(bits_to_double(i64v(&a[0]))),
             "test_domain" => Value::I32(test_domain(i32v(&a[0])).ok_or(ExternFail::Domain)?),
             "perm_get" => match &a[0] {
-                Value::PermTable(id) => match &self.tables[id.0] {
+                Value::Handle(id) => match &self.tables[id.0] {
                     Table::Perm(p) => Value::I32(rt_utils::perm_lookup(p, i32v(&a[1]))),
                     Table::Sampler(_) => panic!("perm_get on a sampler"),
                 },
                 v => panic!("perm_get: expected a perm table, got {v:?}"),
             },
             "sampler_sample" => match (&a[0], &a[1]) {
-                (Value::Sampler(id), Value::Vec3(F64x3 { x, y, z })) => match &self.tables[id.0] {
+                (Value::Handle(id), Value::Vec3(F64x3 { x, y, z })) => match &self.tables[id.0] {
                     Table::Sampler(st) => mk64(rt_utils::sample_state(
                         *st,
                         [f64::from_bits(*x), f64::from_bits(*y), f64::from_bits(*z)],

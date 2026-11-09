@@ -1,6 +1,6 @@
 # Generic autoconsts
 
-Status: design agreed, not implemented. Lands after `specs/compiler.md`, and so after milestone 5 of
+Status: design agreed. Milestones 1 and 2 are implemented (see "Implementation notes" at the end); 3 to 6 are not. Lands after `specs/compiler.md`, and so after milestone 5 of
 `specs/program-level-inputs.md`, which deletes `tungsten-legacy`. It lands before `specs/workers.md`, which restates the
 creation API from §5.1 on its final types.
 
@@ -531,3 +531,38 @@ Unit `auto_consts` lists are derived like the other lists, in first-use order, a
 | Text format | `param` and `auto`, old keywords removed | Keeping `table` for handles: two item kinds for one arena |
 | `@case` | `param(...)` replaces `seed(...)` | `seed(n)` as sugar: two spellings, and the printer has to pick one |
 | Spec location | `specs/auto-consts.md` | Root `SPEC.md`: holds the testsuite design |
+
+## Implementation notes
+
+Milestones 1 and 2.
+
+- **Handle interning.** The registry interns the handle names its declarations mention (records, then
+  externs), and lowering continues that numbering with the names only the program mentions, in walk
+  order (autoconst types first). `LowerMap.handle_types` has the names. This is a superset of §4.2's
+  "registry first, then the arenas" and stays deterministic.
+- **`LowerMap` data.** It carries `auto_params` (an `IdMap` with an `AutoParamId`, since core has no
+  params), `auto_param_types` and `auto_consts: Vec<AutoConstInfo>` (the core id, name, type,
+  initializer and arguments, in arena order). `resolved_auto_consts` works from these, so `Prepared`
+  doesn't need the IR. `LowerMap.tables` maps `Ref<AutoConst>` to `TableId`.
+- **Argument kinds.** Milestone 2 has `AutoConstArg::{Param, I64}` and `AutoArgValue::{I64, F64, Bool}`.
+  Param values can already be `F64` or `Bool`; `F64`, `Bool` and `Str` autoconst arguments, and
+  `AutoArgValue::Str`, wait for milestone 5. A non-handle autoconst is lowered as an error
+  (`BadAutoConstType`) until milestone 4.
+- **`@case` params.** `param(name = value)` takes an `i64` as an unsuffixed or `L` literal, decimal or hex,
+  up to `u64::MAX`. The printer writes an `i64` param as a bare signed decimal. The parse `Case` has
+  `params: Vec<(Ref<AutoParam>, Value)>` in program order.
+- **Printer.** Params are labelled by their name (the host rule, so duplicates get `##N`). Autoconsts are
+  `a<N>`, with `@name("…")` when the name differs.
+- **Wire format.** `TestIo` has `params`, and each driver decodes them into `ap<N>` locals and passes them
+  to `Orchestration::new`, `AutoConsts.create` and `Orchestration::create` in arena order.
+- **Builder.** `perlin_table` and `sampler_table` are gone. `ProgramBuilder::param` and `auto_const` with
+  `Param`, `Auto` and `AutoArg` replace them. In `extern_fns!` a handle type is written `(handle "Name")`
+  for now (the unparenthesized form is milestone 6).
+- **Testsuite.** `md5` is gone from the workspace. The harness's cache keys and module names use a small
+  stable hash (`src/hash.rs`). The toy initializers dispatch by name in `CaseExterns::new`.
+  `tungsten-rust/src/random.rs` is no longer part of the crate (its `mod` line is removed); the file
+  itself still has to be deleted.
+- **Snapshots.** The `tests/snapshots` golden files of the lowered core programs changed (`PermTable` is
+  now `Handle(HandleTypeId(..))`) and were regenerated.
+- **Not touched.** `specs/builder.md`, the READMEs of `tungsten-check` and `tungsten-core`'s `EXEC.md`
+  still describe tables; that is milestone 6.

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tungsten_core::{ConstId, ExternId, FnId, HostId, InputId, LocalId, RecordId, TableId, UnitId};
 use tungsten_ir::{
-    ComputeUnit, Constant, DensityInput, Function, HostInput, PermutationTableInput, Ref, Var,
+    AutoConst, AutoParam, ComputeUnit, Constant, DensityInput, Function, HostInput, Ref, Var, VariableType,
 };
 
 /// A core id: a dense index.
@@ -110,6 +110,42 @@ pub struct RecordNames {
     pub fields: Vec<String>,
 }
 
+/// Index of an auto param, in declaration order. The core IR has no params.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoParamId(pub usize);
+
+impl CoreId for AutoParamId {
+    fn index(self) -> usize {
+        self.0
+    }
+    fn from_index(i: usize) -> Self {
+        AutoParamId(i)
+    }
+}
+
+/// Where the core program keeps an autoconst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCoreId {
+    Table(TableId),
+}
+
+/// An argument of an autoconst initializer, with params as indices into `auto_params`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AutoArgSpec {
+    Param(AutoParamId),
+    I64(i64),
+}
+
+/// An autoconst as declared, with its place in the core program.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoConstInfo {
+    pub core: AutoCoreId,
+    pub name: String,
+    pub t: VariableType,
+    pub initializer: String,
+    pub args: Vec<AutoArgSpec>,
+}
+
 /// The side table of a lowering: everything the core IR dropped that callers still need.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LowerMap {
@@ -119,10 +155,17 @@ pub struct LowerMap {
     pub hosts: IdMap<HostInput, HostId>,
     /// By `HostId`: the `Name::Named` string, which `host(name = …)` bindings resolve against.
     pub host_names: Vec<Option<String>>,
-    pub tables: IdMap<PermutationTableInput, TableId>,
-    /// By `TableId`: the table as written (`ident`, `subident`, `subident_index`).
-    pub table_idents: Vec<PermutationTableInput>,
+    /// The handle autoconsts, by `TableId`.
+    pub tables: IdMap<AutoConst, TableId>,
+    /// Auto params in declaration order.
+    pub auto_params: IdMap<AutoParam, AutoParamId>,
+    /// By `AutoParamId`.
+    pub auto_param_types: Vec<VariableType>,
+    /// Every autoconst in arena order, read or not.
+    pub auto_consts: Vec<AutoConstInfo>,
     pub inputs: IdMap<DensityInput, InputId>,
+    /// By `HandleTypeId`: the handle type names, in order of first appearance.
+    pub handle_types: Vec<String>,
     /// By `FnId`: that function's locals.
     pub locals: Vec<IdMap<Var, LocalId>>,
     /// By `ExternId`.

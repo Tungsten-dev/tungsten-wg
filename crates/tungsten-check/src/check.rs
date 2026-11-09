@@ -122,8 +122,10 @@ impl Names<'_> {
             Type::Pos3 => "pos3".into(),
             Type::Array(inner, n) => format!("[{}; {n}]", self.ty(inner)),
             Type::Record(r) => format!("extern {}", self.record(*r)),
-            Type::PermTable => "perm_table".into(),
-            Type::Sampler => "interpolated_noise_sampler".into(),
+            Type::Handle(h) => match self.map.handle_types.get(h.0) {
+                Some(name) => format!("handle {name}"),
+                None => format!("handle #{}", h.0),
+            },
         }
     }
 

@@ -3,10 +3,10 @@
 
 use std::collections::HashMap;
 
-use tungsten_core::{ExternDecl, ExternId, RecordDecl, RecordId};
+use tungsten_core::{ExternDecl, ExternId, HandleTypeId, RecordDecl, RecordId};
 use tungsten_ir::VariableType;
 
-use crate::lower::types::{TypeFail, lower_type};
+use crate::lower::types::{TypeFail, TypeNames, lower_type};
 
 /// Extern and record declarations with their names. Build one with [`RegistryBuilder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,36 @@ pub struct Registry {
     pub(crate) records: Vec<RecordDecl>,
     pub(crate) record_ids: HashMap<String, RecordId>,
     pub(crate) field_names: Vec<Vec<String>>,
+    /// Handle type names the declarations mention, in order of first appearance. Their index is
+    /// the `HandleTypeId`; lowering continues the numbering for names only programs mention.
+    pub(crate) handle_names: Vec<String>,
+}
+
+/// Resolves names while the registry is built.
+struct BuildNames<'a> {
+    record_ids: &'a HashMap<String, RecordId>,
+    handles: Vec<String>,
+}
+
+impl TypeNames for BuildNames<'_> {
+    fn record(&mut self, name: &'static str) -> Option<RecordId> {
+        self.record_ids.get(name).copied()
+    }
+
+    fn handle(&mut self, name: &'static str) -> HandleTypeId {
+        intern(&mut self.handles, name)
+    }
+}
+
+/// The index of `name` in `names`, appending it if it is new.
+pub(crate) fn intern(names: &mut Vec<String>, name: &str) -> HandleTypeId {
+    match names.iter().position(|n| n == name) {
+        Some(i) => HandleTypeId(i),
+        None => {
+            names.push(name.to_string());
+            HandleTypeId(names.len() - 1)
+        }
+    }
 }
 
 impl Registry {
@@ -168,8 +198,9 @@ impl RegistryBuilder {
             }
         }
 
-        let resolve = |t: &VariableType, context: &dyn Fn() -> String| {
-            lower_type(t, &mut |n| record_ids.get(n).copied()).map_err(|e| match e {
+        let mut build_names = BuildNames { record_ids: &record_ids, handles: vec![] };
+        let mut resolve = |t: &VariableType, context: &dyn Fn() -> String| {
+            lower_type(t, &mut build_names).map_err(|e| match e {
                 TypeFail::UnknownRecord(name) => RegistryError::UnknownRecord {
                     context: context(),
                     name: name.to_string(),
@@ -207,6 +238,7 @@ impl RegistryBuilder {
                 cycle.into_iter().map(|r| names[r].clone()).collect(),
             ));
         }
+        let handle_names = build_names.handles;
 
         Ok(Registry {
             extern_names: self.externs.iter().map(|e| e.name.clone()).collect(),
@@ -220,6 +252,7 @@ impl RegistryBuilder {
                 .iter()
                 .map(|r| r.fields.iter().map(|(f, _)| f.clone()).collect())
                 .collect(),
+            handle_names,
         })
     }
 }

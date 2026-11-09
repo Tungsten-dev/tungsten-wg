@@ -33,10 +33,10 @@ impl PartialOrd for Name {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum VariableType {
-    PermutationTable,
-    InterpolatedNoiseSampler,
+    /// An opaque runtime type, built once by the runtime and only passed to externs.
+    Handle(&'static str),
     Vec3,
     Pos3,
     F32,
@@ -52,8 +52,7 @@ pub enum VariableType {
 impl Debug for VariableType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VariableType::PermutationTable => write!(f, "perm_table"),
-            VariableType::InterpolatedNoiseSampler => write!(f, "interpolated_noise_sampler"),
+            VariableType::Handle(name) => write!(f, "handle {}", name),
             VariableType::Vec3 => write!(f, "vec3"),
             VariableType::Pos3 => write!(f, "pos3"),
             VariableType::F32 => write!(f, "f32"),
@@ -367,7 +366,8 @@ pub enum ComputeUnit {
         function: Ref<Function>,
         /// The program inputs this unit lists, in build order.
         density_inputs: Vec<Ref<DensityInput>>,
-        permutation_table_inputs: Vec<Ref<PermutationTableInput>>,
+        /// The autoconsts this unit lists, in first-use order.
+        auto_consts: Vec<Ref<AutoConst>>,
         host_inputs: Vec<Ref<HostInput>>,
         helper_functions: Vec<Ref<Function>>,
         constants: Vec<Ref<Constant>>,
@@ -385,14 +385,32 @@ pub struct DensityInput {
     pub dimensions: (i32, i32, i32),
 }
 
+/// A value supplied once, when the orchestration is created. Programs can't read it directly;
+/// only autoconst initializers take it as an argument.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PermutationTableInput {
-    PerlinNoise {
-        ident: String,
-        subident: Option<String>,
-        subident_index: usize,
-    },
-    Base3DNoise,
+pub struct AutoParam {
+    pub name: String,
+    /// `I64`, `F64` or `Bool`.
+    pub t: VariableType,
+}
+
+/// A value built once, when the orchestration is created, by calling the runtime function
+/// `initializer` with `args`. The IR doesn't know what the initializer computes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AutoConst {
+    /// Field-name hint and display name.
+    pub name: String,
+    /// `Handle` or a scalar.
+    pub t: VariableType,
+    /// Bare name of a runtime function.
+    pub initializer: String,
+    pub args: Vec<AutoConstArg>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AutoConstArg {
+    Param(Ref<AutoParam>),
+    I64(i64),
 }
 
 /// Input from the host environment, either statically computed, or dynamically computed at runtime.
@@ -439,7 +457,6 @@ pub struct Var {
 pub struct Function {
     pub canonical_name: Option<String>,
     // density_inputs: Vec<DensityInput>,
-    // permutation_table_inputs: Vec<PermutationTableInput>,
     pub host_inputs: Vec<Ref<HostInput>>,
     pub body: Vec<Statement>,
     pub variables: Arena<Var>,
@@ -461,7 +478,10 @@ pub struct OptimizedProgram {
     pub entry_points: Vec<EntryPoint>,
     pub constants: Arena<Constant>,
     pub host_inputs: Arena<HostInput>,
-    pub permutation_tables: Arena<PermutationTableInput>,
+    /// Creation-time inputs, in declaration order. The creation API takes one argument per param.
+    pub auto_params: Arena<AutoParam>,
+    /// Values built at creation time, in creation order.
+    pub auto_consts: Arena<AutoConst>,
     pub density_inputs: Arena<DensityInput>,
 }
 
@@ -519,9 +539,8 @@ pub enum Expression {
     /// Optionally, the caller can pass in an index for the called density for reading.
     DensityVariable(Ref<DensityInput>, Option<Box<Expression>>),
 
-    // similar to density variable but for permutation tables,
-    // this is used to reference the permutation tables that are passed as arguments to noise functions
-    PermutationTable(Ref<PermutationTableInput>),
+    /// A value built at creation time (see [`AutoConst`]).
+    AutoConst(Ref<AutoConst>),
     HostInput(Ref<HostInput>),
     /// A read-only value supplied by the evaluation context (origin, position, scales).
     Ambient(AmbientKind),

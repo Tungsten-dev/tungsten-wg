@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use tungsten_core::{ConstId, FnId, HostId, InputId, UnitId};
+use tungsten_core::{ConstId, FnId, HostId, InputId, TableId, UnitId};
 
 /// All errors of one [`lower`](crate::lower) call, in walk order. Never empty.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -39,9 +39,19 @@ pub enum EntityKind {
     Function,
     Constant,
     HostInput,
-    PermutationTable,
+    AutoConst,
+    AutoParam,
     DensityInput,
     Var,
+}
+
+impl EntityKind {
+    fn article(self) -> &'static str {
+        match self {
+            EntityKind::AutoConst | EntityKind::AutoParam => "an",
+            _ => "a",
+        }
+    }
 }
 
 impl fmt::Display for EntityKind {
@@ -51,7 +61,8 @@ impl fmt::Display for EntityKind {
             EntityKind::Function => "function",
             EntityKind::Constant => "constant",
             EntityKind::HostInput => "host input",
-            EntityKind::PermutationTable => "permutation table",
+            EntityKind::AutoConst => "autoconst",
+            EntityKind::AutoParam => "auto param",
             EntityKind::DensityInput => "density input",
             EntityKind::Var => "variable",
         })
@@ -79,7 +90,7 @@ impl fmt::Display for ParameterProblem {
 /// the checker.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LowerErrorKind {
-    #[error("dangling reference to a {kind}")]
+    #[error("dangling reference to {} {kind}", kind.article())]
     DanglingRef { kind: EntityKind },
     #[error("unknown extern function `{0}`")]
     UnknownExtern(String),
@@ -97,6 +108,9 @@ pub enum LowerErrorKind {
     ConstructArity { expected: usize, found: usize },
     #[error("parameter {problem}")]
     Parameter { problem: ParameterProblem },
+    /// Only handle autoconsts are supported so far.
+    #[error("autoconst type `{t}` isn't a handle type")]
+    BadAutoConstType { t: String },
 }
 
 /// Where an error is: an item and a path inside it.
@@ -124,6 +138,7 @@ pub enum Item {
     Unit { id: Option<UnitId>, name: String },
     Host { id: Option<HostId>, name: String },
     Input { id: Option<InputId>, name: String },
+    AutoConst { id: Option<TableId>, name: String },
     Entry { index: usize },
     /// Before the walk enters an item. No lowering error is reported here; checker wf errors
     /// in extern and record decls are.
@@ -140,6 +155,7 @@ impl fmt::Display for Item {
             Item::Unit { name, .. } => write!(f, "unit `{name}`"),
             Item::Host { name, .. } => write!(f, "host `{name}`"),
             Item::Input { name, .. } => write!(f, "input `{name}`"),
+            Item::AutoConst { name, .. } => write!(f, "autoconst `{name}`"),
             Item::Entry { index } => write!(f, "entry {index}"),
             Item::Registry => write!(f, "registry"),
             Item::Program => write!(f, "program"),

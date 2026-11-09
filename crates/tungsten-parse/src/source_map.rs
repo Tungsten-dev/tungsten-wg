@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use tungsten_ir::{
-    ComputeUnit, Constant, DensityInput, Function, HostInput, PermutationTableInput, Ref, Var,
+    AutoConst, AutoParam, ComputeUnit, Constant, DensityInput, Function, HostInput, Ref, Var,
 };
 
 use crate::span::Span;
@@ -55,7 +55,8 @@ pub struct SourceMap {
     pub units: HashMap<Ref<ComputeUnit>, Span>,
     pub constants: HashMap<Ref<Constant>, Span>,
     pub hosts: HashMap<Ref<HostInput>, Span>,
-    pub tables: HashMap<Ref<PermutationTableInput>, Span>,
+    pub auto_params: HashMap<Ref<AutoParam>, Span>,
+    pub auto_consts: HashMap<Ref<AutoConst>, Span>,
     /// Index = `entry_points` index.
     pub entries: Vec<Span>,
     pub vars: HashMap<(Ref<Function>, Ref<Var>), Span>,

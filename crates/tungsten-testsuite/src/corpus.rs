@@ -117,7 +117,7 @@ program {
     unit u { main f; }
     entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0)
 "#;
 
     #[test]

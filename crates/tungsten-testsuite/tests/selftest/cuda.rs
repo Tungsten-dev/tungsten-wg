@@ -24,7 +24,7 @@ fn cstub(id: &str, body: &str, extra: &str) -> TestSource {
         "//@@FILE {id}.cu\n#define TUNGSTEN_PROFILE_EXACT 1\n#include \"tw/tungsten_runtime.cuh\"\n#include \"tw/profile_exact.cuh\"\n\
          #include \"tw/proto.h\"\n#include <string>\n{extra}\n\
          static bool run(tw::proto::Reader& r, tw::proto::Writer& w, std::string& err) {{ {body} }}\n\
-         int tw_serve_{id}() {{ cudaSetDevice(0); return tw::proto::serve(32, run); }}\n"
+         int tw_serve_{id}() {{ cudaSetDevice(0); return tw::proto::serve(24, run); }}\n"
     );
     TestSource { name: id.to_string(), id: id.to_string(), source }
 }
@@ -165,7 +165,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
             bits(-0.0)
         );
         let mut t = cstub("t_cgolden", &body, "#include <cstring>");
-        t.source = t.source.replace("serve(32,", &format!("serve({},", request.len()));
+        t.source = t.source.replace("serve(24,", &format!("serve({},", request.len()));
         let env = TestEnv::new();
         let arts = h.build_tests(&records_source(env.spec()), std::slice::from_ref(&t));
         let Artifact::Binary { path, id } = &arts["t_cgolden"] else {
@@ -219,8 +219,8 @@ __global__ void toy() {
                     VariableType::I32 => "3".into(),
                     VariableType::I64 => "3LL".into(),
                     VariableType::Vec3 => "double3{0, 0, 0}".into(),
-                    VariableType::PermutationTable => "&perm".into(),
-                    VariableType::InterpolatedNoiseSampler => "&samp".into(),
+                    VariableType::Handle("PerlinNoiseSampler") => "&perm".into(),
+                    VariableType::Handle("InterpolatedNoiseSampler") => "&samp".into(),
                     other => panic!("no sample argument for {other:?}"),
                 })
                 .collect();

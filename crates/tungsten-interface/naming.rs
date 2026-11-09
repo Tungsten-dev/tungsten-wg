@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref};
+use tungsten_ir::model::{AutoConst, ComputeUnit, HostInput, OptimizedProgram, Ref};
 
 /// Per-language naming: names that must never be generated, and how to make a legal identifier.
 /// Each backend builds its own [`super::Interface`] with its rules, so names may differ between backends.
@@ -303,22 +303,21 @@ pub fn entry_base_names(
         .collect()
 }
 
-/// Field name of a permutation table in `AutoConsts`.
-pub fn auto_const_field_name(rules: &NamingRules, table: &PermutationTableInput) -> String {
-    match table {
-        PermutationTableInput::PerlinNoise {
-            ident,
-            subident,
-            subident_index,
-        } => (rules.sanitize)(&format!(
-            "{}_{}_{}",
-            ident,
-            subident_index,
-            subident.as_deref().unwrap_or("")
-        )),
-        PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
-    }
+/// Field name of an autoconst in `AutoConsts`: its sanitized name (the caller makes it unique).
+pub fn auto_const_field_name(rules: &NamingRules, a: &AutoConst) -> String {
+    (rules.sanitize)(&a.name)
 }
+
+/// Names that generated creation code already uses, so no auto param may take them.
+pub const CREATION_RESERVED: &[&str] = &[
+    "buffers",
+    "auto_constants",
+    "auto_consts",
+    "_init",
+    "out",
+    "impl",
+    "this",
+];
 
 /// Field name of a static host input in `HostConsts`.
 pub fn host_field_name(rules: &NamingRules, input: &HostInput) -> String {

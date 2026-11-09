@@ -3,7 +3,8 @@
 
 program {
     host scale: f64;
-    table t0 = perlin("minecraft:offset", none, 0);
+    param seed: i64;
+    auto t0: handle PerlinNoiseSampler @name("minecraft:offset_0_") = make_permutation_table(param(seed), 577895406318539652L, 4557074653038767061L, 0L, 0L, 0L);
     const half = 0.5;
 
     fn lerp(a: f64, b: f64, t: f64) -> f64 {
@@ -17,7 +18,7 @@ program {
 
     unit base {
         main base_main;
-        tables [t0];
+        autos [t0];
         hosts [scale];
         helpers [lerp];
         consts [half];
@@ -36,7 +37,7 @@ program {
     entry top @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(4.0, 1.0, 4.0);
 }
 
-@case "origin" origin(0, 0, 0) seed(1) host(scale = 2.0)
-@case "far"    origin(1000000, -64, 3) seed(1) host(scale = -0.0)
+@case "origin" origin(0, 0, 0) param(seed = 1) host(scale = 2.0)
+@case "far"    origin(1000000, -64, 3) param(seed = 1) host(scale = -0.0)
 @expect "origin" top[0, 0, 0] = 0.25
 @expect "far" error(OutOfBounds)

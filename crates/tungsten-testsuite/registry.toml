@@ -143,13 +143,13 @@ domain_error = false
 
 [[extern]]
 name = "perm_get"
-params = ["perm_table", "i32"]
+params = ["handle PerlinNoiseSampler", "i32"]
 ret = "i32"
 domain_error = false
 
 [[extern]]
 name = "sampler_sample"
-params = ["interpolated_noise_sampler", "vec3"]
+params = ["handle InterpolatedNoiseSampler", "vec3"]
 ret = "f64"
 domain_error = false
 
