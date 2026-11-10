@@ -1,6 +1,6 @@
 [package]
 name = "tungsten-wg"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "A compiler / code generator for world generation (Rust and CUDA)."
 license = "MIT OR Apache-2.0"
@@ -32,7 +32,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Tungsten-dev/tungsten-wg"
@@ -52,19 +52,17 @@ libtest-mimic = "0.8"
 insta = "1"
 # Pinned together with VERUS_TAG in scripts/verify.sh (the script checks it).
 vstd = "=0.0.0-2026-10-25-0158"
-tungsten-ir = { path = "crates/tungsten-ir" }
-tungsten-builder = { path = "crates/tungsten-builder" }
-tungsten-codegen = { path = "crates/tungsten-codegen" }
-tungsten-interface = { path = "crates/tungsten-interface" }
-tungsten-optimizer = { path = "crates/tungsten-optimizer" }
-tungsten-rust = { path = "crates/tungsten-rust" }
-tungsten-java = { path = "crates/tungsten-java" }
-tungsten-cuda = { path = "crates/tungsten-cuda" }
-tungsten-inspect = { path = "crates/tungsten-inspect" }
-tungsten-parse = { path = "crates/tungsten-parse" }
-tungsten-core = { path = "crates/tungsten-core" }
-tungsten-check = { path = "crates/tungsten-check" }
-tungsten-testsuite = { path = "crates/tungsten-testsuite" }
+tungsten-ir = { path = "crates/tungsten-ir", version = "0.2.1" }
+tungsten-codegen = { path = "crates/tungsten-codegen", version = "0.2.1" }
+tungsten-interface = { path = "crates/tungsten-interface", version = "0.2.1" }
+tungsten-optimizer = { path = "crates/tungsten-optimizer", version = "0.2.1" }
+tungsten-rust = { path = "crates/tungsten-rust", version = "0.2.1" }
+tungsten-java = { path = "crates/tungsten-java", version = "0.2.1" }
+tungsten-cuda = { path = "crates/tungsten-cuda", version = "0.2.1" }
+tungsten-inspect = { path = "crates/tungsten-inspect", version = "0.2.1" }
+tungsten-parse = { path = "crates/tungsten-parse", version = "0.2.1" }
+tungsten-core = { path = "crates/tungsten-core", version = "0.2.1" }
+tungsten-check = { path = "crates/tungsten-check", version = "0.2.1" }
 
 [features]
 default = ["rust"]
