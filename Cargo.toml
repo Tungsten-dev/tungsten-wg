@@ -63,6 +63,8 @@ tungsten-inspect = { path = "crates/tungsten-inspect", version = "0.2.1" }
 tungsten-parse = { path = "crates/tungsten-parse", version = "0.2.1" }
 tungsten-core = { path = "crates/tungsten-core", version = "0.2.1" }
 tungsten-check = { path = "crates/tungsten-check", version = "0.2.1" }
+tungsten-builder = { path = "crates/tungsten-builder", version = "0.2.1" }
+tungsten-testsuite = { path = "crates/tungsten-testsuite", version = "0.2.1" }
 
 [features]
 default = ["rust"]
