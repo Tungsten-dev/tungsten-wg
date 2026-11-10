@@ -1,4 +1,4 @@
-// OutOfFuel is interpreter-only (SPEC §4.1).
+// OutOfFuel is interpreter-only (crate README, "Rules and contracts").
 @fuel(100)
 program {
     fn run() -> i32 {

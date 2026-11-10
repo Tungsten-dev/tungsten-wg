@@ -1,4 +1,4 @@
-//! Driver side of the wire protocol (SPEC §7.4) and the request loop. Generated drivers decode a
+//! Driver side of the wire protocol (crate README, "Protocol") and the request loop. Generated drivers decode a
 //! request with `Reader` and encode the result with `Writer`; `serve` does the framing, catches
 //! panics and maps them to failure responses.
 #![allow(dead_code)]

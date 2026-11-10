@@ -1,6 +1,6 @@
 package tungsten.runtime;
 
-/** splitmix64 helpers of the toy tables (SPEC 5.3). */
+/** splitmix64 helpers of the toy tables (crate README, "Rules and contracts, Toy tables"). */
 final class Toy {
     private Toy() {}
 

@@ -1,4 +1,4 @@
-//! Interpreter runs and `@expect` matching (SPEC §3.3, §4.1).
+//! Interpreter runs and `@expect` matching (crate README, "Rules and contracts").
 
 use tungsten_check::{
     CaseResult, EvalError, EvalFailure, EvalOptions, Invalid, NamedCase, Prepared, Value,
@@ -55,7 +55,7 @@ pub fn check_reject(tf: &TestFile, env: &TestEnv) -> Result<(), String> {
     }
 }
 
-/// Binds hosts by name (SPEC §3.3), so inlining can't invalidate them.
+/// Binds hosts by name (crate README, "Rules and contracts"), so inlining can't invalidate them.
 pub fn named_case(tf: &TestFile, i: usize, env: &TestEnv) -> Result<NamedCase, String> {
     let c = &tf.cases[i];
     let mut hosts = vec![];
@@ -131,13 +131,13 @@ pub fn expects_out_of_fuel(tf: &TestFile, i: usize) -> bool {
         .any(|e| e.case == i && matches!(&e.kind, ExpectKind::Error(k) if k == "OutOfFuel"))
 }
 
-/// Cases no backend must be sent (SPEC §4.1).
+/// Cases no backend must be sent (crate README, "Rules and contracts").
 pub fn skipped_for_backends(r: &CaseResult) -> bool {
     has_out_of_fuel(r)
 }
 
 /// Cases `backend` must not be sent: `OutOfFuel` everywhere, and on CUDA every case where the
-/// interpreter errors, because trap errors are sticky and cost a process (SPEC §6.3).
+/// interpreter errors, because trap errors are sticky and cost a process (crate README, "Rules and contracts").
 pub fn skipped_for_backend(r: &CaseResult, backend: &str) -> bool {
     skipped_for_backends(r) || (backend == "cuda" && !(r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())))
 }

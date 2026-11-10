@@ -1,4 +1,4 @@
-// Driver side of the wire protocol (SPEC §7.4) for generated CUDA drivers. Host only.
+// Driver side of the wire protocol (crate README, "Protocol") for generated CUDA drivers. Host only.
 #pragma once
 
 #include <cstdio>
@@ -51,7 +51,7 @@ inline bool write_all(const unsigned char* d, size_t n) {
 
 /// Reads requests of `request_len` bytes from stdin until EOF and answers each on stdout. `run`
 /// returns false with a message on a CUDA error. Such an error is sticky, so the process answers
-/// with a failure and exits; the harness resumes in a new process (SPEC §7.3).
+/// with a failure and exits; the harness resumes in a new process (crate README, "Processes").
 inline int serve(size_t request_len, bool (*run)(Reader&, Writer&, std::string&)) {
     std::vector<unsigned char> req(request_len ? request_len : 1);
     for (;;) {

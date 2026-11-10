@@ -74,7 +74,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
     });
     t!("failing_initializer_is_reported_as_the_original_failure", |h: &Harness| {
         // The first case fails inside a static initialiser (ExceptionInInitializerError), the second
-        // sees NoClassDefFoundError; both must still score as a division by zero (SPEC 7.3).
+        // sees NoClassDefFoundError; both must still score as a division by zero (crate README, "Rules and contracts, Processes").
         let extra = "static final class Boom { static int zero() { return 0; } static final int X = 1 / zero(); }";
         let (o, v) = run(h, &program("((1 / 0) as f64)", &[0.0, 1.0]), "r.f64(); return new byte[]{(byte) Boom.X};", extra, SHORT)?;
         assert!(o.iter().all(|x| matches!(x, CaseOutcome::Failed { kind: 0, .. })), "{o:?}");
@@ -110,7 +110,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
             Err(Failed::from("the second build invoked javac"))
         }
     });
-    // The Java Reader/Writer against the golden bytes shared with the host side (SPEC 7.4).
+    // The Java Reader/Writer against the golden bytes shared with the host side (crate README, "Rules and contracts, Protocol").
     t!("golden_bytes", |h: &Harness| {
         let golden = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/protocol.txt"))
             .map_err(|e| Failed::from(e.to_string()))?;
@@ -151,7 +151,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
             other => Err(Failed::from(format!("expected the golden response, got {other:?}"))),
         }
     });
-    // Toy-table goldens (SPEC 5.3), the same values as the Rust side in src/externs.rs.
+    // Toy-table goldens (crate README, "Rules and contracts, Toy tables"), the same values as the Rust side in src/externs.rs.
     t!("toy_table_goldens", |h: &Harness| {
         let body = "r.f64(); \
             byte[] p = Helpers.make_permutation_table(1, 2, 3, 4, 5, 6).perm; \
@@ -165,7 +165,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
         let (_, v) = run(h, &program("1.0", &[0.0]), body, "", SHORT)?;
         expect_pass(&v[0])
     });
-    // One call to every registered extern (SPEC 5.2): a missing one is a compile error.
+    // One call to every registered extern (crate README, "Things worth knowing"): a missing one is a compile error.
     t!("runtime_coverage", |h: &Harness| {
         let env = TestEnv::new();
         let mut body = String::from("r.f64(); ");

@@ -1,5 +1,5 @@
 //! What generated code calls by plain name: the registry externs (`registry.toml`), the toy
-//! tables (SPEC §5.3) and `make_boxed`. Re-exported through `mathf64`, so the two hardcoded glob
+//! tables (crate README, "Rules and contracts, Toy tables") and `make_boxed`. Re-exported through `mathf64`, so the two hardcoded glob
 //! imports of the generated code are enough. Thin wrappers over `externs.rs` and `utilsf64.rs`,
 //! which the interpreter shares.
 #![allow(dead_code)]

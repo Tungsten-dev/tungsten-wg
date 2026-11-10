@@ -1,4 +1,4 @@
-//! CUDA driver generator and build inputs (SPEC §7.1, §7.2, milestone 5).
+//! CUDA driver generator and build inputs (crate README, "Batches").
 //!
 //! A batch is one binary. Per test there is a directory `t_<hash>/` with the four generated files
 //! of `tungsten-cuda` (namespace `t_<hash>`) and a `t_<hash>.cu` that includes `density.cu`,

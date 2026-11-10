@@ -21,7 +21,7 @@ pub struct CorpusFile {
 }
 
 impl CorpusFile {
-    /// The top-level directory (the batch of milestone 2).
+    /// The top-level directory (one backend batch).
     pub fn dir(&self) -> &str {
         self.name.split('/').next().unwrap_or("")
     }
@@ -59,7 +59,7 @@ pub struct Loaded {
     pub result: Result<TestFile, String>,
 }
 
-/// Parses `src` and validates the directives the parser leaves to the harness (SPEC §6.4, §3.3).
+/// Parses `src` and validates the directives the parser leaves to the harness (crate README, "Rules and contracts").
 pub fn load_source(src: &str, env: &TestEnv) -> Result<TestFile, String> {
     let tf = load(src, FileId(0), env).map_err(|d| d.to_string())?;
     validate(&tf)?;

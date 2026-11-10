@@ -1,5 +1,5 @@
-//! `TW_BACKENDS`, `TW_REQUIRE`, `TW_LARGE` (SPEC §3.2). No backend runs in milestone 1, but the
-//! names are validated now so a typo can't pass silently.
+//! `TW_BACKENDS`, `TW_REQUIRE`, `TW_LARGE` (crate README, "Running it"). Unknown names are
+//! rejected so a typo can't pass silently.
 
 pub const KNOWN_BACKENDS: &[&str] = &["rust", "java", "cuda"];
 

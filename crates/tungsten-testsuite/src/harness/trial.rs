@@ -1,4 +1,4 @@
-//! One backend trial: `<path>::<backend>::original` or `::inlined` (SPEC §6.1).
+//! One backend trial: `<path>::<backend>::original` or `::inlined` (crate README, "Rules and contracts").
 
 use std::time::Duration;
 
@@ -72,7 +72,7 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
             }
             let large = tf.tier.as_deref() == Some("large");
             let make = || h.command(&path, &id);
-            // One GPU: jobs on it run one at a time (SPEC §7.3, §13).
+            // One GPU: jobs on it run one at a time (crate README, "Rules and contracts, Processes").
             let _gpu = (h.lang == Lang::Cuda).then(|| GPU_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
             let outcomes = run_cases_opts(
                 &make,

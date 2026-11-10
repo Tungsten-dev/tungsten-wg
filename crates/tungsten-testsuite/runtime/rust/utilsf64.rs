@@ -1,4 +1,4 @@
-//! Toy permutation tables and samplers (SPEC §5.3). Self-contained: this file is also copied
+//! Toy permutation tables and samplers (see the crate README, "Toy tables"). Self-contained: this file is also copied
 //! into generated builds, so it must not use `crate::` paths.
 #![allow(dead_code)]
 

@@ -1,4 +1,4 @@
-//! Scoring of one backend case against the interpreter (SPEC §6.2, §6.3, §6.5).
+//! Scoring of one backend case against the interpreter (crate README, "Rules and contracts").
 
 use tungsten_check::{CaseResult, Value};
 use tungsten_parse::{CellSample, TestFile};
@@ -11,7 +11,7 @@ use crate::values::{core_eq, show};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Not run, not scored (SPEC §4.1, §6.3).
+    /// Not run, not scored (crate README, "Rules and contracts").
     Skipped,
     /// Passed; the note says why when the interpreter errored and the backend failed too.
     Pass(Option<String>),
@@ -29,7 +29,7 @@ pub fn interpreter_clean(r: &CaseResult) -> bool {
     r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())
 }
 
-/// Whether cell `k` of entry `e` takes part in the comparison (SPEC §6.2). Deterministic: the
+/// Whether cell `k` of entry `e` takes part in the comparison (crate README, "Rules and contracts"). Deterministic: the
 /// `sample` cells with the smallest hash of `(seed, entry, cell)`.
 pub fn cell_selected(cells: Option<CellSample>, e: usize, k: usize, total: usize) -> bool {
     use crate::externs::rt_utils::splitmix64;
@@ -58,7 +58,7 @@ fn describe(o: &CaseOutcome) -> String {
     }
 }
 
-/// The scoring table of SPEC §6.3 for one case that reached the backend.
+/// The scoring table of crate README, "Rules and contracts" for one case that reached the backend.
 pub fn score_case(
     tf: &TestFile,
     env: &TestEnv,
@@ -129,7 +129,7 @@ fn compare_cells(tf: &TestFile, io: &TestIo, case: usize, want: &CaseResult, got
     }
 }
 
-/// A build or generation failure fails every case that would have run (SPEC §6.3).
+/// A build or generation failure fails every case that would have run (crate README, "Rules and contracts").
 pub fn score_unbuilt(tf: &TestFile, oracle_result: &CaseResult, case: usize, why: &str) -> Verdict {
     if oracle::skipped_for_backends(oracle_result) {
         Verdict::Skipped

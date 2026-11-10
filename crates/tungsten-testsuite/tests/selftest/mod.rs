@@ -1,4 +1,4 @@
-//! `selftest::`: the harness must detect failures, or a green run means nothing (SPEC §12).
+//! `selftest::`: the harness must detect failures, or a green run means nothing (crate README, "The harness checks itself").
 //!
 //! Each test feeds a stub driver (hand-written Rust, standing in for generated code) through the
 //! real build, fallback, process and scoring code, and checks the verdict.

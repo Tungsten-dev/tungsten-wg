@@ -1,6 +1,6 @@
 //! CUDA selftests: stub drivers (hand-written CUDA C++) through the real CUDA build, process and
 //! scoring code, plus the CUDA halves of the runtime checks (golden bytes, toy-table goldens,
-//! extern coverage) and the device-error recovery of SPEC §7.3.
+//! extern coverage) and the device-error recovery of crate README, "Rules and contracts"
 
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -89,7 +89,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
         expect_pass(&v[2])
     });
     // A real sticky device error: the kernel traps, the driver reports it and exits, and the next
-    // case runs in a fresh process and still gets a correct answer (SPEC §7.3).
+    // case runs in a fresh process and still gets a correct answer (crate README, "Rules and contracts, Processes").
     t!("device_trap_ends_process_and_resumes", |h: &Harness| {
         let extra = "__global__ void boom() { __trap(); }";
         let body = "double x = r.f64(); if (x == 1.0) { boom<<<1, 1>>>(); cudaError_t e = cudaDeviceSynchronize(); \
@@ -140,7 +140,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
             Err(Failed::from("the second build invoked nvcc"))
         }
     });
-    // The driver-side Reader/Writer against the golden bytes shared with the host side (SPEC 7.4).
+    // The driver-side Reader/Writer against the golden bytes shared with the host side (crate README, "Rules and contracts, Protocol").
     t!("golden_bytes", |h: &Harness| {
         let golden = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/protocol.txt"))
             .map_err(|e| Failed::from(e.to_string()))?;
@@ -178,7 +178,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
             other => Err(Failed::from(format!("expected the golden response, got {other:?}"))),
         }
     });
-    // Toy-table goldens (SPEC 5.3): the Rust and Java values, computed on the host and on the device.
+    // Toy-table goldens (crate README, "Rules and contracts, Toy tables"): the Rust and Java values, computed on the host and on the device.
     t!("toy_table_goldens", |h: &Harness| {
         let extra = "\
 __managed__ unsigned long long g_out[12];
@@ -205,7 +205,7 @@ __global__ void toy() {
         let (_, v) = run(h, &program("1.0", &[0.0]), body, &format!("#include <cstring>\n{extra}"), SHORT)?;
         expect_pass(&v[0])
     });
-    // One call to every registered extern, on the device (SPEC 5.2): a missing one is a compile error.
+    // One call to every registered extern, on the device (crate README, "Things worth knowing"): a missing one is a compile error.
     t!("runtime_coverage", |h: &Harness| {
         let env = TestEnv::new();
         let mut calls = String::new();

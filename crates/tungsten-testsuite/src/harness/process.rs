@@ -1,4 +1,4 @@
-//! Child process lifecycle for one test (SPEC §7.3): request/response with a watchdog, and
+//! Child process lifecycle for one test (crate README, "Processes"): request/response with a watchdog, and
 //! resume after a crash or timeout.
 
 use std::io::{Read, Write};

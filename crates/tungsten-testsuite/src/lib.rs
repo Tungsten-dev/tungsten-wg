@@ -1,7 +1,7 @@
 //! `tungsten-testsuite`: differential test harness, corpus and runtimes.
 //!
-//! Milestone 1: registry, `TestEnv`, shared externs, and the interpreter-side trials
-//! (round-trip, lowering, interpreter, inliner). See `SPEC.md` at the repo root.
+//! Registry, `TestEnv`, shared externs, the interpreter-side trials (round-trip, lowering,
+//! interpreter, inliner) and the Rust, Java and CUDA backend trials. See the crate README.
 
 pub mod compare;
 pub mod corpus;

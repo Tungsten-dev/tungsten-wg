@@ -1,4 +1,4 @@
-//! Reconciliation of `@knownfail` directives with backend results (SPEC §6.4).
+//! Reconciliation of `@knownfail` directives with backend results (crate README, "Rules and contracts").
 
 use tungsten_parse::KnownFail;
 
