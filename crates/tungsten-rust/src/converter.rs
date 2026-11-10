@@ -9,7 +9,7 @@ use std::rc::Rc;
 use tungsten_interface::Interface;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
-    Arena, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
+    AmbientKind, Arena, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
     PermutationTableInput, Ref, Var, VariableType,
 };
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
@@ -169,6 +169,10 @@ impl<'a> FunctionConverter<'a> {
                 PermutationTableInput::Base3DNoise => VariableType::InterpolatedNoiseSampler,
             },
             E::HostInput(r) => self.program.host_inputs[*r].get_type(),
+            E::Ambient(k) => match k {
+                AmbientKind::Pos3 => VariableType::Pos3,
+                _ => VariableType::Vec3,
+            },
             E::BinaryOp { op, left, right } => {
                 derive_binop_type(*op, self.derive_type(left), self.derive_type(right))?
             }

@@ -1,0 +1,20 @@
+// Equal dims: cell k reads cell k.
+program {
+    fn base_main() -> f64 {
+        return (ambient(pos3).x as f64);
+    }
+    unit base {
+        main base_main;
+    }
+
+    fn top_main() -> f64 {
+        return (density(b) + 100.0);
+    }
+    unit top {
+        main top_main;
+        input b = base @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+    entry top @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" top = [100.0, 101.0, 102.0, 103.0]

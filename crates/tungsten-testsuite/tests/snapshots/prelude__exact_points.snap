@@ -1,0 +1,1621 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                5,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [
+                FnId(
+                    0,
+                ),
+                FnId(
+                    1,
+                ),
+                FnId(
+                    2,
+                ),
+                FnId(
+                    3,
+                ),
+                FnId(
+                    4,
+                ),
+            ],
+            consts: [
+                ConstId(
+                    0,
+                ),
+                ConstId(
+                    1,
+                ),
+            ],
+        },
+    ],
+    functions: [
+        Function {
+            params: 1,
+            locals: [
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: ExternCall {
+                        ext: ExternId(
+                            1,
+                        ),
+                        params: [
+                            F64,
+                        ],
+                        ret: F64,
+                        args: [
+                            Binary {
+                                op: Add,
+                                left: Binary {
+                                    op: Divide,
+                                    left: Local(
+                                        LocalId(
+                                            0,
+                                        ),
+                                    ),
+                                    right: Const(
+                                        ConstId(
+                                            0,
+                                        ),
+                                    ),
+                                },
+                                right: Lit(
+                                    F64(
+                                        4602678819172646912,
+                                    ),
+                                ),
+                            },
+                        ],
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        2,
+                    ),
+                    value: Binary {
+                        op: Subtract,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Const(
+                                ConstId(
+                                    0,
+                                ),
+                            ),
+                        },
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        3,
+                    ),
+                    value: Binary {
+                        op: Multiply,
+                        left: Local(
+                            LocalId(
+                                2,
+                            ),
+                        ),
+                        right: Local(
+                            LocalId(
+                                2,
+                            ),
+                        ),
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        4,
+                    ),
+                    value: Local(
+                        LocalId(
+                            2,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        5,
+                    ),
+                    value: Local(
+                        LocalId(
+                            2,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        6,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 12,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                4,
+                            ),
+                            value: Binary {
+                                op: Divide,
+                                left: Binary {
+                                    op: Multiply,
+                                    left: Binary {
+                                        op: Subtract,
+                                        left: Lit(
+                                            F64(
+                                                0,
+                                            ),
+                                        ),
+                                        right: Local(
+                                            LocalId(
+                                                4,
+                                            ),
+                                        ),
+                                    },
+                                    right: Local(
+                                        LocalId(
+                                            3,
+                                        ),
+                                    ),
+                                },
+                                right: Binary {
+                                    op: Multiply,
+                                    left: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                6,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            F64(
+                                                4607182418800017408,
+                                            ),
+                                        ),
+                                    },
+                                    right: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                6,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            F64(
+                                                4611686018427387904,
+                                            ),
+                                        ),
+                                    },
+                                },
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                5,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        5,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                6,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        6,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            5,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 1,
+            locals: [
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: ExternCall {
+                        ext: ExternId(
+                            1,
+                        ),
+                        params: [
+                            F64,
+                        ],
+                        ret: F64,
+                        args: [
+                            Binary {
+                                op: Add,
+                                left: Binary {
+                                    op: Divide,
+                                    left: Local(
+                                        LocalId(
+                                            0,
+                                        ),
+                                    ),
+                                    right: Const(
+                                        ConstId(
+                                            0,
+                                        ),
+                                    ),
+                                },
+                                right: Lit(
+                                    F64(
+                                        4602678819172646912,
+                                    ),
+                                ),
+                            },
+                        ],
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        2,
+                    ),
+                    value: Binary {
+                        op: Subtract,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Const(
+                                ConstId(
+                                    0,
+                                ),
+                            ),
+                        },
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        3,
+                    ),
+                    value: Binary {
+                        op: Multiply,
+                        left: Local(
+                            LocalId(
+                                2,
+                            ),
+                        ),
+                        right: Local(
+                            LocalId(
+                                2,
+                            ),
+                        ),
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        4,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        5,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        6,
+                    ),
+                    value: Lit(
+                        F64(
+                            0,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 12,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                4,
+                            ),
+                            value: Binary {
+                                op: Divide,
+                                left: Binary {
+                                    op: Multiply,
+                                    left: Binary {
+                                        op: Subtract,
+                                        left: Lit(
+                                            F64(
+                                                0,
+                                            ),
+                                        ),
+                                        right: Local(
+                                            LocalId(
+                                                4,
+                                            ),
+                                        ),
+                                    },
+                                    right: Local(
+                                        LocalId(
+                                            3,
+                                        ),
+                                    ),
+                                },
+                                right: Binary {
+                                    op: Multiply,
+                                    left: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                6,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            F64(
+                                                4607182418800017408,
+                                            ),
+                                        ),
+                                    },
+                                    right: Binary {
+                                        op: Add,
+                                        left: Local(
+                                            LocalId(
+                                                6,
+                                            ),
+                                        ),
+                                        right: Lit(
+                                            F64(
+                                                4611686018427387904,
+                                            ),
+                                        ),
+                                    },
+                                },
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                5,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        5,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                6,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        6,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            5,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 1,
+            locals: [
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                If {
+                    cond: Binary {
+                        op: Greater,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                4649456441864749056,
+                            ),
+                        ),
+                    },
+                    then_branch: [
+                        Return(
+                            Lit(
+                                F64(
+                                    9218868437227405312,
+                                ),
+                            ),
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                If {
+                    cond: Binary {
+                        op: Less,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                13873145138068324352,
+                            ),
+                        ),
+                    },
+                    then_branch: [
+                        Return(
+                            Lit(
+                                F64(
+                                    0,
+                                ),
+                            ),
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: ExternCall {
+                        ext: ExternId(
+                            1,
+                        ),
+                        params: [
+                            F64,
+                        ],
+                        ret: F64,
+                        args: [
+                            Binary {
+                                op: Add,
+                                left: Binary {
+                                    op: Divide,
+                                    left: Local(
+                                        LocalId(
+                                            0,
+                                        ),
+                                    ),
+                                    right: Const(
+                                        ConstId(
+                                            1,
+                                        ),
+                                    ),
+                                },
+                                right: Lit(
+                                    F64(
+                                        4602678819172646912,
+                                    ),
+                                ),
+                            },
+                        ],
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        2,
+                    ),
+                    value: Binary {
+                        op: Subtract,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Const(
+                                ConstId(
+                                    1,
+                                ),
+                            ),
+                        },
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        3,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        4,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        5,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 20,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                3,
+                            ),
+                            value: Binary {
+                                op: Divide,
+                                left: Binary {
+                                    op: Multiply,
+                                    left: Local(
+                                        LocalId(
+                                            3,
+                                        ),
+                                    ),
+                                    right: Local(
+                                        LocalId(
+                                            2,
+                                        ),
+                                    ),
+                                },
+                                right: Local(
+                                    LocalId(
+                                        5,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                4,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        3,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                5,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        5,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                While {
+                    cond: Binary {
+                        op: Greater,
+                        left: Local(
+                            LocalId(
+                                1,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                0,
+                            ),
+                        ),
+                    },
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                4,
+                            ),
+                            value: Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Subtract,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                While {
+                    cond: Binary {
+                        op: Less,
+                        left: Local(
+                            LocalId(
+                                1,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                0,
+                            ),
+                        ),
+                    },
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                4,
+                            ),
+                            value: Binary {
+                                op: Divide,
+                                left: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            4,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 1,
+            locals: [
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                If {
+                    cond: Unary {
+                        op: Not,
+                        operand: Binary {
+                            op: Greater,
+                            left: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                            right: Lit(
+                                F64(
+                                    0,
+                                ),
+                            ),
+                        },
+                    },
+                    then_branch: [
+                        Return(
+                            Lit(
+                                F64(
+                                    9221120237041090560,
+                                ),
+                            ),
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                If {
+                    cond: Binary {
+                        op: Equal,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                9218868437227405312,
+                            ),
+                        ),
+                    },
+                    then_branch: [
+                        Return(
+                            Lit(
+                                F64(
+                                    9218868437227405312,
+                                ),
+                            ),
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        2,
+                    ),
+                    value: Lit(
+                        F64(
+                            0,
+                        ),
+                    ),
+                },
+                While {
+                    cond: Binary {
+                        op: Greater,
+                        left: Local(
+                            LocalId(
+                                1,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                4609434218613702656,
+                            ),
+                        ),
+                    },
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Divide,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                2,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        2,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                While {
+                    cond: Binary {
+                        op: Less,
+                        left: Local(
+                            LocalId(
+                                1,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                4604930618986332160,
+                            ),
+                        ),
+                    },
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                2,
+                            ),
+                            value: Binary {
+                                op: Subtract,
+                                left: Local(
+                                    LocalId(
+                                        2,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Assign {
+                    target: LocalId(
+                        3,
+                    ),
+                    value: Binary {
+                        op: Divide,
+                        left: Binary {
+                            op: Subtract,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Lit(
+                                F64(
+                                    4607182418800017408,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Add,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Lit(
+                                F64(
+                                    4607182418800017408,
+                                ),
+                            ),
+                        },
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        4,
+                    ),
+                    value: Binary {
+                        op: Multiply,
+                        left: Local(
+                            LocalId(
+                                3,
+                            ),
+                        ),
+                        right: Local(
+                            LocalId(
+                                3,
+                            ),
+                        ),
+                    },
+                },
+                Assign {
+                    target: LocalId(
+                        5,
+                    ),
+                    value: Local(
+                        LocalId(
+                            3,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        6,
+                    ),
+                    value: Local(
+                        LocalId(
+                            3,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        7,
+                    ),
+                    value: Lit(
+                        F64(
+                            4607182418800017408,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 20,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                5,
+                            ),
+                            value: Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        5,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        4,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                7,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        7,
+                                    ),
+                                ),
+                                right: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                6,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        6,
+                                    ),
+                                ),
+                                right: Binary {
+                                    op: Divide,
+                                    left: Local(
+                                        LocalId(
+                                            5,
+                                        ),
+                                    ),
+                                    right: Local(
+                                        LocalId(
+                                            7,
+                                        ),
+                                    ),
+                                },
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    2,
+                                ),
+                            ),
+                            right: Const(
+                                ConstId(
+                                    1,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Multiply,
+                            left: Lit(
+                                F64(
+                                    4611686018427387904,
+                                ),
+                            ),
+                            right: Local(
+                                LocalId(
+                                    6,
+                                ),
+                            ),
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 2,
+            locals: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                If {
+                    cond: Unary {
+                        op: Not,
+                        operand: Binary {
+                            op: Greater,
+                            left: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                            right: Lit(
+                                F64(
+                                    0,
+                                ),
+                            ),
+                        },
+                    },
+                    then_branch: [
+                        Return(
+                            Lit(
+                                F64(
+                                    9221120237041090560,
+                                ),
+                            ),
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                Return(
+                    Call {
+                        func: FnId(
+                            2,
+                        ),
+                        args: [
+                            Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Call {
+                                    func: FnId(
+                                        3,
+                                    ),
+                                    args: [
+                                        Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Array(
+                F64,
+                5,
+            ),
+            hosts: [],
+            body: [
+                Return(
+                    ArrayLit(
+                        [
+                            Call {
+                                func: FnId(
+                                    0,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    1,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    2,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    3,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    4,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            4611686018427387904,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                ],
+                            },
+                        ],
+                    ),
+                ),
+            ],
+        },
+    ],
+    consts: [
+        ConstDecl {
+            init: Lit(
+                F64(
+                    4618760256179416344,
+                ),
+            ),
+        },
+        ConstDecl {
+            init: Lit(
+                F64(
+                    4604418534313441775,
+                ),
+            ),
+        },
+    ],
+    hosts: [],
+    tables: [],
+    inputs: [],
+    entries: [
+        Entry {
+            unit: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 1,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                PermTable,
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Sampler,
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

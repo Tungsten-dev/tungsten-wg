@@ -7,12 +7,12 @@ the generated class so locals cannot shadow them.
 
 use super::converter::FunctionConverter;
 use super::types::{boxed_class, find_density_input, convert_binary_op, convert_type, holder_class, is_object, numeric_literal};
-use super::{HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_HOST_CONSTS, PARAM_POS, uniform_arguments};
+use super::{HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_POS, uniform_arguments};
 use tungsten_interface::Instance;
 use tungsten_interface::naming::java_sanitize;
 use crate::model as java;
 use tungsten_ir::model::VariableType;
-use tungsten_ir::model::{BinaryOperator, ConstExpr, Expression, UnaryOperator};
+use tungsten_ir::model::{AmbientKind, BinaryOperator, ConstExpr, Expression, UnaryOperator};
 
 use java::Expression as J;
 
@@ -32,11 +32,11 @@ pub fn const_to_expression(e: &ConstExpr) -> Expression {
         }
         ConstExpr::UnaryOp { op, operand } => Expression::UnaryOp { op: *op, operand: b(operand) },
         ConstExpr::ExplicitCast { to, expr } => Expression::ExplicitCast { to: to.clone(), expr: b(expr) },
-        ConstExpr::Field { base, field, type_of_field, known_idnex } => Expression::Field {
+        ConstExpr::Field { base, field, type_of_field, base_type } => Expression::Field {
             base: b(base),
             field: field.clone(),
             type_of_field: type_of_field.clone(),
-            known_idnex: *known_idnex,
+            base_type: base_type.clone(),
         },
         ConstExpr::ArrayAccess { array, index } => {
             Expression::ArrayAccess { array: b(array), index: b(index) }
@@ -106,6 +106,12 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => J::IntLit(*v),
             Expression::Long(v) => J::LongLit(*v),
             Expression::Bool(v) => J::BoolLit(*v),
+            Expression::Ambient(k) => match k {
+                AmbientKind::Origin => J::field(J::name(PARAM_CONFIG), "origin"),
+                AmbientKind::OriginScale => J::field(J::name(PARAM_CONFIG), "origin_scale"),
+                AmbientKind::PositionScale => J::field(J::name(PARAM_CONFIG), "position_scale"),
+                AmbientKind::Pos3 => J::field(J::name(PARAM_POS), "pos"),
+            },
             Expression::FunctionCall { function, parameters } => {
                 self.called.push(*function);
                 let program = self.program;

@@ -121,6 +121,10 @@ impl<'a> FunctionConverter<'a> {
                 PermutationTableInput::Base3DNoise => VariableType::InterpolatedNoiseSampler,
             },
             E::HostInput(r) => self.program.host_inputs[*r].get_type(),
+            E::Ambient(k) => match k {
+                tungsten_ir::model::AmbientKind::Pos3 => VariableType::Pos3,
+                _ => VariableType::Vec3,
+            },
             E::BinaryOp { op, left, right } => {
                 let (l, r) = (self.derive_type(left), self.derive_type(right));
                 match op {

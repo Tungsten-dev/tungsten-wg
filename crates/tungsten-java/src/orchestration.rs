@@ -9,7 +9,7 @@ use super::{
     AUTO_CONSTS_CLASS, HELPERS_CLASS, HOST_CONSTS_CLASS, INTERNAL_BUFFERS_CLASS, JavaCodegen,
     ORCHESTRATION_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_HOST_CONSTS, size,
 };
-use tungsten_interface::naming::{NamingRules, java_sanitize, unique, unit_base_name};
+use tungsten_interface::naming::{NamingRules, entry_method_names, java_sanitize};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use crate::model::codegen::JavaCodeGenerator;
 use crate::model as java;
@@ -202,10 +202,9 @@ fn orchestration_class(program: &OptimizedProgram, interface: &Interface, rules:
             value: J::name(PARAM_AUTO_CONSTS),
         }],
     }];
-    let mut used = rules.used_set();
-    for entry in &program.entry_points {
+    let names = entry_method_names(program, rules, rules.used_set());
+    for (entry, name) in program.entry_points.iter().zip(names) {
         let entry = Instance::from_entry(entry);
-        let name = unique(&mut used, format!("orchestrate_{}", unit_base_name(rules, program, entry.cu)));
         methods.push(entry_method(program, interface, name, &entry));
     }
     java::Class {

@@ -1,0 +1,28 @@
+// Explicit-index reads at the grid edges; -1 and len are out of bounds.
+program {
+    host i: i32;
+    fn base_main() -> i32 {
+        return ((ambient(pos3).x * 10) + ambient(pos3).y);
+    }
+    unit base {
+        main base_main;
+    }
+
+    fn top_main() -> i32 @hosts(i) {
+        return density(b, host(i));
+    }
+    unit top {
+        main top_main;
+        input b = base @dims(2, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        hosts [i];
+    }
+    entry top @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "first" origin(0, 0, 0) seed(1) host(i = 0)
+@case "last" origin(0, 0, 0) seed(1) host(i = 3)
+@case "neg" origin(0, 0, 0) seed(1) host(i = -1)
+@case "len" origin(0, 0, 0) seed(1) host(i = 4)
+@expect "first" top[0, 0, 0] = 0
+@expect "last" top[0, 0, 0] = 11
+@expect "neg" error(OutOfBounds)
+@expect "len" error(OutOfBounds)

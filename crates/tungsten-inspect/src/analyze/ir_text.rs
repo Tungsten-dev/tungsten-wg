@@ -152,6 +152,7 @@ impl Printer<'_, '_> {
             Expression::Int(x) => format!("{x}"),
             Expression::Long(x) => format!("{x}L"),
             Expression::Bool(x) => format!("{x}"),
+            Expression::Ambient(k) => format!("ambient({k:?})"),
             Expression::FunctionCall {
                 function,
                 parameters,

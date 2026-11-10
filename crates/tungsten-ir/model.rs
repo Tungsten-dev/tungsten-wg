@@ -524,6 +524,8 @@ pub enum Expression {
     // this is used to reference the permutation tables that are passed as arguments to noise functions
     PermutationTable(Ref<PermutationTableInput>),
     HostInput(Ref<HostInput>),
+    /// A read-only value supplied by the evaluation context (origin, position, scales).
+    Ambient(AmbientKind),
 
     BinaryOp {
         op: BinaryOperator,
@@ -540,7 +542,8 @@ pub enum Expression {
         base: Box<Expression>,
         field: String,
         type_of_field: VariableType,
-        known_idnex: Option<usize>, // for cases where we know the index of the field (e.g. for vec3.x, vec3.y, vec3.z)
+        /// Type of `base`; used to resolve `field`.
+        base_type: VariableType,
     },
 
     ArrayAccess {
@@ -568,6 +571,14 @@ pub enum Expression {
         to: VariableType,
         expr: Box<Expression>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AmbientKind {
+    Origin,
+    Pos3,
+    OriginScale,
+    PositionScale,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -600,7 +611,8 @@ pub enum ConstExpr {
         base: Box<ConstExpr>,
         field: String,
         type_of_field: VariableType,
-        known_idnex: Option<usize>, // for cases where we know the index of the field (e.g. for vec3.x, vec3.y, vec3.z)
+        /// Type of `base`; used to resolve `field`.
+        base_type: VariableType,
     },
 
     ArrayAccess {

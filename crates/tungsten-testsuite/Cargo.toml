@@ -1,0 +1,39 @@
+[package]
+name = "tungsten-testsuite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Differential test harness, corpus and runtimes for tungsten."
+publish = false
+
+[dependencies]
+tungsten-parse.workspace = true
+tungsten-check.workspace = true
+tungsten-core.workspace = true
+tungsten-ir.workspace = true
+tungsten-interface.workspace = true
+tungsten-optimizer.workspace = true
+tungsten-rust.workspace = true
+tungsten-java.workspace = true
+tungsten-cuda.workspace = true
+md5.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+libtest-mimic.workspace = true
+insta.workspace = true
+
+[[test]]
+name = "roundtrip"
+harness = false
+
+[[test]]
+name = "lowering"
+harness = false
+
+[[test]]
+name = "corpus"
+harness = false

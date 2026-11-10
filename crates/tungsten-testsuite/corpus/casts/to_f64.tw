@@ -1,0 +1,12 @@
+// Casts to f64: f32 widens exactly, i64 rounds to nearest even, -0.0 stays negative.
+program {
+    fn run() -> [f64; 4] {
+        return [(0.1f as f64), (16777217 as f64), (9007199254740993L as f64), (-0.0f as f64)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [0.10000000149011612, 16777217.0, 9007199254740992.0, -0.0]

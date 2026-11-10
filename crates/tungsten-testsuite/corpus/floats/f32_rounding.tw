@@ -1,0 +1,12 @@
+// Each f32 operation rounds to f32.
+program {
+    fn run() -> [f32; 4] {
+        return [(0.1f + 0.2f), (16777216.0f + 1.0f), (1.0f / 3.0f), (0.0f * -1.0f)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [0.3f, 16777216.0f, 0.33333334f, -0.0f]
