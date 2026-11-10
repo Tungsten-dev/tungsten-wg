@@ -380,7 +380,7 @@ fn auto_const_assignments(program: &OptimizedProgram, interface: &Interface) -> 
             })
             .collect();
         let field = interface.auto_const_field(r);
-        out.push(format!("// {}", a.name.replace(['\n', '\r'], " ")));
+        out.push(format!("// {}", a.name.chars().map(|c| if c.is_control() || c == '\\' || c == '?' { ' ' } else { c }).collect::<String>()));
         out.push(format!("auto_constants->{} = tw::{}({});", field, a.initializer, args.join(", ")));
     }
     out
@@ -551,7 +551,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
     ]);
     for e in entries {
         create.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result_{b}), {b}_len * sizeof({t}), cudaHostAllocDefault));",
+            "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result_{b}), Orchestration::{b}_len * sizeof({t}), cudaHostAllocDefault));",
             b = e.base,
             t = e.public_element
         ));
@@ -609,7 +609,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             }
         }
         methods.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result_{b}, s.slab + {l}::{f}, {b}_len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
+            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result_{b}, s.slab + {l}::{f}, Orchestration::{b}_len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
             b = e.base,
             l = layout_name(),
             f = interface.buffer_field(&e.inst),

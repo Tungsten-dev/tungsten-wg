@@ -243,11 +243,14 @@ pub fn cuda_sanitize(name: &str) -> String {
 
 /// Replaces characters that are not valid in generated identifiers.
 pub fn sanitize_name(name: &str) -> String {
-    name.replace(':', "_")
-        .replace('/', "_")
-        .replace('<', "_")
-        .replace('>', "_")
-        .replace('-', "_")
+    let mut s: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
+        s.insert(0, '_');
+    }
+    s
 }
 
 /// `base`, or `base_N` for the first free N if `base` is already taken.
@@ -314,6 +317,10 @@ pub const CREATION_RESERVED: &[&str] = &[
     "out",
     "impl",
     "this",
+    // CUDA: file-scope names `create` reads, and its loop variable
+    "host_consts_ring",
+    "i",
+    "stream",
 ];
 
 /// Field name of a static host input in `HostConsts`.

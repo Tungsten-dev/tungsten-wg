@@ -228,7 +228,7 @@ impl Interface {
         }
 
         let mut auto_consts = HashMap::new();
-        let mut used_auto = HashSet::new();
+        let mut used_auto = rules.used_set();
         for (r, a) in program.auto_consts.iter() {
             auto_consts.insert(r, unique(&mut used_auto, auto_const_field_name(rules, a)));
         }
