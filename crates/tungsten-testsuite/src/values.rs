@@ -1,4 +1,4 @@
-//! `tungsten_parse::Value` ↔ `tungsten_core::Value`, and value equality (SPEC §6.2).
+//! `tungsten_parse::Value` ↔ `tungsten_core::Value`, and value equality (crate README, "Rules and contracts").
 
 use tungsten_check::{Registry, Value as Core};
 use tungsten_core::{F64x3, I32x3};

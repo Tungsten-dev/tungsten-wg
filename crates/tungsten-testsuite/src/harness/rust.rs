@@ -1,4 +1,4 @@
-//! Rust driver generator and build command (SPEC §7.1, §7.2).
+//! Rust driver generator and build command (crate README, "Rules and contracts, Batches").
 //!
 //! A batch is one crate: the runtime files from `runtime/rust/`, a generated `records.rs`, one
 //! module `t_<hash>` per test (the backend output plus a generated `driver`), and a `main.rs`
@@ -27,7 +27,7 @@ pub const RUNTIME_FILES: &[(&str, &str)] = &[
     ("proto.rs", include_str!("../../runtime/rust/proto.rs")),
 ];
 
-/// Flags of every build; part of the cache key (SPEC §7.2).
+/// Flags of every build; part of the cache key (crate README, "Rules and contracts, Batches").
 pub const RUSTC_FLAGS: &[&str] = &[
     "--edition",
     "2024",

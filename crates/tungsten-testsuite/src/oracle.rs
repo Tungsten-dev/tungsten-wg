@@ -1,8 +1,8 @@
-//! Interpreter runs and `@expect` matching (SPEC §3.3, §4.1).
+//! Interpreter runs and `@expect` matching (crate README, "Rules and contracts").
 
 use tungsten_check::{
-    AutoArgValue, CaseResult, EvalError, EvalFailure, EvalOptions, Invalid, NamedCase, Prepared, Value,
-    prepare, DEFAULT_FUEL,
+    AutoArgValue, CaseResult, DEFAULT_FUEL, EvalError, EvalFailure, EvalOptions, Invalid,
+    NamedCase, Prepared, Value, prepare,
 };
 use tungsten_ir::{HostInput, Name};
 use tungsten_parse::{ExpectKind, TestFile};
@@ -28,17 +28,29 @@ pub fn error_kind_name(e: &EvalError) -> String {
 /// The variant names of the lowering and checker errors of a rejection.
 pub fn reject_kinds(inv: &Invalid) -> Vec<String> {
     fn variant(dbg: String) -> String {
-        dbg.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
+        dbg.chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect()
     }
     match inv {
-        Invalid::Lower(e) => e.0.iter().map(|e| variant(format!("{:?}", e.kind))).collect(),
-        Invalid::Check(e) => e.0.iter().map(|e| variant(format!("{:?}", e.kind))).collect(),
+        Invalid::Lower(e) => {
+            e.0.iter()
+                .map(|e| variant(format!("{:?}", e.kind)))
+                .collect()
+        }
+        Invalid::Check(e) => {
+            e.0.iter()
+                .map(|e| variant(format!("{:?}", e.kind)))
+                .collect()
+        }
     }
 }
 
 /// Checks a rejected program against `@expect reject[(Kind)]`.
 pub fn check_reject(tf: &TestFile, env: &TestEnv) -> Result<(), String> {
-    let Some(want) = &tf.reject else { return Err("not a reject file".into()) };
+    let Some(want) = &tf.reject else {
+        return Err("not a reject file".into());
+    };
     match prepare(&tf.program, &env.registry) {
         Ok(_) => Err("expected a rejection, but the program was accepted".into()),
         Err(inv) => match want {
@@ -55,7 +67,7 @@ pub fn check_reject(tf: &TestFile, env: &TestEnv) -> Result<(), String> {
     }
 }
 
-/// Binds hosts by name (SPEC §3.3), so inlining can't invalidate them.
+/// Binds hosts by name (crate README, "Rules and contracts"), so inlining can't invalidate them.
 pub fn named_case(
     tf: &TestFile,
     i: usize,
@@ -65,17 +77,37 @@ pub fn named_case(
     let params = c
         .params
         .iter()
-        .map(|(r, v)| Ok((tf.program.auto_params[*r].name.clone(), to_core(v, &env.registry)?)))
+        .map(|(r, v)| {
+            Ok((
+                tf.program.auto_params[*r].name.clone(),
+                to_core(v, &env.registry)?,
+            ))
+        })
         .collect::<Result<Vec<_>, String>>()?;
     let mut hosts = vec![];
     for (r, v) in &c.hosts {
         let name = match &tf.program.host_inputs[*r] {
-            HostInput::Static { name: Name::Named(n), .. } => n.clone(),
-            other => return Err(format!("case `{}`: host {other:?} has no name to bind", c.name)),
+            HostInput::Static {
+                name: Name::Named(n),
+                ..
+            } => n.clone(),
+            other => {
+                return Err(format!(
+                    "case `{}`: host {other:?} has no name to bind",
+                    c.name
+                ));
+            }
         };
         hosts.push((name, to_core(v, &env.registry)?));
     }
-    Ok((NamedCase { origin: c.origin, hosts, auto_values: vec![] }, params))
+    Ok((
+        NamedCase {
+            origin: c.origin,
+            hosts,
+            auto_values: vec![],
+        },
+        params,
+    ))
 }
 
 pub fn run_case(
@@ -96,7 +128,10 @@ pub fn run_case(
             Ok((n.clone(), v))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let inits = prep.map().resolved_auto_consts(&params).map_err(|e| e.to_string())?;
+    let inits = prep
+        .map()
+        .resolved_auto_consts(&params)
+        .map_err(|e| e.to_string())?;
     let (ext, auto_values) = CaseExterns::new(prep.map(), &inits)?;
     let mut named = named.clone();
     named.auto_values = auto_values;
@@ -120,12 +155,23 @@ pub fn run_all(tf: &TestFile, env: &TestEnv) -> Result<Interp, String> {
     let mut results = vec![];
     for (i, c) in tf.cases.iter().enumerate() {
         let (named, params) = named_case(tf, i, env)?;
-        let on = EvalOptions { fuel: fuel(tf), memo: true };
-        let off = EvalOptions { fuel: fuel(tf), memo: false };
-        let a = run_case(&prepared, &named, &params, on).map_err(|e| format!("case `{}`: {e}", c.name))?;
-        let b = run_case(&prepared, &named, &params, off).map_err(|e| format!("case `{}`: {e}", c.name))?;
+        let on = EvalOptions {
+            fuel: fuel(tf),
+            memo: true,
+        };
+        let off = EvalOptions {
+            fuel: fuel(tf),
+            memo: false,
+        };
+        let a = run_case(&prepared, &named, &params, on)
+            .map_err(|e| format!("case `{}`: {e}", c.name))?;
+        let b = run_case(&prepared, &named, &params, off)
+            .map_err(|e| format!("case `{}`: {e}", c.name))?;
         if a != b {
-            return Err(format!("case `{}`: memo on and off differ:\n{a:?}\n{b:?}", c.name));
+            return Err(format!(
+                "case `{}`: memo on and off differ:\n{a:?}\n{b:?}",
+                c.name
+            ));
         }
         results.push(a);
     }
@@ -145,7 +191,10 @@ pub fn first_failure(r: &CaseResult) -> Option<(usize, usize, EvalError)> {
 }
 
 fn has_out_of_fuel(r: &CaseResult) -> bool {
-    r.entries.iter().flatten().any(|c| matches!(c, Err(EvalError::OutOfFuel)))
+    r.entries
+        .iter()
+        .flatten()
+        .any(|c| matches!(c, Err(EvalError::OutOfFuel)))
 }
 
 /// Whether case `i` is expected to fail with `OutOfFuel`.
@@ -155,15 +204,17 @@ pub fn expects_out_of_fuel(tf: &TestFile, i: usize) -> bool {
         .any(|e| e.case == i && matches!(&e.kind, ExpectKind::Error(k) if k == "OutOfFuel"))
 }
 
-/// Cases no backend must be sent (SPEC §4.1).
+/// Cases no backend must be sent (crate README, "Rules and contracts").
 pub fn skipped_for_backends(r: &CaseResult) -> bool {
     has_out_of_fuel(r)
 }
 
 /// Cases `backend` must not be sent: `OutOfFuel` everywhere, and on CUDA every case where the
-/// interpreter errors, because trap errors are sticky and cost a process (SPEC §6.3).
+/// interpreter errors, because trap errors are sticky and cost a process (crate README, "Rules and contracts").
 pub fn skipped_for_backend(r: &CaseResult, backend: &str) -> bool {
-    skipped_for_backends(r) || (backend == "cuda" && !(r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())))
+    skipped_for_backends(r)
+        || (backend == "cuda"
+            && !(r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())))
 }
 
 fn flat(c: [i32; 3], dims: (i32, i32, i32)) -> usize {
@@ -221,7 +272,9 @@ pub fn check_expects(tf: &TestFile, env: &TestEnv, run: &Interp) -> Result<(), S
                 let res = match kind {
                     ExpectKind::Cell(c, v) => check(flat(*c, dims), v),
                     ExpectKind::All(v) => (0..cells.len()).try_for_each(|k| check(k, v)),
-                    ExpectKind::Grid(vs) => vs.iter().enumerate().try_for_each(|(k, v)| check(k, v)),
+                    ExpectKind::Grid(vs) => {
+                        vs.iter().enumerate().try_for_each(|(k, v)| check(k, v))
+                    }
                     ExpectKind::Error(_) => unreachable!(),
                 };
                 if let Err(m) = res {
@@ -265,12 +318,18 @@ pub fn same_entries(a: &CaseResult, b: &CaseResult) -> Result<(), String> {
 pub fn check_inline(tf: &TestFile, env: &TestEnv, run: &Interp) -> Result<(), String> {
     let mut program = tf.program.clone();
     tungsten_optimizer::perform_inline(&mut program);
-    let prepared = prepare(&program, &env.registry).map_err(|e| format!("inlined program rejected:\n{e}"))?;
+    let prepared =
+        prepare(&program, &env.registry).map_err(|e| format!("inlined program rejected:\n{e}"))?;
     for (i, c) in tf.cases.iter().enumerate() {
         let (named, params) = named_case(tf, i, env)?;
-        let opts = EvalOptions { fuel: fuel(tf), memo: true };
-        let r = run_case(&prepared, &named, &params, opts).map_err(|e| format!("case `{}` (inlined): {e}", c.name))?;
-        same_entries(&run.results[i], &r).map_err(|m| format!("case `{}`: inlined differs: {m}", c.name))?;
+        let opts = EvalOptions {
+            fuel: fuel(tf),
+            memo: true,
+        };
+        let r = run_case(&prepared, &named, &params, opts)
+            .map_err(|e| format!("case `{}` (inlined): {e}", c.name))?;
+        same_entries(&run.results[i], &r)
+            .map_err(|m| format!("case `{}`: inlined differs: {m}", c.name))?;
     }
     Ok(())
 }

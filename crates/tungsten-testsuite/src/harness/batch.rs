@@ -1,4 +1,4 @@
-//! Batches, the content-hash cache and the per-test fallback (SPEC §7.2).
+//! Batches, the content-hash cache and the per-test fallback (crate README, "Rules and contracts, Batches").
 //!
 //! A batch is `(backend, top-level corpus dir, stage)`. The first trial that needs a batch
 //! builds all of it; the others wait on the same `OnceLock`.
@@ -77,7 +77,7 @@ pub struct Harness {
     /// The `-arch=sm_XY` flag (CUDA harnesses only).
     pub arch: String,
     pub large: bool,
-    /// Number of compiler invocations so far (the cache check of SPEC §12 reads it).
+    /// Number of compiler invocations so far (the cache check of crate README, "The harness checks itself" reads it).
     pub builds: AtomicUsize,
     batches: Mutex<HashMap<(String, Stage), BatchCell>>,
 }
@@ -259,7 +259,7 @@ impl Harness {
     }
 
     /// Whether a `Failed` response ends the process, so the next case needs a new one (CUDA: a
-    /// device error is sticky, SPEC §7.3).
+    /// device error is sticky, crate README, "Rules and contracts, Processes").
     pub fn restart_after_failure(&self) -> bool {
         self.lang == Lang::Cuda
     }
@@ -323,7 +323,7 @@ impl Harness {
     }
 
     /// Builds the tests as one crate; if that fails, builds each alone (in parallel, separately
-    /// cached). The batch failure itself isn't reported, only the attributed ones (SPEC §7.2).
+    /// cached). The batch failure itself isn't reported, only the attributed ones (crate README, "Rules and contracts, Batches").
     pub fn build_tests(&self, records: &str, tests: &[TestSource]) -> HashMap<String, Artifact> {
         let refs: Vec<&TestSource> = tests.iter().collect();
         match self.build(records, &refs) {
@@ -586,7 +586,7 @@ impl Harness {
     }
 }
 
-/// Cache key of a set of tests, for the invalidation check of SPEC §12.
+/// Cache key of a set of tests, for the invalidation check of crate README, "The harness checks itself"
 pub fn cache_key(
     version: &str,
     runtime: &[(&str, &str)],

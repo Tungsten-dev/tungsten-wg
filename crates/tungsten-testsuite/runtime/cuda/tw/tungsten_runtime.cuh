@@ -1,5 +1,5 @@
-// Test runtime for generated CUDA code (SPEC §5.2): vector operators, `tw::Array`, `Config`,
-// `PositionIterator`, saturating casts, the toy tables (SPEC §5.3) and the records generated from
+// Test runtime for generated CUDA code (crate README, "Things worth knowing"): vector operators, `tw::Array`, `Config`,
+// `PositionIterator`, saturating casts, the toy tables (crate README, "Rules and contracts, Toy tables") and the records generated from
 // `registry.toml` (`records.cuh`). The registry externs are in `profile_exact.cuh`.
 //
 // Everything is `__host__ __device__` and header-only, so the host driver can compute goldens with
@@ -156,7 +156,7 @@ TW_HD PositionIterator make_position(const Config& c, int3 local) {
 }
 TW_HD int index(PositionIterator p) { return p.idx; }
 
-// ---- toy tables (SPEC §5.3) -----------------------------------------------------------------
+// ---- toy tables (crate README, "Rules and contracts, Toy tables") -----------------------------------------------------------------
 TW_HD unsigned long long splitmix64(unsigned long long x) {
     unsigned long long z = x + 0x9E3779B97F4A7C15ULL;
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;

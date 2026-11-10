@@ -1,4 +1,4 @@
-//! Java driver generator and build inputs (SPEC §7.1, §7.2).
+//! Java driver generator and build inputs (crate README, "Rules and contracts, Batches").
 //!
 //! A batch is one source tree: the runtime from `runtime/java/`, one class per registry record in
 //! `tungsten.runtime`, and per test a package `t_<hash>` holding the backend output (`Gen`) and a

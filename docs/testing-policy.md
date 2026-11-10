@@ -30,7 +30,7 @@ the interpreter is proven not to crash or hang, but not yet proven to compute th
 | Checker and interpreter (`tungsten-core`) | Working, tested |
 | Proofs that the checker and interpreter can't go out of bounds, overflow or loop forever | Run by hand with `scripts/verify.sh` |
 | Proofs that the interpreter is correct, and that accepted programs can't get stuck | Not started |
-| Test harness, test corpus and backend comparison (`tungsten-testsuite`) | Working: Rust, Java and CUDA are compared with the interpreter on the corpus (see [SPEC.md](../SPEC.md)) |
+| Test harness, test corpus and backend comparison (`tungsten-testsuite`) | Working: Rust, Java and CUDA are compared with the interpreter on the corpus (see [its README](../crates/tungsten-testsuite/README.md)) |
 | Random program testing against backends | Out of scope for now |
 | Backends following the required semantics | Mostly not yet: Rust and Java carry `@knownfail` notes for the gaps (see [PAPER.md](../PAPER.md)). CUDA has one |
 | CI | Deferred; a workflow was written and then removed on purpose. Tests and proofs only run locally |
@@ -247,7 +247,7 @@ covering its edge cases, not just the normal path.
 | Document | Covers |
 | --- | --- |
 | [TESTING.md](../TESTING.md) | The normative rules: semantics, typing, harness and test levels |
-| [SPEC.md](../SPEC.md) | The detailed design of `tungsten-testsuite` |
+| [`crates/tungsten-testsuite/README.md`](../crates/tungsten-testsuite/README.md) | The design of `tungsten-testsuite` |
 | [`crates/tungsten-core/SEMANTICS.md`](../crates/tungsten-core/SEMANTICS.md) | What a core program means |
 | [`crates/tungsten-core/VERUS.md`](../crates/tungsten-core/VERUS.md) | What's proven today, and how to run it |
 | [`crates/tungsten-check/README.md`](../crates/tungsten-check/README.md) | The lowering, and what it deliberately doesn't do |

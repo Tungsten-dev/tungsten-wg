@@ -1,4 +1,4 @@
-//! Wire format between the harness and a generated driver (SPEC §7.4).
+//! Wire format between the harness and a generated driver (crate README, "Rules and contracts, Protocol").
 //!
 //! Little-endian. A request is `origin:[u64;3] param* host*`. A response is `0x00 value*` or
 //! `0x01 kind:u8 len:u32 utf8[len]`. Values are positional and typed by the program, with no tags.
@@ -197,7 +197,7 @@ impl TestIo {
         Ok(TestIo { params, hosts, entries })
     }
 
-    /// Entries that return tables can't be encoded (SPEC §3.3).
+    /// Entries that return tables can't be encoded (crate README, "Rules and contracts").
     pub fn check_encodable(&self) -> Result<(), String> {
         for (i, e) in self.entries.iter().enumerate() {
             if has_table_type(&e.ty) {
@@ -365,7 +365,7 @@ mod tests {
         b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join("")
     }
 
-    /// Golden bytes, shared with the Java driver in milestone 3 (`tests/golden/protocol.txt`).
+    /// Golden bytes, shared with the Java and CUDA drivers (`tests/golden/protocol.txt`).
     #[test]
     fn golden_bytes() {
         let env = TestEnv::new();
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(cells[1][1], Value::Pos3(I32x3 { x: -1, y: 0, z: 7 }));
     }
 
-    /// An entry returning a table can't be encoded: a test error on every backend (SPEC §3.3).
+    /// An entry returning a table can't be encoded: a test error on every backend (crate README, "Rules and contracts").
     #[test]
     fn table_entries_are_a_test_error() {
         let env = TestEnv::new();

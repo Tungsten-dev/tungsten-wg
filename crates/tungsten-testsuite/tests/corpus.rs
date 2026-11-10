@@ -1,6 +1,6 @@
 //! L3 and L5 on the interpreter: `::load`, `::interp`, `::inline` for every corpus file, plus the
-//! selection and runtime self-checks, and the Rust backend trials `::rust::original` and
-//! `::rust::inlined` (milestone 2).
+//! selection and runtime self-checks, and the backend trials `::<backend>::original` and
+//! `::<backend>::inlined`.
 
 mod selftest;
 
