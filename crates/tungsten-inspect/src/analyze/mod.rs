@@ -587,6 +587,7 @@ pub(crate) fn expr_children(e: &Expression) -> Vec<&Expression> {
         | Expression::Long(_)
         | Expression::Bool(_)
         | Expression::PermutationTable(_)
+        | Expression::Ambient(_)
         | Expression::HostInput(_) => vec![],
     }
 }

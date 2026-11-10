@@ -1,0 +1,20 @@
+// Two entries in one program, with different dimensions and result types.
+program {
+    fn one() -> i32 {
+        return 7;
+    }
+    fn two() -> f64 {
+        return (ambient(pos3).x as f64);
+    }
+    unit a {
+        main one;
+    }
+    unit b {
+        main two;
+    }
+    entry a @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" a[0, 0, 0] = 7
+@expect "c" b = [0.0, 1.0, 2.0]

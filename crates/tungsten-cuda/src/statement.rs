@@ -1,5 +1,5 @@
 /*
-Statement conversion from the optimized IR to CUDA C++ (SPEC.md §8). One IR statement becomes one
+Statement conversion from the optimized IR to CUDA C++. One IR statement becomes one
 C++ statement: `Ref` temporaries are materialized inside expressions, so nothing is hoisted.
 */
 

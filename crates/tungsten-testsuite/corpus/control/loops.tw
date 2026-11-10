@@ -1,0 +1,65 @@
+// Break leaves the innermost loop, return leaves the function, Repeat 0, consts referencing consts.
+program {
+    const a = 3;
+    const b = (const(a) * 2);
+    const c = (const(b) + const(a));
+
+    fn nested_break() -> i32 {
+        let acc: i32 = 0;
+        let i: i32 = 0;
+        repeat 3 {
+            while true {
+                acc = (acc + 1);
+                break;
+            }
+            i = (i + 1);
+            if (i == 2) {
+                break;
+            }
+        }
+        return ((acc * 10) + i);
+    }
+
+    fn nested_return() -> i32 {
+        let n: i32 = 0;
+        repeat 5 {
+            repeat 5 {
+                n = (n + 1);
+                if (n == 7) {
+                    return (n * 100);
+                }
+            }
+        }
+        return -1;
+    }
+
+    fn zero_repeat() -> i32 {
+        let n: i32 = 5;
+        repeat 0 {
+            n = 1;
+        }
+        return n;
+    }
+
+    fn sum_to_ten() -> i32 {
+        let i: i32 = 0;
+        let s: i32 = 0;
+        while (i < 10) {
+            s = (s + i);
+            i = (i + 1);
+        }
+        return s;
+    }
+
+    fn run() -> [i32; 5] {
+        return [nested_break(), nested_return(), zero_repeat(), sum_to_ten(), const(c)];
+    }
+    unit u {
+        main run;
+        helpers [nested_break, nested_return, zero_repeat, sum_to_ten];
+        consts [a, b, c];
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [22, 700, 5, 45, 9]

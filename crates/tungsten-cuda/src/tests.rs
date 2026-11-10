@@ -48,7 +48,7 @@ fn build_program<'m>(arena: &'m Bump) -> SPMT<'m> {
     scalar.host_inputs = vec![HostInput::Static(sea)];
     let scalar: DensityFunctionRef = Interned::new(arena.alloc(scalar));
 
-    // A 4x4x4 noise unit: constants (one depending on another), permutation table, pos3 binding.
+    // A 4x4x4 noise unit: constants (one depending on another), permutation table, an ambient read.
     let n = Builder::new(arena).named("minecraft:noise").returns(VariableType::F64);
     let base = n.constant("base", VariableType::F64, 0.25f64);
     let scale = n.constant("scale", VariableType::F64, Expression::Variable(base) * 2.0f64);
@@ -187,11 +187,8 @@ fn generates_cuda_for_small_program() {
         "constexpr double base = 0.25;",
         "constexpr double scale = base * 2.0;",
         "__device__ constexpr tw::Array<double, 3> points = tw::Array<double, 3>{{-1.0, 0.0, TW_NAN_F64}};",
-        // value-initialized locals and default bindings
+        // value-initialized locals
         "double acc{};",
-        "int3 pos3 = p.pos;",
-        // `origin` is reserved (a kernel parameter), so the local is renamed
-        "double3 origin_1 = ctx.config.origin;",
         "for (int repeat_counter = 0; repeat_counter < 3; ++repeat_counter) {",
         // Java integer semantics
         "k = (int)((unsigned)ctx.host_consts->sea_level << 1);",
@@ -200,7 +197,7 @@ fn generates_cuda_for_small_program() {
         ">> (k & 31)",
         "(long long)((unsigned long long)tw::f2i64(v) * (unsigned long long)(-5LL))",
         // externs, samplers, refs
-        "tw::sample(&ctx.auto_constants->minecraft_temperature_0_, pos3.x)",
+        "tw::sample(&ctx.auto_constants->minecraft_temperature_0_, p.pos.x)",
         "tw::nudge(&v, &tw::lval(v * 2.0))",
         // buffers and array access
         "tw::buffer<double>(ctx.buffers, BufferLayout::minecraft_noise_d4x4x4_output)[tw::index(p)]",
@@ -372,4 +369,46 @@ fn bytes() {
         "tw::buffer<signed char>(buffers, BufferLayout::minecraft_bytes_d4x4x4_output)",
     ]);
     assert_contains("orchestration.h", &output.public_header, &["const signed char* result_minecraft_bytes() const;"]);
+}
+
+/// A unit reading all four default variables, which lower to ambient reads.
+fn build_ambient_program<'m>(arena: &'m Bump) -> SPMT<'m> {
+    let mut b = Builder::new(arena).named("minecraft:ambients").returns(VariableType::F64);
+    let field = |name: &str, t: VariableType, f: &str, field_t: VariableType| Expression::Field {
+        base: Box::new(var(b.alloc_var(Name::Named(name.into()), t))),
+        field: f.into(),
+        type_of_field: field_t,
+        known_idnex: None,
+    };
+    let body = vec![Statement::Return(
+        field("origin", VariableType::Vec3, "x", VariableType::F64)
+            * field("origin_scale", VariableType::Vec3, "x", VariableType::F64)
+            + field("pos3", VariableType::Pos3, "x", VariableType::I32).cast(VariableType::F64)
+                * field("position_scale", VariableType::Vec3, "x", VariableType::F64),
+    )];
+    b.set_body(body);
+    let unit = b.finish_compute_unit();
+    SPMT {
+        density_functions: vec![unit],
+        functions: vec![],
+        main_density_functions: vec![MainDensityFunction {
+            density_function: unit,
+            dimensions: (4, 4, 4),
+            scaled_origin: (1.0, 1.0, 1.0),
+            scaled_position: (1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+#[test]
+fn ambients() {
+    let arena = Bump::new();
+    let output = generate(&build_ambient_program(&arena), CudaConfig::default());
+    assert_contains("density.cu", &output.density_source, &[
+        "ctx.config.origin.x",
+        "ctx.config.origin_scale.x",
+        "ctx.config.position_scale.x",
+        "p.pos.x",
+    ]);
+    assert!(!output.density_source.contains("double3 origin_1"), "{}", output.density_source);
 }

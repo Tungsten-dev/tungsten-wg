@@ -16,7 +16,7 @@ use super::{
 use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{Instance, Interface};
 use crate::model as java;
-use tungsten_ir::model::{Name, VariableType};
+use tungsten_ir::model::VariableType;
 use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
@@ -32,21 +32,8 @@ pub struct Converted {
     pub constants: Vec<Ref<Constant>>,
 }
 
-/// Variables the prologue binds from `p` and `config` instead of declaring bare.
-fn default_binding(name: &Name) -> Option<java::Expression> {
-    let Name::Named(n) = name else { return None };
-    let config_field = |f: &str| J::field(J::name(PARAM_CONFIG), f);
-    match n.as_str() {
-        "origin" => Some(config_field("origin")),
-        "origin_scale" => Some(config_field("origin_scale")),
-        "position_scale" => Some(config_field("position_scale")),
-        "pos3" => Some(J::field(J::name(PARAM_POS), "pos")),
-        _ => None,
-    }
-}
-
-/// Declares every local at the top of the function: default bindings get their value, everything
-/// else is declared bare. Initializing those is the frontend's job (javac reports violations).
+/// Declares every local bare at the top of the function. Initializing them is the frontend's job
+/// (javac reports violations).
 fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java::Statement> {
     let mut out = Vec::new();
     for (r, var) in func.variables.iter() {
@@ -57,7 +44,7 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java
         out.push(java::Statement::Declare {
             t: convert_type(&var.t),
             name,
-            init: default_binding(&var.name),
+            init: None,
             is_final: false,
         });
     }

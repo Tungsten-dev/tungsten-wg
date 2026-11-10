@@ -133,7 +133,7 @@ pub const JAVA_RESERVED: &[&str] = &[
 ];
 
 /// C++20 keywords and alternative tokens, CUDA built-ins used unqualified, and names the generated
-/// CUDA files declare or use (see the CUDA SPEC.md §4.1).
+/// CUDA files declare or use.
 pub const CUDA_RESERVED: &[&str] = &[
     // C++20 keywords
     "alignas", "alignof", "asm", "auto", "bool", "break", "case", "catch", "char", "char8_t",
@@ -268,6 +268,41 @@ pub fn unique(used: &mut HashSet<String>, base: String) -> String {
     }
 }
 
+/// Names of the entry methods of the orchestration type, one per entry point in order:
+/// `orchestrate_<unit>`, made unique against `used` (which each backend seeds with the names
+/// already taken in that type, such as the constructor) and against each other.
+pub fn entry_method_names(
+    program: &OptimizedProgram,
+    rules: &NamingRules,
+    mut used: HashSet<String>,
+) -> Vec<String> {
+    program
+        .entry_points
+        .iter()
+        .map(|entry| {
+            unique(
+                &mut used,
+                format!("orchestrate_{}", unit_base_name(rules, program, entry.density_function)),
+            )
+        })
+        .collect()
+}
+
+/// Base names of the entries of a CUDA-style orchestration class, one per entry point in order:
+/// the unit's base name made unique against `used` (which the backend seeds with the member names
+/// already taken) and against each other. `enqueue_<base>` and `result_<base>` derive from it.
+pub fn entry_base_names(
+    program: &OptimizedProgram,
+    rules: &NamingRules,
+    mut used: HashSet<String>,
+) -> Vec<String> {
+    program
+        .entry_points
+        .iter()
+        .map(|entry| unique(&mut used, unit_base_name(rules, program, entry.density_function)))
+        .collect()
+}
+
 /// Field name of a permutation table in `AutoConsts`.
 pub fn auto_const_field_name(rules: &NamingRules, table: &PermutationTableInput) -> String {
     match table {
@@ -309,7 +344,16 @@ pub fn unit_base_name(
 
 #[cfg(test)]
 mod tests {
-    use super::cuda_sanitize;
+    use super::{cuda_sanitize, unique};
+    use std::collections::HashSet;
+
+    #[test]
+    fn unique_suffixes_collisions() {
+        let mut used = HashSet::from(["new".to_string()]);
+        assert_eq!(unique(&mut used, "new".into()), "new_1");
+        assert_eq!(unique(&mut used, "new".into()), "new_2");
+        assert_eq!(unique(&mut used, "a".into()), "a");
+    }
 
     #[test]
     fn cuda_sanitize_rules() {

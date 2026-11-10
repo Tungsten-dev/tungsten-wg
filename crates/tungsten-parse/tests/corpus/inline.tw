@@ -1,0 +1,17 @@
+// A leaf unit read through a density input: the inliner can merge it into the root.
+program {
+    fn leaf_fn(x: f64) -> f64 {
+        return (x + 1.0);
+    }
+    fn root_fn() -> f64 {
+        vars { v: f64 }
+        v = density(root.d);
+        return (v * 2.0);
+    }
+    unit leaf { main leaf_fn; }
+    unit root {
+        main root_fn;
+        input d = leaf @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+    entry root @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}

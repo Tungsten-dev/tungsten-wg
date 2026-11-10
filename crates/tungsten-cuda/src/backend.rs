@@ -4,7 +4,7 @@ use tungsten_ir::model::OptimizedProgram;
 
 use crate::{CudaCodegen, TransformCudaOrchestration};
 
-/// Numeric profile, fixed at generation time (SPEC.md §14).
+/// Numeric profile, fixed at generation time (see Profiles in `README.md`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Profile {
     /// Bitwise equal to the Rust output; ports of the Rust runtime's math, `--fmad=false`.
@@ -86,7 +86,7 @@ pub struct CudaConfig {
     pub block_size: u32,
     /// Pinned staging slots for `HostConsts` uploads (at least 1).
     pub host_consts_ring: u32,
-    /// Emit bounds and division checks (SPEC.md §13).
+    /// Emit bounds and division checks (`TW_CHECK_INDEX` / `TW_CHECK_DIV`).
     pub debug_checks: bool,
     pub inline_policy: InlinePolicy,
 }

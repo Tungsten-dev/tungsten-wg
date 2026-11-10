@@ -1,0 +1,56 @@
+// A lenient program: lets, bare names, derived fields, unqualified density, implicit input vars.
+@fuel(1000)
+@tier(smoke)
+program {
+    host seed: i64;
+    host scale: f64;
+    table noise = perlin("minecraft:noise", none, 0);
+    table b3 = base3d;
+    const two = 2.0;
+    const four = (const(two) * two);
+
+    fn leaf(x: f64) -> f64 {
+        return (x * const(four));
+    }
+
+    fn helper(a: f64, b: f64) -> f64 @hosts(scale) {
+        vars { r: f64 }
+        let t: f64 = (a + b);
+        if (t < 0.0) {
+            r = -t;
+        } else if (t > 1.0) {
+            r = 1.0;
+        } else {
+            r = t;
+        }
+        return (r * host(scale));
+    }
+
+    fn root() -> f64 {
+        let acc: f64 = 0.0;
+        let i: i32;
+        repeat 3 {
+            acc = (acc + helper(density(inner), 0.5));
+        }
+        while (acc > 100.0) {
+            acc = (acc / 2.0);
+            break;
+        }
+        let p: vec3 = ambient(origin);
+        let q: pos3 = ambient(pos3);
+        acc = (acc + p.x + (q.y as f64));
+        return acc;
+    }
+
+    unit leaf_u { main leaf; consts [two, four]; }
+    unit root_u {
+        main root;
+        helpers [helper];
+        hosts [scale];
+        input inner = leaf_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
+    }
+    entry top = root_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c1" origin(0, 0, 0) seed(7) host(seed = 5L, scale = 2)
+@expect "c1" top[0, 0, 0] = 1.5
+@expect "c1" top[1, 0, 0] = nan

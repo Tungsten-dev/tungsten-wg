@@ -1,0 +1,649 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                3,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [
+                FnId(
+                    0,
+                ),
+                FnId(
+                    1,
+                ),
+                FnId(
+                    2,
+                ),
+            ],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 3,
+            locals: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Local(
+                            LocalId(
+                                0,
+                            ),
+                        ),
+                        right: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    2,
+                                ),
+                            ),
+                            right: Binary {
+                                op: Subtract,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 3,
+            locals: [
+                F64,
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        3,
+                    ),
+                    value: Binary {
+                        op: Divide,
+                        left: Binary {
+                            op: Subtract,
+                            left: Local(
+                                LocalId(
+                                    2,
+                                ),
+                            ),
+                            right: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Subtract,
+                            left: Local(
+                                LocalId(
+                                    1,
+                                ),
+                            ),
+                            right: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                        },
+                    },
+                },
+                If {
+                    cond: Binary {
+                        op: Less,
+                        left: Local(
+                            LocalId(
+                                3,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                0,
+                            ),
+                        ),
+                    },
+                    then_branch: [
+                        Assign {
+                            target: LocalId(
+                                3,
+                            ),
+                            value: Lit(
+                                F64(
+                                    0,
+                                ),
+                            ),
+                        },
+                    ],
+                    else_branch: [],
+                },
+                If {
+                    cond: Binary {
+                        op: Greater,
+                        left: Local(
+                            LocalId(
+                                3,
+                            ),
+                        ),
+                        right: Lit(
+                            F64(
+                                4607182418800017408,
+                            ),
+                        ),
+                    },
+                    then_branch: [
+                        Assign {
+                            target: LocalId(
+                                3,
+                            ),
+                            value: Lit(
+                                F64(
+                                    4607182418800017408,
+                                ),
+                            ),
+                        },
+                    ],
+                    else_branch: [],
+                },
+                Return(
+                    Binary {
+                        op: Multiply,
+                        left: Binary {
+                            op: Multiply,
+                            left: Local(
+                                LocalId(
+                                    3,
+                                ),
+                            ),
+                            right: Local(
+                                LocalId(
+                                    3,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Subtract,
+                            left: Lit(
+                                F64(
+                                    4613937818241073152,
+                                ),
+                            ),
+                            right: Binary {
+                                op: Multiply,
+                                left: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        3,
+                                    ),
+                                ),
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 5,
+            locals: [
+                I32,
+                I32,
+                I32,
+                I32,
+                I32,
+            ],
+            ret: I32,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Add,
+                            left: Local(
+                                LocalId(
+                                    0,
+                                ),
+                            ),
+                            right: Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        3,
+                                    ),
+                                ),
+                            },
+                        },
+                        right: Binary {
+                            op: Multiply,
+                            left: Binary {
+                                op: Multiply,
+                                left: Local(
+                                    LocalId(
+                                        2,
+                                    ),
+                                ),
+                                right: Local(
+                                    LocalId(
+                                        3,
+                                    ),
+                                ),
+                            },
+                            right: Local(
+                                LocalId(
+                                    4,
+                                ),
+                            ),
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Array(
+                F64,
+                5,
+            ),
+            hosts: [],
+            body: [
+                Return(
+                    ArrayLit(
+                        [
+                            Call {
+                                func: FnId(
+                                    0,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4621819117588971520,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4598175219545276416,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    1,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4602678819172646912,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    1,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4611686018427387904,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Call {
+                                func: FnId(
+                                    1,
+                                ),
+                                args: [
+                                    Lit(
+                                        F64(
+                                            0,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            4607182418800017408,
+                                        ),
+                                    ),
+                                    Lit(
+                                        F64(
+                                            13830554455654793216,
+                                        ),
+                                    ),
+                                ],
+                            },
+                            Cast {
+                                to: F64,
+                                operand: Call {
+                                    func: FnId(
+                                        2,
+                                    ),
+                                    args: [
+                                        Lit(
+                                            I32(
+                                                1,
+                                            ),
+                                        ),
+                                        Lit(
+                                            I32(
+                                                2,
+                                            ),
+                                        ),
+                                        Lit(
+                                            I32(
+                                                3,
+                                            ),
+                                        ),
+                                        Lit(
+                                            I32(
+                                                4,
+                                            ),
+                                        ),
+                                        Lit(
+                                            I32(
+                                                5,
+                                            ),
+                                        ),
+                                    ],
+                                },
+                            },
+                        ],
+                    ),
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [],
+    tables: [],
+    inputs: [],
+    entries: [
+        Entry {
+            unit: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 1,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                PermTable,
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Sampler,
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

@@ -1,0 +1,21 @@
+// Two inputs of one unit differing only in position_scale must not share a buffer.
+program {
+    fn base_main() -> f64 {
+        return ((ambient(pos3).x as f64) * ambient(position_scale).x);
+    }
+    unit base {
+        main base_main;
+    }
+
+    fn top_main() -> f64 {
+        return (density(a) + density(b));
+    }
+    unit top {
+        main top_main;
+        input a = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        input b = base @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
+    }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" top = [0.0, 1.5]

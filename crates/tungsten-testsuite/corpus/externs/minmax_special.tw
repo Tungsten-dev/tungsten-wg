@@ -1,0 +1,13 @@
+// min and max follow Java: -0.0 < 0.0 and NaN wins.
+program {
+    fn run() -> [f64; 6] {
+        return [ext min(0.0, -0.0), ext min(-0.0, 0.0), ext max(-0.0, 0.0), ext max(0.0, -0.0),
+                ext min(nan, 1.0), ext max(1.0, nan)];
+    }
+    unit u {
+        main run;
+    }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) seed(1)
+@expect "c" u[0, 0, 0] = [-0.0, -0.0, 0.0, 0.0, nan, nan]

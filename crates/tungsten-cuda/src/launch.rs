@@ -2,7 +2,7 @@
 Launch shape of an instance's kernel: a 1D grid of `ceil(N / B)` blocks, so no lanes are padded
 away on narrow dimensions; the wrapper decodes the linear id back into `(x, y, z)`. Deterministic,
 so the device side (`__launch_bounds__`) and the host side (`<<<blocks, threads>>>`) compute the
-same shape. Keep this and the kernel body signature stable: wave fusion (SPEC.md §9.4) builds on
+same shape. Keep this and the kernel body signature stable: wave fusion (see `README.md`) builds on
 both.
 */
 
