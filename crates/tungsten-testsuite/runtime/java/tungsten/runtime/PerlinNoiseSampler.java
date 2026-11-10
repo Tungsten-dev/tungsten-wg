@@ -1,6 +1,6 @@
 package tungsten.runtime;
 
-/** Toy permutation table (SPEC 5.3); mirrors runtime/rust/utilsf64.rs. */
+/** Toy permutation table (crate README, "Toy tables"); mirrors runtime/rust/utilsf64.rs. */
 public final class PerlinNoiseSampler {
     public final byte[] perm;
 

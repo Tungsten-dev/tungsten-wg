@@ -1,6 +1,6 @@
 package tungsten.runtime;
 
-/** Toy sampler (SPEC 5.3); mirrors runtime/rust/utilsf64.rs. */
+/** Toy sampler (crate README, "Rules and contracts, Toy tables"); mirrors runtime/rust/utilsf64.rs. */
 public final class InterpolatedNoiseSampler {
     public final long state;
 

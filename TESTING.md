@@ -2,10 +2,9 @@
 
 Status: partly implemented. `tungsten-parse`, `tungsten-core` (checker and interpreter, no
 functional proofs yet), `tungsten-check` and `tungsten-testsuite` exist. The testsuite does
-differential testing against Rust, Java and CUDA (milestones 1 to 3 and 5; per-milestone notes in
-`SPEC.md`). Backend conformance is still open (§4 item 4) and is tracked through `@knownfail`. The CI
+differential testing against Rust, Java and CUDA (its README has the design). Backend conformance is still open (§4 item 4) and is tracked through `@knownfail`. The CI
 workflow is deferred (§12). Per-item status is marked in §3 and §4. The design of
-`tungsten-testsuite` is in `SPEC.md` at the repo root; this file reflects its decisions.
+`tungsten-testsuite` is in `crates/tungsten-testsuite/README.md`; this file reflects its decisions.
 
 ## 1. Summary
 
@@ -83,7 +82,7 @@ crates/tungsten-check/         # plain Rust, unverified
   src/lower/          # OptimizedProgram -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
-crates/tungsten-testsuite/     # Rust, Java and CUDA differential done; full layout in SPEC.md §2
+crates/tungsten-testsuite/     # Rust, Java and CUDA differential done; layout in its README
   src/harness/        # batches and cache, protocol, processes, driver generators
   src/registry.rs     # registry.toml loader
   src/env.rs          # tungsten_parse::Env + tungsten_check::Registry
@@ -446,7 +445,7 @@ pass that makes each `If`/`While` condition call a trace extern, so verified cod
   the name strings. A Perlin table folds splitmix64 over `(seed, id_lo, id_hi, subident_index,
   sub_lo, sub_hi)`, with the ids from `xoroshiro_seed`; a Base3D table is `splitmix64(seed)`, so all
   Base3D tables of one seed are identical. `perm_get` reads `perm[i & 255]` and has no domain error.
-  Full definition in `SPEC.md` §5.3. Each language has an identical implementation.
+  Full definition in the testsuite README ("Toy tables"). Each language has an identical implementation.
 - **Extern types**: declared records with typed fields, with definitions generated per language
   from `registry.toml`. `ConstructExtern`/`Field` work on them structurally.
 - **Prelude** (`prelude.tw`): `sin`, `cos`, `exp`, `log`, `pow`, `lerp`, `smoothstep`,

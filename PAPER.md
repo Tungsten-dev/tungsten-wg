@@ -146,7 +146,7 @@ Kinds: `bug` (backend/optimizer/interface bug), `design` (decision with a ration
 - 2026-11-01 [design] The harness scores a build failure as a failure even for cases where the interpreter
   errors, so a genuine compile bug cannot hide in an error-only test; the cost is that a failing `const`
   needs a `@knownfail` (previous entry). A `@knownfail` also covers every case in its scope, so files are
-  kept to one concern each. Evidence: `SPEC.md` §6.3, §6.4.
+  kept to one concern each. Evidence: `crates/tungsten-testsuite/README.md`, "Rules and contracts".
 - 2026-11-01 [limitation] The verified runtime in the sister project (`tungsten-frontends/tungsten-mc`,
   `src/utilsf64.rs`) implements `make_boxed` with `Box::new_uninit().assume_init()`, so `InternalBuffers`
   and `AutoConsts` start with uninitialised contents (undefined behaviour for `bool` cells, and

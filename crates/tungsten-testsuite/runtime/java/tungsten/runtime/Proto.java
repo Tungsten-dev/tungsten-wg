@@ -5,7 +5,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
-/** Driver side of the wire protocol (SPEC 7.4) and the request loop; mirrors runtime/rust/proto.rs. */
+/** Driver side of the wire protocol (crate README, "Rules and contracts, Protocol") and the request loop; mirrors runtime/rust/proto.rs. */
 public final class Proto {
     private Proto() {}
 
@@ -58,7 +58,7 @@ public final class Proto {
     }
 
     // A failing constant initialiser surfaces as ExceptionInInitializerError once, then as
-    // NoClassDefFoundError on every later use (SPEC 7.3). Both report the original failure.
+    // NoClassDefFoundError on every later use (crate README, "Rules and contracts, Processes"). Both report the original failure.
     private static Throwable initFailure;
 
     static Throwable unwrap(Throwable t) {

@@ -1,4 +1,4 @@
-// Registry externs for the exact profile (SPEC §5.1): bitwise equal to the Rust runtime when built
+// Registry externs for the exact profile (crate README, "Things worth knowing"): bitwise equal to the Rust runtime when built
 // with --fmad=false --prec-div=true --prec-sqrt=true --ftz=false. Semantics of `min`/`max` and the
 // bit conversions are Java's, as in runtime/rust/externs.rs.
 #pragma once
@@ -76,7 +76,7 @@ TW_X double sampler_sample(const InterpolatedNoiseSampler* s, double3 v) {
 }
 
 /// Fails for negative input. A device trap ends the process (sticky error), so the driver cannot
-/// recover the case; error cases are never run on CUDA (SPEC §6.3), and this is a safety net.
+/// recover the case; error cases are never run on CUDA (crate README, "Rules and contracts"), and this is a safety net.
 TW_X int test_domain(int x) {
 #ifdef __CUDA_ARCH__
     if (x < 0) __trap();

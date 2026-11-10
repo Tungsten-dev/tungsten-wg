@@ -1,5 +1,5 @@
 //! `tungsten_check::Externs` over the shared runtime in `runtime/rust/`, plus the per-case toy
-//! tables (SPEC §5.3).
+//! tables (crate README, "Rules and contracts, Toy tables").
 
 use tungsten_check::{ExternFail, Externs, LowerMap, Value};
 use tungsten_core::{ExternId, F64x3};
@@ -190,7 +190,7 @@ mod tests {
 mod golden {
     use super::rt_utils::*;
 
-    /// Toy-table golden values for fixed seeds (SPEC §5.3, §12). Any port must reproduce these.
+    /// Toy-table golden values for fixed seeds (crate README, "Rules and contracts, Toy tables"). Any port must reproduce these.
     /// Cross-checked against an independent Python implementation of the definitions.
     #[test]
     fn toy_tables() {
