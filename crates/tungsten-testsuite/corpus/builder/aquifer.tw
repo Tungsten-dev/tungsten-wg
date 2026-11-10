@@ -40,7 +40,7 @@ program {
 
     entry aquifer_random @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "wet" origin(0, 0, 0) seed(1) host(start_y = 5, splitter = new Pair { a: 1.5, b: 2 })
+@case "wet" origin(0, 0, 0) host(start_y = 5, splitter = new Pair { a: 1.5, b: 2 })
 @expect "wet" aquifer_random = [-451L]
-@case "dry" origin(0, 0, 0) seed(1) host(start_y = 5, splitter = new Pair { a: 0.5, b: 2 })
+@case "dry" origin(0, 0, 0) host(start_y = 5, splitter = new Pair { a: 0.5, b: 2 })
 @expect "dry" aquifer_random = [-452L]

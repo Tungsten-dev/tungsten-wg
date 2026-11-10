@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use tungsten_ir::model::{
-    ComputeUnit, Constant, Expression, Function, HostInput, PermutationTableInput, Ref,
+    ComputeUnit, Constant, Expression, Function, HostInput, AutoConst, Ref,
 };
 
 use super::graph::named_displays;
@@ -113,12 +113,12 @@ pub(crate) fn resources(
     // Declared uses per unit, plus helpers' (and main functions') host inputs attributed to
     // their units.
     let mut const_users: HashMap<Ref<Constant>, Vec<Ref<ComputeUnit>>> = HashMap::new();
-    let mut table_users: HashMap<Ref<PermutationTableInput>, Vec<Ref<ComputeUnit>>> =
+    let mut table_users: HashMap<Ref<AutoConst>, Vec<Ref<ComputeUnit>>> =
         HashMap::new();
     let mut host_users: HashMap<Ref<HostInput>, Vec<Ref<ComputeUnit>>> = HashMap::new();
     for (r, cu) in ctx.program.compute_units.iter() {
         let ComputeUnit::DensityFunction {
-            permutation_table_inputs,
+            auto_consts,
             host_inputs,
             constants,
             ..
@@ -126,7 +126,7 @@ pub(crate) fn resources(
         constants
             .iter()
             .for_each(|c| const_users.entry(*c).or_default().push(r));
-        permutation_table_inputs
+        auto_consts
             .iter()
             .for_each(|t| table_users.entry(*t).or_default().push(r));
         host_inputs
@@ -174,7 +174,7 @@ pub(crate) fn resources(
 
     let mut tables: Vec<TableInfo> = ctx
         .program
-        .permutation_tables
+        .auto_consts
         .iter()
         .map(|(r, _)| TableInfo {
             id: ctx.tables[&r].id.clone(),
@@ -267,7 +267,7 @@ pub(crate) fn resources(
 /// constants closed under their dependencies.
 struct Reachable {
     constants: HashSet<Ref<Constant>>,
-    tables: HashSet<Ref<PermutationTableInput>>,
+    tables: HashSet<Ref<AutoConst>>,
     host_inputs: HashSet<Ref<HostInput>>,
 }
 
@@ -283,13 +283,13 @@ impl Reachable {
                 continue;
             }
             let ComputeUnit::DensityFunction {
-                permutation_table_inputs,
+                auto_consts,
                 host_inputs,
                 constants,
                 ..
             } = cu;
             r.constants.extend(constants);
-            r.tables.extend(permutation_table_inputs);
+            r.tables.extend(auto_consts);
             r.host_inputs.extend(host_inputs);
         }
         for f in &ctx.reachable_functions {
@@ -299,7 +299,7 @@ impl Reachable {
                 Expression::Constant(c) => {
                     r.constants.insert(*c);
                 }
-                Expression::PermutationTable(t) => {
+                Expression::AutoConst(t) => {
                     r.tables.insert(*t);
                 }
                 Expression::HostInput(h) => {

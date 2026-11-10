@@ -1,10 +1,9 @@
 //! `tungsten_check::Externs` over the shared runtime in `runtime/rust/`, plus the per-case toy
 //! tables (crate README, "Rules and contracts, Toy tables").
 
-use tungsten_check::{ExternFail, Externs, LowerMap, Value};
-use tungsten_core::{ExternId, F64x3};
-use tungsten_ir::PermutationTableInput;
-use tungsten_rust::random::xoroshiro_seed;
+use tungsten_check::{AutoCoreId, ExternFail, Externs, LowerMap, ResolvedAutoConst, Value};
+use tungsten_check::AutoArgValue::{Bool, F64, I64, Str};
+use tungsten_core::{ExternId, F64x3, HostId};
 
 #[path = "../runtime/rust/externs.rs"]
 pub mod rt_externs;
@@ -24,30 +23,68 @@ pub struct CaseExterns {
 }
 
 impl CaseExterns {
-    pub fn new(map: &LowerMap, seed: u64) -> Self {
-        let tables = map
-            .table_idents
-            .iter()
-            .map(|t| match t {
-                PermutationTableInput::PerlinNoise { ident, subident, subident_index } => {
-                    let id = xoroshiro_seed(ident);
-                    let sub = subident.as_deref().map(xoroshiro_seed).unwrap_or((0, 0));
-                    let st = rt_utils::perlin_state(
-                        seed,
-                        id.0 as i64,
-                        id.1 as i64,
-                        *subident_index as i64,
-                        sub.0 as i64,
-                        sub.1 as i64,
-                    );
-                    Table::Perm(Box::new(rt_utils::make_perm(st)))
+    /// Builds the toy runtime objects of every autoconst (`inits` are in arena order): handles go
+    /// into the externs, values come back for `NamedCase::auto_values`. The testsuite acts as a
+    /// small frontend: it knows what its own initializers mean.
+    pub fn new(map: &LowerMap, inits: &[ResolvedAutoConst]) -> Result<(Self, Vec<(HostId, Value)>), String> {
+        let mut tables: Vec<Option<Table>> = vec![];
+        let mut values = vec![];
+        for a in inits {
+            let bad = |what: &str| format!("autoconst `{}`: {what} for `{}`", a.name, a.initializer);
+            match (a.initializer, a.args.as_slice()) {
+                ("make_permutation_table", [I64(seed), I64(id_lo), I64(id_hi), I64(idx), I64(sub_lo), I64(sub_hi)]) => {
+                    let st = rt_utils::perlin_state(*seed as u64, *id_lo, *id_hi, *idx, *sub_lo, *sub_hi);
+                    Self::put_table(&mut tables, a, Table::Perm(Box::new(rt_utils::make_perm(st))))?;
                 }
-                PermutationTableInput::Base3DNoise => {
-                    Table::Sampler(rt_utils::base3d_state(seed))
+                ("make_base3d_perm_table", [I64(seed)]) => {
+                    Self::put_table(&mut tables, a, Table::Sampler(rt_utils::base3d_state(*seed as u64)))?;
                 }
-            })
-            .collect();
-        CaseExterns { names: map.externs.clone(), tables }
+                ("make_salt", [I64(seed), Str(name)]) => {
+                    values.push((Self::host(a)?, Value::I64(rt_utils::toy_salt(*seed, name))));
+                }
+                ("make_bits", [F64(x)]) => values.push((Self::host(a)?, Value::I64(x.to_bits() as i64))),
+                ("make_scale", [F64(base), Bool(flip)]) => {
+                    let v = if *flip { -*base } else { *base };
+                    values.push((Self::host(a)?, Value::F64(v.to_bits())));
+                }
+                ("make_flag", [Bool(on), I64(n)]) => {
+                    values.push((Self::host(a)?, Value::Bool(*on && *n > 0)));
+                }
+                ("make_i8", [I64(v)]) => values.push((Self::host(a)?, Value::I8(*v as i8))),
+                ("make_i32", [I64(v)]) => values.push((Self::host(a)?, Value::I32(*v as i32))),
+                ("make_f32", [F64(v)]) => values.push((Self::host(a)?, Value::F32((*v as f32).to_bits()))),
+                (name, args) => {
+                    return Err(format!(
+                        "unknown initializer `{name}` with {} arguments ({})",
+                        args.len(),
+                        bad("unexpected arguments")
+                    ));
+                }
+            }
+        }
+        let tables = tables
+            .into_iter()
+            .map(|t| t.ok_or_else(|| "a table has no initializer".to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((CaseExterns { names: map.externs.clone(), tables }, values))
+    }
+
+    fn put_table(tables: &mut Vec<Option<Table>>, a: &ResolvedAutoConst, table: Table) -> Result<(), String> {
+        let AutoCoreId::Table(id) = a.core else {
+            return Err(format!("autoconst `{}` is a value, but `{}` builds a handle", a.name, a.initializer));
+        };
+        if tables.len() <= id.0 {
+            tables.resize_with(id.0 + 1, || None);
+        }
+        tables[id.0] = Some(table);
+        Ok(())
+    }
+
+    fn host(a: &ResolvedAutoConst) -> Result<HostId, String> {
+        match a.core {
+            AutoCoreId::Host(h) => Ok(h),
+            AutoCoreId::Table(_) => Err(format!("autoconst `{}` is a handle, but `{}` builds a value", a.name, a.initializer)),
+        }
     }
 }
 
@@ -111,14 +148,14 @@ impl Externs for CaseExterns {
             "bits_to_double" => mk64(bits_to_double(i64v(&a[0]))),
             "test_domain" => Value::I32(test_domain(i32v(&a[0])).ok_or(ExternFail::Domain)?),
             "perm_get" => match &a[0] {
-                Value::PermTable(id) => match &self.tables[id.0] {
+                Value::Handle(id) => match &self.tables[id.0] {
                     Table::Perm(p) => Value::I32(rt_utils::perm_lookup(p, i32v(&a[1]))),
                     Table::Sampler(_) => panic!("perm_get on a sampler"),
                 },
                 v => panic!("perm_get: expected a perm table, got {v:?}"),
             },
             "sampler_sample" => match (&a[0], &a[1]) {
-                (Value::Sampler(id), Value::Vec3(F64x3 { x, y, z })) => match &self.tables[id.0] {
+                (Value::Handle(id), Value::Vec3(F64x3 { x, y, z })) => match &self.tables[id.0] {
                     Table::Sampler(st) => mk64(rt_utils::sample_state(
                         *st,
                         [f64::from_bits(*x), f64::from_bits(*y), f64::from_bits(*z)],

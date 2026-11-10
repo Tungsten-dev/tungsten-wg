@@ -64,7 +64,7 @@ impl<'a> Deriver<'a> {
             }
             Expression::ExternCall { return_type, .. } => return_type.clone(),
             Expression::DensityVariable(d, _) => return self.density_return(*d),
-            Expression::PermutationTable(_) => T::PermutationTable,
+            Expression::AutoConst(a) => self.p.auto_consts[*a].t.clone(),
             Expression::HostInput(h) => match &self.p.host_inputs[*h] {
                 HostInput::Static { t, .. } => t.clone(),
                 HostInput::Dynamic => return None,

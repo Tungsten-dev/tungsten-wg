@@ -1,8 +1,8 @@
-//! Extern and record declarations. `extern_fns!` and `record_decls!` produce them next to the
+//! Extern, record and auto initializer declarations. `extern_fns!` and `record_decls!` produce them next to the
 //! call functions, so each signature is written once. The facade's `registry_from` turns them
 //! into a `tungsten-check` registry.
 
-use tungsten_ir::VariableType;
+use tungsten_ir::{AutoArgType, VariableType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternDecl {
@@ -11,6 +11,14 @@ pub struct ExternDecl {
     pub ret: VariableType,
     /// The extern can fail on some inputs (`@domain_error`).
     pub domain_error: bool,
+}
+
+/// A runtime function that builds an autoconst once, when the orchestration is created.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoInitializerDecl {
+    pub name: String,
+    pub params: Vec<AutoArgType>,
+    pub ret: VariableType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +33,7 @@ pub struct RecordDecl {
 pub struct Decls {
     pub externs: Vec<ExternDecl>,
     pub records: Vec<RecordDecl>,
+    pub initializers: Vec<AutoInitializerDecl>,
 }
 
 impl Decls {
@@ -43,6 +52,11 @@ impl Decls {
         for r in other.records {
             if !self.records.contains(&r) {
                 self.records.push(r);
+            }
+        }
+        for i in other.initializers {
+            if !self.initializers.contains(&i) {
+                self.initializers.push(i);
             }
         }
     }

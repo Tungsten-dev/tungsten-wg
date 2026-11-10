@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref};
+use tungsten_ir::model::{AutoConst, ComputeUnit, HostInput, OptimizedProgram, Ref};
 
 /// Per-language naming: names that must never be generated, and how to make a legal identifier.
 /// Each backend builds its own [`super::Interface`] with its rules, so names may differ between backends.
@@ -98,8 +98,6 @@ pub const JAVA_RESERVED: &[&str] = &[
     "Pos3",
     "PositionIterator",
     "Helpers",
-    "PerlinNoiseSampler",
-    "InterpolatedNoiseSampler",
     "DoubleRef",
     "FloatRef",
     "IntRef",
@@ -156,7 +154,6 @@ pub const CUDA_RESERVED: &[&str] = &[
     // generated and runtime names
     "tw", "dev", "Ctx", "Config", "PositionIterator", "HostConsts", "DeviceHostConsts",
     "AutoConsts", "BufferLayout", "Orchestration", "Status", "Vec3", "Pos3", "Array", "Impl",
-    "PerlinNoiseSampler", "InterpolatedNoiseSampler",
     // uniform parameters and kernel locals
     "p", "ctx", "local", "origin", "buffers", "auto_constants", "host_consts", "r", "config",
 ];
@@ -246,11 +243,14 @@ pub fn cuda_sanitize(name: &str) -> String {
 
 /// Replaces characters that are not valid in generated identifiers.
 pub fn sanitize_name(name: &str) -> String {
-    name.replace(':', "_")
-        .replace('/', "_")
-        .replace('<', "_")
-        .replace('>', "_")
-        .replace('-', "_")
+    let mut s: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if s.is_empty() || s.starts_with(|c: char| c.is_ascii_digit()) {
+        s.insert(0, '_');
+    }
+    s
 }
 
 /// `base`, or `base_N` for the first free N if `base` is already taken.
@@ -303,22 +303,25 @@ pub fn entry_base_names(
         .collect()
 }
 
-/// Field name of a permutation table in `AutoConsts`.
-pub fn auto_const_field_name(rules: &NamingRules, table: &PermutationTableInput) -> String {
-    match table {
-        PermutationTableInput::PerlinNoise {
-            ident,
-            subident,
-            subident_index,
-        } => (rules.sanitize)(&format!(
-            "{}_{}_{}",
-            ident,
-            subident_index,
-            subident.as_deref().unwrap_or("")
-        )),
-        PermutationTableInput::Base3DNoise => "base3d_perm_table".to_string(),
-    }
+/// Field name of an autoconst in `AutoConsts`: its sanitized name (the caller makes it unique).
+pub fn auto_const_field_name(rules: &NamingRules, a: &AutoConst) -> String {
+    (rules.sanitize)(&a.name)
 }
+
+/// Names that generated creation code already uses, so no auto param may take them.
+pub const CREATION_RESERVED: &[&str] = &[
+    "buffers",
+    "auto_constants",
+    "auto_consts",
+    "_init",
+    "out",
+    "impl",
+    "this",
+    // CUDA: file-scope names `create` reads, and its loop variable
+    "host_consts_ring",
+    "i",
+    "stream",
+];
 
 /// Field name of a static host input in `HostConsts`.
 pub fn host_field_name(rules: &NamingRules, input: &HostInput) -> String {

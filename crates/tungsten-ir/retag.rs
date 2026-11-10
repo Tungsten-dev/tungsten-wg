@@ -17,9 +17,10 @@ macro_rules! ref_kinds {
             function: Function, fns, "function", 2;
             constant: Constant, consts, "constant", 3;
             host_input: HostInput, hosts, "host input", 4;
-            table: PermutationTableInput, tables, "permutation table", 5;
+            auto_const: AutoConst, auto_consts, "autoconst", 5;
             var: Var, vars, "variable", 6;
             density_input: DensityInput, inputs, "density input", 7;
+            auto_param: AutoParam, auto_params, "auto param", 8;
         }
     };
 }
@@ -98,7 +99,8 @@ impl Clone for OptimizedProgram {
             entry_points: self.entry_points.clone(),
             constants: self.constants.clone(),
             host_inputs: self.host_inputs.clone(),
-            permutation_tables: self.permutation_tables.clone(),
+            auto_params: self.auto_params.clone(),
+            auto_consts: self.auto_consts.clone(),
             density_inputs: self.density_inputs.clone(),
         };
 
@@ -107,7 +109,8 @@ impl Clone for OptimizedProgram {
             (self.functions.tag(), c.functions.tag()),
             (self.constants.tag(), c.constants.tag()),
             (self.host_inputs.tag(), c.host_inputs.tag()),
-            (self.permutation_tables.tag(), c.permutation_tables.tag()),
+            (self.auto_params.tag(), c.auto_params.tag()),
+            (self.auto_consts.tag(), c.auto_consts.tag()),
             (self.density_inputs.tag(), c.density_inputs.tag()),
         ]);
         // `clone_with` keeps every slot in place, so live values pair up in iteration order.
@@ -140,13 +143,21 @@ pub(crate) fn walk_program(p: &mut OptimizedProgram, v: &mut impl RefVisitor) {
     for input in p.density_inputs.values_mut() {
         v.compute_unit(&mut input.density_function);
     }
+    for a in p.auto_consts.values_mut() {
+        for arg in &mut a.args {
+            match arg {
+                AutoConstArg::Param(r) => v.auto_param(r),
+                AutoConstArg::I64(_) | AutoConstArg::F64(_) | AutoConstArg::Bool(_) | AutoConstArg::Str(_) => {}
+            }
+        }
+    }
 }
 
 fn walk_compute_unit(cu: &mut ComputeUnit, v: &mut impl RefVisitor) {
     let ComputeUnit::DensityFunction {
         function,
         density_inputs,
-        permutation_table_inputs,
+        auto_consts,
         host_inputs,
         helper_functions,
         constants,
@@ -154,7 +165,7 @@ fn walk_compute_unit(cu: &mut ComputeUnit, v: &mut impl RefVisitor) {
     } = cu;
     v.function(function);
     density_inputs.iter_mut().for_each(|r| v.density_input(r));
-    permutation_table_inputs.iter_mut().for_each(|r| v.table(r));
+    auto_consts.iter_mut().for_each(|r| v.auto_const(r));
     host_inputs.iter_mut().for_each(|r| v.host_input(r));
     helper_functions.iter_mut().for_each(|r| v.function(r));
     constants.iter_mut().for_each(|r| v.constant(r));
@@ -213,7 +224,7 @@ fn walk_expr(e: &mut Expression, v: &mut impl RefVisitor) {
                 walk_expr(i, v);
             }
         }
-        Expression::PermutationTable(r) => v.table(r),
+        Expression::AutoConst(r) => v.auto_const(r),
         Expression::HostInput(r) => v.host_input(r),
         Expression::Ambient(_) => {}
         Expression::BinaryOp { left, right, .. } => {
@@ -277,7 +288,8 @@ mod tests {
         fns: Vec<Ref<Function>>,
         consts: Vec<Ref<Constant>>,
         hosts: Vec<Ref<HostInput>>,
-        tables: Vec<Ref<PermutationTableInput>>,
+        auto_consts: Vec<Ref<AutoConst>>,
+        auto_params: Vec<Ref<AutoParam>>,
         vars: Vec<Ref<Var>>,
         inputs: Vec<Ref<DensityInput>>,
     }
@@ -295,8 +307,11 @@ mod tests {
         fn host_input(&mut self, r: &mut Ref<HostInput>) {
             self.hosts.push(*r)
         }
-        fn table(&mut self, r: &mut Ref<PermutationTableInput>) {
-            self.tables.push(*r)
+        fn auto_const(&mut self, r: &mut Ref<AutoConst>) {
+            self.auto_consts.push(*r)
+        }
+        fn auto_param(&mut self, r: &mut Ref<AutoParam>) {
+            self.auto_params.push(*r)
         }
         fn var(&mut self, r: &mut Ref<Var>) {
             self.vars.push(*r)
@@ -334,7 +349,8 @@ mod tests {
             entry_points: vec![],
             constants: Arena::new(),
             host_inputs: Arena::new(),
-            permutation_tables: Arena::new(),
+            auto_params: Arena::new(),
+            auto_consts: Arena::new(),
             density_inputs: Arena::new(),
         };
         let a = p.constants.insert(Constant {
@@ -353,9 +369,16 @@ mod tests {
             name: Name::Named("seed".into()),
             t: VariableType::I64,
         });
-        let table = p
-            .permutation_tables
-            .insert(PermutationTableInput::Base3DNoise);
+        let seed_param = p.auto_params.insert(AutoParam {
+            name: "seed".into(),
+            t: VariableType::I64,
+        });
+        let table = p.auto_consts.insert(AutoConst {
+            name: "table".into(),
+            t: VariableType::Handle("PerlinNoiseSampler"),
+            initializer: "make_table".into(),
+            args: vec![AutoConstArg::Param(seed_param), AutoConstArg::I64(7)],
+        });
 
         // Remove one slot so generations and the free list are exercised.
         let gone = p.functions.insert(function("gone"));
@@ -367,7 +390,7 @@ mod tests {
         let leaf = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: leaf_fn,
             density_inputs: vec![],
-            permutation_table_inputs: vec![],
+            auto_consts: vec![],
             host_inputs: vec![],
             helper_functions: vec![],
             constants: vec![b],
@@ -404,10 +427,10 @@ mod tests {
                 value: Expression::ExternCall {
                     function_name: "sample".into(),
                     parameters: vec![
-                        Expression::PermutationTable(table),
+                        Expression::AutoConst(table),
                         Expression::DensityVariable(input, None),
                     ],
-                    parameter_types: vec![VariableType::PermutationTable, VariableType::F64],
+                    parameter_types: vec![VariableType::Handle("PerlinNoiseSampler"), VariableType::F64],
                     return_type: VariableType::F64,
                 },
             },
@@ -431,7 +454,7 @@ mod tests {
         let root = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: root_fn,
             density_inputs: vec![input],
-            permutation_table_inputs: vec![table],
+            auto_consts: vec![table],
             host_inputs: vec![seed],
             helper_functions: vec![helper],
             constants: vec![],
@@ -468,9 +491,13 @@ mod tests {
         for r in &refs.hosts {
             c.host_inputs.get(*r);
         }
-        for r in &refs.tables {
-            c.permutation_tables.get(*r);
+        for r in &refs.auto_consts {
+            c.auto_consts.get(*r);
         }
+        for r in &refs.auto_params {
+            c.auto_params.get(*r);
+        }
+        assert!(!refs.auto_params.is_empty(), "autoconst args are walked");
         for r in &refs.vars {
             assert!(c.functions.values().any(|f| f.variables.contains(*r)));
         }
@@ -489,7 +516,8 @@ mod tests {
         back(&p.functions, &c.functions);
         back(&p.constants, &c.constants);
         back(&p.host_inputs, &c.host_inputs);
-        back(&p.permutation_tables, &c.permutation_tables);
+        back(&p.auto_params, &c.auto_params);
+        back(&p.auto_consts, &c.auto_consts);
         back(&p.density_inputs, &c.density_inputs);
 
         // The removed slot stays removed, and its stale ref is stale in the clone too.

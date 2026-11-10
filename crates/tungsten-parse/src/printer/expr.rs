@@ -13,6 +13,7 @@ pub fn type_text(t: &VariableType) -> String {
     stack::grow(|| match t {
         VariableType::Array(e, n) => format!("[{}; {n}]", type_text(e)),
         VariableType::Extern(n) => format!("extern {}", quote_name(n)),
+        VariableType::Handle(n) => format!("handle {}", quote_name(n)),
         t => tables::prim_kw(t)
             .expect("every other type has a keyword")
             .as_str()
@@ -160,7 +161,7 @@ impl ExprPrinter<'_> {
                 }
                 out.push(')');
             }
-            PermutationTable(t) => out.push_str(&format!("table({})", self.labels.table(*t))),
+            AutoConst(a) => out.push_str(&format!("auto({})", self.labels.auto_const(*a))),
             HostInput(h) => out.push_str(&format!("host({})", self.labels.host(*h))),
             Ambient(k) => out.push_str(&format!("ambient({})", tables::ambient_text(*k))),
             BinaryOp { op, left, right } => {

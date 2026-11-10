@@ -1,11 +1,11 @@
-//! `body!`, `build!`, `extern_fns!`, `record_decls!`, `vec3!`, `pos3!`, `array!` and `vt!`.
+//! `body!`, `build!`, `extern_fns!`, `auto_initializers!`, `record_decls!`, `vec3!`, `pos3!`, `array!` and `vt!`.
 //!
 //! `body!` and `build!` expand onto `FnBuilder`'s methods, so both styles build the same IR.
 //! The builder argument must be a variable name: nested blocks become closures whose parameter
 //! shadows it, so code inside a block can use it (and other `&mut` values such as the program
 //! builder) freely.
 
-/// A `VariableType` from a short spelling: `F64`, `I32`, `"Record"`, `[F64; 3]`, `(…)`.
+/// A `VariableType` from a short spelling: `F64`, `I32`, `"Record"`, `handle "Name"`, `[F64; 3]`, `(…)`.
 #[macro_export]
 macro_rules! vt {
     ([$t:tt; $n:expr]) => {
@@ -13,6 +13,9 @@ macro_rules! vt {
     };
     ($s:literal) => {
         $crate::__ir::VariableType::Extern($s)
+    };
+    (handle $s:literal) => {
+        $crate::__ir::VariableType::Handle($s)
     };
     (($($inner:tt)*)) => {
         $crate::vt!($($inner)*)
@@ -23,18 +26,66 @@ macro_rules! vt {
 }
 
 /// Declares extern functions. Each signature gives a typed call function and, with
-/// `group name;`, an entry in `pub fn name() -> Decls`.
+/// `group name;`, an entry in `pub fn name() -> Decls`. A handle type is written
+/// `handle "Name"`.
 ///
 /// ```ignore
 /// extern_fns! {
 ///     group aquifer_externs;
 ///     random_next_int(r: "Random", bound: I32): I32,
 ///     checked_div(a: F64, b: F64): F64 @domain_error,
+///     table_get(t: handle "Table", i: I32): I32,
 /// }
 /// ```
 #[macro_export]
 macro_rules! extern_fns {
-    (group $g:ident; $($name:ident($($arg:ident : $aty:tt),* $(,)?) : $ret:tt $(@ $flag:ident)?),* $(,)?) => {
+    (group $g:ident; $($body:tt)*) => {
+        $crate::extern_fns!(@items [$g] [] $($body)*);
+    };
+
+    // Signatures, one at a time. `done` holds `{ name [arg: (type)..] (ret) [flag] }`.
+    (@items $g:tt $done:tt) => {
+        $crate::extern_fns!(@emit $g $done);
+    };
+    (@items $g:tt [$($done:tt)*] $name:ident ( $($args:tt)* ) : $($rest:tt)*) => {
+        $crate::extern_fns!(@args $g [$($done)*] $name [] [$($args)*] [$($rest)*]);
+    };
+
+    // Arguments, normalised to `arg: (type)`.
+    (@args $g:tt $done:tt $name:ident [$($acc:tt)*] [$a:ident : handle $s:literal , $($more:tt)*] $rest:tt) => {
+        $crate::extern_fns!(@args $g $done $name [$($acc)* $a : (handle $s),] [$($more)*] $rest);
+    };
+    (@args $g:tt $done:tt $name:ident [$($acc:tt)*] [$a:ident : handle $s:literal] $rest:tt) => {
+        $crate::extern_fns!(@args $g $done $name [$($acc)* $a : (handle $s),] [] $rest);
+    };
+    (@args $g:tt $done:tt $name:ident [$($acc:tt)*] [$a:ident : $t:tt , $($more:tt)*] $rest:tt) => {
+        $crate::extern_fns!(@args $g $done $name [$($acc)* $a : ($t),] [$($more)*] $rest);
+    };
+    (@args $g:tt $done:tt $name:ident [$($acc:tt)*] [$a:ident : $t:tt] $rest:tt) => {
+        $crate::extern_fns!(@args $g $done $name [$($acc)* $a : ($t),] [] $rest);
+    };
+    (@args $g:tt $done:tt $name:ident $acc:tt [] [handle $s:literal $($rest:tt)*]) => {
+        $crate::extern_fns!(@tail $g $done $name $acc (handle $s) [$($rest)*]);
+    };
+    (@args $g:tt $done:tt $name:ident $acc:tt [] [$t:tt $($rest:tt)*]) => {
+        $crate::extern_fns!(@tail $g $done $name $acc ($t) [$($rest)*]);
+    };
+
+    // After the return type: an optional `@flag` and an optional comma.
+    (@tail $g:tt [$($done:tt)*] $name:ident $acc:tt $ret:tt [@ $flag:ident , $($more:tt)*]) => {
+        $crate::extern_fns!(@items $g [$($done)* { $name $acc $ret [$flag] }] $($more)*);
+    };
+    (@tail $g:tt [$($done:tt)*] $name:ident $acc:tt $ret:tt [@ $flag:ident]) => {
+        $crate::extern_fns!(@items $g [$($done)* { $name $acc $ret [$flag] }]);
+    };
+    (@tail $g:tt [$($done:tt)*] $name:ident $acc:tt $ret:tt [, $($more:tt)*]) => {
+        $crate::extern_fns!(@items $g [$($done)* { $name $acc $ret [] }] $($more)*);
+    };
+    (@tail $g:tt [$($done:tt)*] $name:ident $acc:tt $ret:tt []) => {
+        $crate::extern_fns!(@items $g [$($done)* { $name $acc $ret [] }]);
+    };
+
+    (@emit [$g:ident] [$( { $name:ident [$($arg:ident : $aty:tt,)*] $ret:tt [$($flag:ident)?] } )*]) => {
         $( $crate::extern_fns!(@fn $name($($arg : $aty),*) : $ret); )*
 
         /// The declarations of this group's externs.
@@ -51,9 +102,10 @@ macro_rules! extern_fns {
             d
         }
     };
-    ($($name:ident($($arg:ident : $aty:tt),* $(,)?) : $ret:tt $(@ $flag:ident)?),* $(,)?) => {
+    (@emit [] [$( { $name:ident [$($arg:ident : $aty:tt,)*] $ret:tt [$($flag:ident)?] } )*]) => {
         $( $crate::extern_fns!(@fn $name($($arg : $aty),*) : $ret); )*
     };
+
     (@fn $name:ident($($arg:ident : $aty:tt),*) : $ret:tt) => {
         #[track_caller]
         #[allow(clippy::too_many_arguments)]
@@ -68,6 +120,48 @@ macro_rules! extern_fns {
     };
     (@flag) => { false };
     (@flag domain_error) => { true };
+    ($($body:tt)*) => {
+        $crate::extern_fns!(@items [] [] $($body)*);
+    };
+}
+
+/// Declares autoconst initializers for the registry, as `pub fn name() -> Decls`. Arguments are
+/// `I64`, `F64`, `Bool` or `Str`; the return type is a scalar or `handle "Name"`.
+///
+/// ```ignore
+/// auto_initializers! {
+///     group table_initializers;
+///     make_table(I64, I64): handle "Table",
+///     derive_salt(I64, Str): I64,
+/// }
+/// ```
+#[macro_export]
+macro_rules! auto_initializers {
+    (group $g:ident; $($body:tt)*) => {
+        /// The declarations of this group's autoconst initializers.
+        pub fn $g() -> $crate::Decls {
+            let mut d = $crate::Decls::new();
+            $crate::auto_initializers!(@items d $($body)*);
+            d
+        }
+    };
+    (@items $d:ident) => {};
+    (@items $d:ident $name:ident ( $($a:ident),* $(,)? ) : handle $s:literal $(, $($more:tt)*)?) => {
+        $d.initializers.push($crate::AutoInitializerDecl {
+            name: ::std::string::String::from(stringify!($name)),
+            params: ::std::vec![$($crate::AutoArgType::$a),*],
+            ret: $crate::vt!(handle $s),
+        });
+        $crate::auto_initializers!(@items $d $($($more)*)?);
+    };
+    (@items $d:ident $name:ident ( $($a:ident),* $(,)? ) : $ret:tt $(, $($more:tt)*)?) => {
+        $d.initializers.push($crate::AutoInitializerDecl {
+            name: ::std::string::String::from(stringify!($name)),
+            params: ::std::vec![$($crate::AutoArgType::$a),*],
+            ret: $crate::vt!($ret),
+        });
+        $crate::auto_initializers!(@items $d $($($more)*)?);
+    };
 }
 
 /// Declares records for the registry, as `pub fn name() -> Decls`.

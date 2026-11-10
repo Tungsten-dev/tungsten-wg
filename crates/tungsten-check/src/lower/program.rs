@@ -6,13 +6,14 @@ use std::collections::{HashMap, HashSet};
 use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
-    ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram, PermutationTableInput,
+    AutoConst, AutoConstArg, ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram,
+    VariableType,
 };
 
 use super::{Ctx, get};
 use crate::error::{EntityKind, Item, LowerError, LowerErrorKind, ParameterProblem, Step};
-use crate::map::{IdMap, LowerMap};
-use crate::registry::Registry;
+use crate::map::{AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, IdMap, LowerMap};
+use crate::registry::{AutoArgType, Registry};
 use super::const_to_expr;
 
 fn name_str(n: &Name) -> Option<&str> {
@@ -36,18 +37,13 @@ pub(crate) fn run(
         path: vec![],
         func: None,
         locals: HashMap::new(),
+        handles: reg.handle_names.clone(),
+        auto_reads: vec![],
     };
-    let tables = p
-        .permutation_tables
-        .values()
-        .map(|t| core::TableDecl {
-            kind: match t {
-                PermutationTableInput::PerlinNoise { .. } => core::TableKind::Perm,
-                PermutationTableInput::Base3DNoise => core::TableKind::Sampler,
-            },
-        })
-        .collect();
-    let hosts = cx.hosts();
+    cx.auto_params();
+    let (tables, auto_hosts) = cx.auto_consts();
+    let mut hosts = cx.hosts();
+    hosts.extend(auto_hosts);
     let consts = cx.consts();
     let functions = cx.functions();
     let units = cx.units();
@@ -64,6 +60,7 @@ pub(crate) fn run(
         externs: vec![],
         records: vec![],
     };
+    cx.map.handle_types = std::mem::take(&mut cx.handles);
     (program, cx.map, cx.errors)
 }
 
@@ -98,13 +95,9 @@ fn build_ids(p: &OptimizedProgram) -> LowerMap {
         m.hosts.push(r, name.unwrap_or_else(|| format!("#{i}")));
         m.host_names.push(named);
     }
-    for (i, (r, t)) in p.permutation_tables.iter().enumerate() {
-        let name = match t {
-            PermutationTableInput::PerlinNoise { ident, .. } => ident.clone(),
-            PermutationTableInput::Base3DNoise => format!("#{i}"),
-        };
-        m.tables.push(r, name);
-        m.table_idents.push(t.clone());
+    for (r, p) in p.auto_params.iter() {
+        m.auto_params.push(r, p.name.clone());
+        m.auto_param_types.push(p.t.clone());
     }
     for (i, (r, d)) in p.density_inputs.iter().enumerate() {
         let name = name_str(&d.name)
@@ -113,6 +106,14 @@ fn build_ids(p: &OptimizedProgram) -> LowerMap {
         m.inputs.push(r, name);
     }
     m
+}
+
+fn contains_handle(t: &VariableType) -> bool {
+    match t {
+        VariableType::Handle(_) => true,
+        VariableType::Array(e, _) => contains_handle(e),
+        _ => false,
+    }
 }
 
 fn dims(d: (i32, i32, i32)) -> core::Dims {
@@ -154,9 +155,180 @@ impl<'p, 'r> Ctx<'p, 'r> {
         self.id_or_dangling(id, EntityKind::Constant, ConstId(0))
     }
 
-    pub(super) fn table_ref(&mut self, r: tungsten_ir::Ref<PermutationTableInput>) -> TableId {
+    pub(super) fn table_ref(&mut self, r: tungsten_ir::Ref<AutoConst>) -> TableId {
         let id = self.map.tables.id(r);
-        self.id_or_dangling(id, EntityKind::PermutationTable, TableId(0))
+        self.id_or_dangling(id, EntityKind::AutoConst, TableId(0))
+    }
+
+    /// Checks the auto params. They have no core counterpart.
+    fn auto_params(&mut self) {
+        let p = self.p;
+        let mut seen = HashSet::new();
+        for (_, a) in p.auto_params.iter() {
+            self.enter(Item::AutoParam { name: a.name.clone() });
+            if !matches!(a.t, VariableType::I64 | VariableType::F64 | VariableType::Bool) {
+                self.err(LowerErrorKind::BadAutoParamType { t: format!("{:?}", a.t) });
+            }
+            if !seen.insert(a.name.as_str()) {
+                self.err(LowerErrorKind::DuplicateAutoParam(a.name.clone()));
+            }
+        }
+    }
+
+    /// One core table per handle autoconst and one extra core host per value autoconst, both in
+    /// arena order. Also fills `map.auto_consts`.
+    fn auto_consts(&mut self) -> (Vec<core::TableDecl>, Vec<core::HostDecl>) {
+        let p = self.p;
+        let mut tables = vec![];
+        let mut hosts = vec![];
+        let real_hosts = p.host_inputs.iter().count();
+        for (r, a) in p.auto_consts.iter() {
+            let is_handle = matches!(a.t, VariableType::Handle(_));
+            let is_value = matches!(
+                a.t,
+                VariableType::Bool
+                    | VariableType::I8
+                    | VariableType::I32
+                    | VariableType::I64
+                    | VariableType::F32
+                    | VariableType::F64
+            );
+            let table = TableId(tables.len());
+            self.enter(Item::AutoConst { id: is_handle.then_some(table), name: a.name.clone() });
+            let core = if is_handle {
+                let ty = self.ty(&a.t);
+                let core::Type::Handle(ty) = ty else { unreachable!("handles lower to handles") };
+                self.map.tables.push(r, a.name.clone());
+                tables.push(core::TableDecl { ty });
+                AutoCoreId::Table(table)
+            } else if is_value {
+                let ty = self.ty(&a.t);
+                let h = HostId(real_hosts + hosts.len());
+                self.map.auto_hosts.insert(r, h);
+                self.map.auto_host_names.push(a.name.clone());
+                self.map.host_names.push(None);
+                hosts.push(core::HostDecl { ty });
+                AutoCoreId::Host(h)
+            } else {
+                self.err(LowerErrorKind::BadAutoConstType { t: format!("{:?}", a.t) });
+                AutoCoreId::Table(table)
+            };
+            let args = a
+                .args
+                .iter()
+                .enumerate()
+                .map(|(k, arg)| match arg {
+                    AutoConstArg::I64(v) => AutoArgSpec::I64(*v),
+                    AutoConstArg::F64(v) => AutoArgSpec::F64(*v),
+                    AutoConstArg::Bool(v) => AutoArgSpec::Bool(*v),
+                    AutoConstArg::Str(v) => AutoArgSpec::Str(v.clone()),
+                    AutoConstArg::Param(r) => {
+                        let id = self.map.auto_params.id(*r);
+                        AutoArgSpec::Param(self.at(Step::Arg(k), |cx| {
+                            cx.id_or_dangling(id, EntityKind::AutoParam, AutoParamId(0))
+                        }))
+                    }
+                })
+                .collect();
+            if is_handle || is_value {
+                self.check_initializer(a);
+            }
+            self.map.auto_consts.push(AutoConstInfo {
+                core,
+                name: a.name.clone(),
+                t: a.t.clone(),
+                initializer: a.initializer.clone(),
+                args,
+            });
+        }
+        (tables, hosts)
+    }
+
+    /// The registry checks of one autoconst: the initializer exists, and its arguments and return
+    /// type fit.
+    fn check_initializer(&mut self, a: &AutoConst) {
+        let reg = self.reg;
+        let Some(decl) = reg.initializer(&a.initializer) else {
+            self.err(LowerErrorKind::UnknownAutoInitializer(a.initializer.clone()));
+            return;
+        };
+        let init = a.initializer.clone();
+        if decl.params.len() != a.args.len() {
+            self.err(LowerErrorKind::AutoArgCount {
+                initializer: init.clone(),
+                expected: decl.params.len(),
+                found: a.args.len(),
+            });
+        } else {
+            for (index, (arg, &expected)) in a.args.iter().zip(&decl.params).enumerate() {
+                let found = match arg {
+                    AutoConstArg::I64(_) => Some(AutoArgType::I64),
+                    AutoConstArg::F64(_) => Some(AutoArgType::F64),
+                    AutoConstArg::Bool(_) => Some(AutoArgType::Bool),
+                    AutoConstArg::Str(_) => Some(AutoArgType::Str),
+                    // A dangling param is reported with the arguments.
+                    AutoConstArg::Param(r) => self.map.auto_params.id(*r).and_then(|id| {
+                        match self.map.auto_param_types[id.0] {
+                            VariableType::I64 => Some(AutoArgType::I64),
+                            VariableType::F64 => Some(AutoArgType::F64),
+                            VariableType::Bool => Some(AutoArgType::Bool),
+                            _ => None,
+                        }
+                    }),
+                };
+                let dangling = matches!(arg, AutoConstArg::Param(r) if self.map.auto_params.id(*r).is_none());
+                if dangling {
+                    continue;
+                }
+                if found != Some(expected) {
+                    let found = match arg {
+                        AutoConstArg::Param(r) => self
+                            .map
+                            .auto_params
+                            .id(*r)
+                            .map(|id| format!("{:?}", self.map.auto_param_types[id.0]))
+                            .unwrap_or_default(),
+                        _ => found.map(|f| f.to_string()).unwrap_or_default(),
+                    };
+                    self.at(Step::Arg(index), |cx| {
+                        cx.err(LowerErrorKind::AutoArgType {
+                            index,
+                            initializer: init.clone(),
+                            expected: expected.to_string(),
+                            found,
+                        })
+                    });
+                }
+                if matches!(arg, AutoConstArg::Str(s) if s.contains('\0')) {
+                    self.at(Step::Arg(index), |cx| {
+                        cx.err(LowerErrorKind::AutoArgHasNul { index })
+                    });
+                }
+            }
+        }
+        let declared = self.ty(&a.t);
+        if declared != decl.ret {
+            let returns = self.type_text(&decl.ret);
+            self.err(LowerErrorKind::AutoInitializerReturn {
+                initializer: init,
+                returns,
+                declared: format!("{:?}", a.t),
+            });
+        }
+    }
+
+    /// A core type as text, with handles by name.
+    fn type_text(&self, t: &core::Type) -> String {
+        match t {
+            core::Type::Handle(h) => format!("handle {}", self.handles.get(h.0).map(String::as_str).unwrap_or("?")),
+            core::Type::Bool => "bool".into(),
+            core::Type::I8 => "i8".into(),
+            core::Type::I32 => "i32".into(),
+            core::Type::I64 => "i64".into(),
+            core::Type::F32 => "f32".into(),
+            core::Type::F64 => "f64".into(),
+            other => format!("{other:?}"),
+        }
     }
 
     fn input_ref(&mut self, r: tungsten_ir::Ref<DensityInput>) -> InputId {
@@ -177,7 +349,12 @@ impl<'p, 'r> Ctx<'p, 'r> {
             let name = self.map.hosts.name(id).unwrap_or_default().to_string();
             self.enter(Item::Host { id: Some(id), name });
             let ty = match h {
-                HostInput::Static { t, .. } => self.ty(t),
+                HostInput::Static { t, .. } => {
+                    if contains_handle(t) {
+                        self.err(LowerErrorKind::HandleHost { t: format!("{t:?}") });
+                    }
+                    self.ty(t)
+                }
                 HostInput::Dynamic => {
                     self.err(LowerErrorKind::DynamicHost);
                     core::Type::Bool
@@ -271,7 +448,14 @@ impl<'p, 'r> Ctx<'p, 'r> {
             .enumerate()
             .map(|(i, &h)| self.at(Step::List { list: "hosts", index: i }, |cx| cx.host_ref(h)))
             .collect();
+        self.auto_reads.clear();
         let body = self.block(&f.body, Step::Stmt);
+        let mut hosts: Vec<HostId> = hosts;
+        for h in std::mem::take(&mut self.auto_reads) {
+            if !hosts.contains(&h) {
+                hosts.push(h);
+            }
+        }
         self.map.locals.push(locals);
         core::Function {
             params,
@@ -292,7 +476,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
             let ComputeUnit::DensityFunction {
                 function,
                 density_inputs,
-                permutation_table_inputs,
+                auto_consts,
                 host_inputs,
                 helper_functions,
                 constants,
@@ -304,16 +488,26 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 .enumerate()
                 .map(|(i, &r)| self.at(Step::List { list: "inputs", index: i }, |cx| cx.input_ref(r)))
                 .collect();
-            let tables = permutation_table_inputs
-                .iter()
-                .enumerate()
-                .map(|(i, &r)| self.at(Step::List { list: "tables", index: i }, |cx| cx.table_ref(r)))
-                .collect();
-            let hosts = host_inputs
+            let mut tables = vec![];
+            let mut auto_hosts = vec![];
+            for (i, &r) in auto_consts.iter().enumerate() {
+                match self.map.auto_hosts.get(&r) {
+                    Some(&h) => auto_hosts.push(h),
+                    None => {
+                        tables.push(self.at(Step::List { list: "autos", index: i }, |cx| cx.table_ref(r)))
+                    }
+                }
+            }
+            let mut hosts: Vec<HostId> = host_inputs
                 .iter()
                 .enumerate()
                 .map(|(i, &r)| self.at(Step::List { list: "hosts", index: i }, |cx| cx.host_ref(r)))
                 .collect();
+            for h in auto_hosts {
+                if !hosts.contains(&h) {
+                    hosts.push(h);
+                }
+            }
             let helpers = helper_functions
                 .iter()
                 .enumerate()

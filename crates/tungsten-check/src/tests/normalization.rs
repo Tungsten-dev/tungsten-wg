@@ -42,7 +42,7 @@ fn references() {
     assert_eq!(ret("return p;"), p());
     assert_eq!(ret("return const(c);"), Expr::Const(ConstId(0)));
     assert_eq!(ret("return host(h);"), Expr::Host(HostId(0)));
-    assert_eq!(ret("return table(t);"), Expr::Table(TableId(0)));
+    assert_eq!(ret("return auto(t);"), Expr::Table(TableId(0)));
     assert_eq!(ret("return ambient(origin);"), Expr::Ambient(Ambient::Origin));
     assert_eq!(ret("return ambient(pos3);"), Expr::Ambient(Ambient::Pos3));
     assert_eq!(
@@ -91,10 +91,10 @@ fn calls() {
         }
     );
     assert_eq!(
-        ret("return ext sample(table(t), p);"),
+        ret("return ext sample(auto(t), p);"),
         Expr::ExternCall {
             ext: ExternId(1),
-            params: vec![Type::PermTable, Type::F64],
+            params: vec![Type::Handle(HandleTypeId(0)), Type::F64],
             ret: Type::F64,
             args: vec![Expr::Table(TableId(0)), p()]
         }
@@ -404,10 +404,10 @@ fn items() {
         pr.tables,
         vec![
             TableDecl {
-                kind: TableKind::Perm
+                ty: HandleTypeId(0)
             },
             TableDecl {
-                kind: TableKind::Sampler
+                ty: HandleTypeId(1)
             }
         ]
     );

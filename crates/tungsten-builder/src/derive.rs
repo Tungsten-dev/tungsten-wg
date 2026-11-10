@@ -5,7 +5,7 @@
 //! call without walking the callee again.
 
 use tungsten_ir::{
-    ConstExpr, Constant, DensityInput, Expression, Function, HostInput, PermutationTableInput,
+    AutoConst, ConstExpr, Constant, DensityInput, Expression, Function, HostInput,
     Ref, Statement,
 };
 
@@ -17,7 +17,7 @@ pub(crate) struct Summary {
     /// Callees before callers.
     pub(crate) helpers: Vec<Ref<Function>>,
     pub(crate) hosts: Vec<Ref<HostInput>>,
-    pub(crate) tables: Vec<Ref<PermutationTableInput>>,
+    pub(crate) autos: Vec<Ref<AutoConst>>,
     /// Dependencies first.
     pub(crate) consts: Vec<Ref<Constant>>,
     pub(crate) inputs: Vec<Ref<DensityInput>>,
@@ -104,8 +104,8 @@ impl Walk<'_> {
                 for h in &callee.hosts {
                     add(&mut self.s.hosts, *h);
                 }
-                for t in &callee.tables {
-                    add(&mut self.s.tables, *t);
+                for t in &callee.autos {
+                    add(&mut self.s.autos, *t);
                 }
                 for c in &callee.consts {
                     add(&mut self.s.consts, *c);
@@ -124,11 +124,11 @@ impl Walk<'_> {
                     self.foreign("an input");
                 }
             }
-            Expression::PermutationTable(t) => {
-                if self.pb.program.permutation_tables.contains(*t) {
-                    add(&mut self.s.tables, *t);
+            Expression::AutoConst(t) => {
+                if self.pb.program.auto_consts.contains(*t) {
+                    add(&mut self.s.autos, *t);
                 } else {
-                    self.foreign("a table");
+                    self.foreign("an autoconst");
                 }
             }
             Expression::HostInput(h) => {

@@ -40,7 +40,8 @@ pub use tungsten_inspect::{InspectBackend, InspectCompile, InspectConfig, Inspec
 #[cfg(feature = "parse")]
 pub use tungsten_parse as parse;
 
-/// A registry from builder declaration groups (`extern_fns!`/`record_decls!` with `group`).
+/// A registry from builder declaration groups (`extern_fns!`, `record_decls!` and
+/// `auto_initializers!` with `group`).
 /// Identical declarations in several groups count once; conflicting ones are reported by
 /// [`check::RegistryBuilder`].
 pub fn registry_from(
@@ -62,6 +63,9 @@ pub fn registry_from(
         let fields: Vec<(&str, ir::VariableType)> =
             r.fields.iter().map(|(n, t)| (n.as_str(), t.clone())).collect();
         rb = rb.record(&r.name, &fields);
+    }
+    for i in &all.initializers {
+        rb = rb.auto_initializer(&i.name, &i.params, i.ret.clone());
     }
     rb.build()
 }
@@ -89,6 +93,11 @@ mod registry_tests {
                 twice(x: I32): I32,
             }
         }
+        tungsten_builder::auto_initializers! {
+            group initializers;
+            make_table(I64, Str): handle "Table",
+            derive_salt(I64, F64, Bool): I64,
+        }
         tungsten_builder::record_decls! {
             group records;
             Pair { a: F64, b: I32 },
@@ -104,6 +113,28 @@ mod registry_tests {
         assert!(externs[1].domain_error);
         assert_eq!(records.len(), 2);
         assert!(r.field_index(r.record_id("Wrap").unwrap(), "v").is_some());
+    }
+
+    #[test]
+    fn initializers_reach_the_registry() {
+        let r = registry_from([group_a(), b::initializers(), b::initializers()]).unwrap();
+        let t = r.initializer("make_table").unwrap();
+        assert_eq!(t.params, [ir::AutoArgType::I64, ir::AutoArgType::Str]);
+        assert!(matches!(t.ret, check::core_ir::Type::Handle(_)));
+        let s = r.initializer("derive_salt").unwrap();
+        assert_eq!(s.params, [ir::AutoArgType::I64, ir::AutoArgType::F64, ir::AutoArgType::Bool]);
+        assert_eq!(s.ret, check::core_ir::Type::I64);
+        assert!(r.initializer("nothing").is_none());
+
+        // The registry checks a program built from the same declarations.
+        let mut pb = ProgramBuilder::new();
+        let seed = pb.param("seed", I64);
+        let salt = pb.auto_const("salt", I64, "derive_salt", [seed.into(), 1.5.into(), true.into()]);
+        let mut f = FnBuilder::new("m", F64);
+        f.ret(builder::Expr::from(salt).cast(F64));
+        let u = pb.finish_unit(f);
+        pb.entry(u, Grid::new((1, 1, 1)));
+        check::prepare(&pb.build().unwrap(), &r).unwrap();
     }
 
     #[test]

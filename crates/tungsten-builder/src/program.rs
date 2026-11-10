@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::panic::Location;
 
 use tungsten_ir::{
-    Arena, ComputeUnit, ConstExpr, DensityInput, EntryPoint, Expression, Function, HostInput,
-    Name, OptimizedProgram, PermutationTableInput, Ref, UnaryOperator, VariableType,
+    Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput, EntryPoint, Expression, Function, HostInput,
+    Name, OptimizedProgram, Ref, UnaryOperator, VariableType,
 };
 
 use crate::derive::{Summary, const_deps, summarize};
@@ -50,11 +50,65 @@ pub struct Host {
     pub(crate) ty: Ty,
 }
 
-/// A permutation table or noise sampler.
+/// A value supplied when the orchestration is created (`I64`, `F64` or `Bool`). Programs can't
+/// read it; it is only an argument of [`ProgramBuilder::auto_const`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Table {
-    pub(crate) r: Ref<PermutationTableInput>,
+pub struct Param {
+    pub(crate) r: Ref<AutoParam>,
     pub(crate) ty: Ty,
+}
+
+/// A value built when the orchestration is created. Reads like any expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Auto {
+    pub(crate) r: Ref<AutoConst>,
+    pub(crate) ty: Ty,
+}
+
+/// An argument of an autoconst initializer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AutoArg {
+    Param(Param),
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    Str(String),
+}
+
+impl From<f64> for AutoArg {
+    fn from(v: f64) -> Self {
+        AutoArg::F64(v)
+    }
+}
+
+impl From<bool> for AutoArg {
+    fn from(v: bool) -> Self {
+        AutoArg::Bool(v)
+    }
+}
+
+impl From<&str> for AutoArg {
+    fn from(v: &str) -> Self {
+        AutoArg::Str(v.to_string())
+    }
+}
+
+impl From<String> for AutoArg {
+    fn from(v: String) -> Self {
+        AutoArg::Str(v)
+    }
+}
+
+impl From<Param> for AutoArg {
+    fn from(p: Param) -> Self {
+        AutoArg::Param(p)
+    }
+}
+
+impl From<i64> for AutoArg {
+    fn from(v: i64) -> Self {
+        AutoArg::I64(v)
+    }
 }
 
 /// A program constant. Its type is its value's type.
@@ -140,7 +194,8 @@ pub struct ProgramBuilder {
     pub(crate) const_deps: HashMap<Ref<tungsten_ir::Constant>, Vec<Ref<tungsten_ir::Constant>>>,
     inputs: HashMap<InputKey, Ref<DensityInput>>,
     hosts: HashMap<String, Host>,
-    tables: HashMap<PermutationTableInput, Ref<PermutationTableInput>>,
+    params: HashMap<String, Param>,
+    autos: HashMap<AutoConst, Auto>,
     fresh: HashMap<String, usize>,
     errors: Vec<BuildError>,
 }
@@ -160,14 +215,16 @@ impl ProgramBuilder {
                 entry_points: Vec::new(),
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
-                permutation_tables: Arena::new(),
+                auto_params: Arena::new(),
+                auto_consts: Arena::new(),
                 density_inputs: Arena::new(),
             },
             summaries: HashMap::new(),
             const_deps: HashMap::new(),
             inputs: HashMap::new(),
             hosts: HashMap::new(),
-            tables: HashMap::new(),
+            params: HashMap::new(),
+            autos: HashMap::new(),
             fresh: HashMap::new(),
             errors: Vec::new(),
         }
@@ -243,7 +300,7 @@ impl ProgramBuilder {
         let r = self.program.compute_units.insert(ComputeUnit::DensityFunction {
             function,
             density_inputs: s.inputs.clone(),
-            permutation_table_inputs: s.tables.clone(),
+            auto_consts: s.autos.clone(),
             host_inputs: s.hosts.clone(),
             helper_functions: s.helpers.clone(),
             constants: s.consts.clone(),
@@ -352,34 +409,71 @@ impl ProgramBuilder {
         h
     }
 
-    fn table(&mut self, t: PermutationTableInput, ty: VariableType) -> Table {
-        let ty = intern(ty);
-        if let Some(r) = self.tables.get(&t) {
-            return Table { r: *r, ty };
+    /// An auto param. The same name returns the same param; with another type that is
+    /// `AutoParamConflict`. Params are passed to the creation API in declaration order.
+    #[track_caller]
+    pub fn param(&mut self, name_: &str, t: VariableType) -> Param {
+        if let Some(p) = self.params.get(name_).copied() {
+            if *p.ty != t {
+                self.error(
+                    BuildErrorKind::AutoParamConflict {
+                        name: name_.to_string(),
+                        existing: name(p.ty),
+                        requested: name(&t),
+                    },
+                    None,
+                    Location::caller(),
+                );
+            }
+            return p;
         }
-        let r = self.program.permutation_tables.insert(t.clone());
-        self.tables.insert(t, r);
-        Table { r, ty }
+        let ty = intern(t.clone());
+        let r = self.program.auto_params.insert(AutoParam { name: name_.to_string(), t });
+        let p = Param { r, ty };
+        self.params.insert(name_.to_string(), p);
+        p
     }
 
-    /// A Perlin permutation table (`perm_table`).
-    pub fn perlin_table(&mut self, ident: &str, sub: Option<&str>, index: usize) -> Table {
-        self.table(
-            PermutationTableInput::PerlinNoise {
-                ident: ident.to_string(),
-                subident: sub.map(str::to_string),
-                subident_index: index,
-            },
-            VariableType::PermutationTable,
-        )
-    }
-
-    /// The Base3D noise sampler (`interpolated_noise_sampler`).
-    pub fn sampler_table(&mut self) -> Table {
-        self.table(
-            PermutationTableInput::Base3DNoise,
-            VariableType::InterpolatedNoiseSampler,
-        )
+    /// A value built at creation time by calling the runtime function `initializer` with
+    /// `args`. An equal autoconst (same type, initializer and arguments) is returned as is, and
+    /// the first name wins. A `Handle` type is what externs take; the program reads the result
+    /// like any expression.
+    pub fn auto_const(
+        &mut self,
+        name_: &str,
+        t: VariableType,
+        initializer: &str,
+        args: impl IntoIterator<Item = AutoArg>,
+    ) -> Auto {
+        let args: Vec<AutoConstArg> = args
+            .into_iter()
+            .map(|a| match a {
+                AutoArg::Param(p) => AutoConstArg::Param(p.r),
+                AutoArg::I64(v) => AutoConstArg::I64(v),
+                AutoArg::F64(v) => AutoConstArg::F64(v),
+                AutoArg::Bool(v) => AutoConstArg::Bool(v),
+                AutoArg::Str(v) => AutoConstArg::Str(v),
+            })
+            .collect();
+        let key = AutoConst {
+            name: String::new(),
+            t: t.clone(),
+            initializer: initializer.to_string(),
+            args: args.clone(),
+        };
+        if let Some(a) = self.autos.get(&key) {
+            return *a;
+        }
+        let ty = intern(t.clone());
+        let r = self.program.auto_consts.insert(AutoConst {
+            name: name_.to_string(),
+            t,
+            initializer: initializer.to_string(),
+            args,
+        });
+        let a = Auto { r, ty };
+        self.autos.insert(key, a);
+        a
     }
 
     /// A named constant. Its value must be a constant expression: literals, other constants,
@@ -511,7 +605,7 @@ fn to_const(
         Expression::FunctionCall { .. } => return not(found, "a function call"),
         Expression::ExternCall { .. } => return not(found, "an extern call"),
         Expression::DensityVariable(..) => return not(found, "a density read"),
-        Expression::PermutationTable(_) => return not(found, "a table"),
+        Expression::AutoConst(_) => return not(found, "an autoconst"),
         Expression::HostInput(_) => return not(found, "a host read"),
         Expression::Ambient(_) => return not(found, "an ambient"),
         Expression::ConstructExtern { .. } => return not(found, "a record construction"),

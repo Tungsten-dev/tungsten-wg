@@ -39,7 +39,7 @@ fn mutate(p: &mut OptimizedProgram, other: &OptimizedProgram, kind: usize, k: us
             false
         }
         4 => {
-            remove_nth(&mut p.permutation_tables, k);
+            remove_nth(&mut p.auto_consts, k);
             false
         }
         5 => {

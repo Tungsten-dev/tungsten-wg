@@ -20,7 +20,7 @@ pub fn sources() -> Vec<String> {
         include_str!("../../../tungsten-parse/tests/corpus/testing_md.tw").to_string(),
         snippet(
             "fn mk(x: f64) -> extern Pair { return new extern Pair { a: x, b: 1 }; }",
-            "let q: extern Pair = mk(p); return (q.a + ext sin(ext sample(table(t), density(d))));",
+            "let q: extern Pair = mk(p); return (q.a + ext sin(ext sample(auto(t), density(d))));",
         ),
         snippet(
             "",
@@ -302,10 +302,9 @@ pub fn rand_value(p: &Program, t: &Type, rng: &mut Rng) -> Value {
             *r,
             p.records.get(r.0).map(|d| d.fields.iter().map(|f| rand_value(p, f, rng)).collect()).unwrap_or_default(),
         ),
-        Type::PermTable | Type::Sampler => {
-            let want = if matches!(t, Type::PermTable) { TableKind::Perm } else { TableKind::Sampler };
-            let id = p.tables.iter().position(|d| d.kind == want).unwrap_or(0);
-            if want == TableKind::Perm { Value::PermTable(TableId(id)) } else { Value::Sampler(TableId(id)) }
+        Type::Handle(want) => {
+            let id = p.tables.iter().position(|d| d.ty == *want).unwrap_or(0);
+            Value::Handle(TableId(id))
         }
     }
 }

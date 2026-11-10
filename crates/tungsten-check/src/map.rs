@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tungsten_core::{ConstId, ExternId, FnId, HostId, InputId, LocalId, RecordId, TableId, UnitId};
 use tungsten_ir::{
-    ComputeUnit, Constant, DensityInput, Function, HostInput, PermutationTableInput, Ref, Var,
+    AutoConst, AutoParam, ComputeUnit, Constant, DensityInput, Function, HostInput, Ref, Var, VariableType,
 };
 
 /// A core id: a dense index.
@@ -110,6 +110,64 @@ pub struct RecordNames {
     pub fields: Vec<String>,
 }
 
+/// Index of an auto param, in declaration order. The core IR has no params.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoParamId(pub usize);
+
+impl CoreId for AutoParamId {
+    fn index(self) -> usize {
+        self.0
+    }
+    fn from_index(i: usize) -> Self {
+        AutoParamId(i)
+    }
+}
+
+/// Where the core program keeps an autoconst.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoCoreId {
+    /// A handle autoconst.
+    Table(TableId),
+    /// A value autoconst: a host after the program's real hosts.
+    Host(HostId),
+}
+
+/// An argument of an autoconst initializer, with params as indices into `auto_params`.
+#[derive(Debug, Clone)]
+pub enum AutoArgSpec {
+    Param(AutoParamId),
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    Str(String),
+}
+
+/// `F64` compares by bit pattern, as in the IR.
+impl PartialEq for AutoArgSpec {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Param(a), Self::Param(b)) => a == b,
+            (Self::I64(a), Self::I64(b)) => a == b,
+            (Self::F64(a), Self::F64(b)) => a.to_bits() == b.to_bits(),
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Str(a), Self::Str(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for AutoArgSpec {}
+
+/// An autoconst as declared, with its place in the core program.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoConstInfo {
+    pub core: AutoCoreId,
+    pub name: String,
+    pub t: VariableType,
+    pub initializer: String,
+    pub args: Vec<AutoArgSpec>,
+}
+
 /// The side table of a lowering: everything the core IR dropped that callers still need.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LowerMap {
@@ -119,10 +177,21 @@ pub struct LowerMap {
     pub hosts: IdMap<HostInput, HostId>,
     /// By `HostId`: the `Name::Named` string, which `host(name = …)` bindings resolve against.
     pub host_names: Vec<Option<String>>,
-    pub tables: IdMap<PermutationTableInput, TableId>,
-    /// By `TableId`: the table as written (`ident`, `subident`, `subident_index`).
-    pub table_idents: Vec<PermutationTableInput>,
+    /// The handle autoconsts, by `TableId`.
+    pub tables: IdMap<AutoConst, TableId>,
+    /// The value autoconsts and the hosts they lower to. Their ids follow the real hosts.
+    pub auto_hosts: HashMap<Ref<AutoConst>, HostId>,
+    /// By value autoconst, in order: the name of host `hosts.len() + i`.
+    pub auto_host_names: Vec<String>,
+    /// Auto params in declaration order.
+    pub auto_params: IdMap<AutoParam, AutoParamId>,
+    /// By `AutoParamId`.
+    pub auto_param_types: Vec<VariableType>,
+    /// Every autoconst in arena order, read or not.
+    pub auto_consts: Vec<AutoConstInfo>,
     pub inputs: IdMap<DensityInput, InputId>,
+    /// By `HandleTypeId`: the handle type names, in order of first appearance.
+    pub handle_types: Vec<String>,
     /// By `FnId`: that function's locals.
     pub locals: Vec<IdMap<Var, LocalId>>,
     /// By `ExternId`.
@@ -132,6 +201,22 @@ pub struct LowerMap {
 }
 
 impl LowerMap {
+    /// The display name of a host: its name, or for a value autoconst's host, the autoconst's.
+    pub fn host_name(&self, h: HostId) -> Option<&str> {
+        match self.hosts.name(h) {
+            Some(n) => Some(n),
+            None => self
+                .auto_host_names
+                .get(h.0.checked_sub(self.hosts.len())?)
+                .map(String::as_str),
+        }
+    }
+
+    /// Whether `h` is the host of a value autoconst rather than a program host.
+    pub fn is_auto_host(&self, h: HostId) -> bool {
+        h.0 >= self.hosts.len() && h.0 - self.hosts.len() < self.auto_host_names.len()
+    }
+
     pub fn extern_name(&self, e: ExternId) -> Option<&str> {
         self.externs.get(e.0).map(String::as_str)
     }

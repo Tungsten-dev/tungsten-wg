@@ -1,6 +1,6 @@
 //! Wire format between the harness and a generated driver (crate README, "Rules and contracts, Protocol").
 //!
-//! Little-endian. A request is `origin:[u64;3] seed:u64 host*`. A response is `0x00 value*` or
+//! Little-endian. A request is `origin:[u64;3] param* host*`. A response is `0x00 value*` or
 //! `0x01 kind:u8 len:u32 utf8[len]`. Values are positional and typed by the program, with no tags.
 
 use tungsten_check::Value;
@@ -27,7 +27,7 @@ pub fn kind_name(kind: u8) -> &'static str {
 /// Types a driver can encode: no tables, anywhere.
 pub fn has_table_type(t: &VariableType) -> bool {
     match t {
-        VariableType::PermutationTable | VariableType::InterpolatedNoiseSampler => true,
+        VariableType::Handle(_) => true,
         VariableType::Array(e, _) => has_table_type(e),
         _ => false,
     }
@@ -153,9 +153,12 @@ pub fn decode_value(r: &mut Reader, t: &VariableType, env: &TestEnv) -> Result<V
     })
 }
 
-/// What a program looks like on the wire: the static hosts (arena order) and the entries.
+/// What a program looks like on the wire: the auto params and static hosts (arena order) and
+/// the entries.
 #[derive(Debug, Clone)]
 pub struct TestIo {
+    /// Name and type of every auto param, in `auto_params` arena order.
+    pub params: Vec<(String, VariableType)>,
     /// Name and type of every static host, in `host_inputs` arena order.
     pub hosts: Vec<(String, VariableType)>,
     pub entries: Vec<EntryIo>,
@@ -175,6 +178,7 @@ impl EntryIo {
 
 impl TestIo {
     pub fn from_program(p: &OptimizedProgram) -> Result<TestIo, String> {
+        let params = p.auto_params.values().map(|a| (a.name.clone(), a.t.clone())).collect();
         let mut hosts = vec![];
         for (_, h) in p.host_inputs.iter() {
             match h {
@@ -190,7 +194,7 @@ impl TestIo {
                 EntryIo { ty: p.functions[*function].return_type.clone(), dims: e.dimensions }
             })
             .collect();
-        Ok(TestIo { hosts, entries })
+        Ok(TestIo { params, hosts, entries })
     }
 
     /// Entries that return tables can't be encoded (crate README, "Rules and contracts").
@@ -207,6 +211,10 @@ impl TestIo {
     }
 
     /// Bytes of the host part of a request.
+    pub fn param_bytes(&self, env: &TestEnv) -> Result<usize, String> {
+        self.params.iter().map(|(_, t)| size_of(t, env)).sum()
+    }
+
     pub fn host_bytes(&self, env: &TestEnv) -> Result<usize, String> {
         self.hosts.iter().map(|(_, t)| size_of(t, env)).sum()
     }
@@ -225,14 +233,20 @@ impl TestIo {
         &self,
         env: &TestEnv,
         origin: [f64; 3],
-        seed: u64,
+        params: &[(String, Value)],
         hosts: &[(String, Value)],
     ) -> Result<Vec<u8>, String> {
         let mut out = vec![];
         for o in origin {
             out.extend(o.to_bits().to_le_bytes());
         }
-        out.extend(seed.to_le_bytes());
+        for (name, t) in &self.params {
+            let (_, v) = params
+                .iter()
+                .find(|(n, _)| n == name)
+                .ok_or_else(|| format!("the case gives no value for param `{name}`"))?;
+            encode_value(v, t, env, &mut out)?;
+        }
         for (name, t) in &self.hosts {
             let (_, v) = hosts
                 .iter()
@@ -356,6 +370,7 @@ mod tests {
     fn golden_bytes() {
         let env = TestEnv::new();
         let io = TestIo {
+            params: vec![("seed".into(), VariableType::I64)],
             hosts: vec![("w".into(), VariableType::Extern("Wrap")), ("n".into(), VariableType::I8)],
             entries: vec![
                 EntryIo { ty: VariableType::Array(Box::new(VariableType::I32), 2), dims: (1, 1, 1) },
@@ -373,7 +388,7 @@ mod tests {
             ],
         );
         let req = io
-            .encode_request(&env, [1.5, -0.0, 2.0], 0x0102_0304_0506_0708, &[("n".into(), Value::I8(-3)), ("w".into(), wrap)])
+            .encode_request(&env, [1.5, -0.0, 2.0], &[("seed".into(), Value::I64(0x0102_0304_0506_0708))], &[("n".into(), Value::I8(-3)), ("w".into(), wrap)])
             .unwrap();
         let resp = io
             .encode_response(
@@ -400,19 +415,20 @@ mod tests {
         let env = TestEnv::new();
         let src = r#"
 program {
-    table p = perlin("minecraft:offset", none, 0);
-    fn run() -> perm_table { return table(p); }
-    unit u { main run; tables [p]; }
+    param seed: i64;
+    auto p: handle PerlinNoiseSampler = make_permutation_table(param(seed), 1L, 2L, 3L, 4L, 5L);
+    fn run() -> handle PerlinNoiseSampler { return auto(p); }
+    unit u { main run; autos [p]; }
     entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0) param(seed = 1)
 "#;
         let tf = crate::corpus::load_source(src, &env).unwrap();
         let io = TestIo::from_program(&tf.program).unwrap();
         let err = io.check_encodable().unwrap_err();
         assert!(err.contains("holds a table"), "{err}");
         // And a plain program is fine.
-        let ok = TestIo { hosts: vec![], entries: vec![EntryIo { ty: VariableType::F64, dims: (1, 1, 1) }] };
+        let ok = TestIo { params: vec![], hosts: vec![], entries: vec![EntryIo { ty: VariableType::F64, dims: (1, 1, 1) }] };
         ok.check_encodable().unwrap();
     }
 

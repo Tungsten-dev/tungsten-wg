@@ -114,6 +114,12 @@ pub enum BuildErrorKind {
         existing: String,
         requested: String,
     },
+    #[error("param `{name}` was declared as `{existing}`, and now as `{requested}`")]
+    AutoParamConflict {
+        name: String,
+        existing: String,
+        requested: String,
+    },
     #[error("a unit's main can't have parameters (it has {params})")]
     UnitHasParams { params: usize },
 }

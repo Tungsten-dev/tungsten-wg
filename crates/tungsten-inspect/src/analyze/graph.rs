@@ -204,7 +204,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
             let ComputeUnit::DensityFunction {
                 function,
                 density_inputs: _,
-                permutation_table_inputs,
+                auto_consts,
                 host_inputs,
                 helper_functions,
                 constants,
@@ -230,7 +230,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
             let unit_reads = ids_of(reads.get(&r));
             let unit_read_by = ids_of(read_by.get(&r));
 
-            let mut tables: Vec<String> = permutation_table_inputs
+            let mut tables: Vec<String> = auto_consts
                 .iter()
                 .map(|t| ctx.tables[t].id.clone())
                 .collect();

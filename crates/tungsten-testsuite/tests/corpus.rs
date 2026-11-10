@@ -150,17 +150,25 @@ fn runtime_externs_registered() -> Result<(), Failed> {
     let env = TestEnv::new();
     let map = tungsten_check::LowerMap {
         externs: env.spec().externs.iter().map(|e| e.name.clone()).collect(),
-        table_idents: vec![
-            tungsten_ir::PermutationTableInput::PerlinNoise {
-                ident: "x".into(),
-                subident: None,
-                subident_index: 0,
-            },
-            tungsten_ir::PermutationTableInput::Base3DNoise,
-        ],
         ..Default::default()
     };
-    let ext = tungsten_testsuite::externs::CaseExterns::new(&map, 1);
+    let (perlin_t, base3d_t) = (
+        tungsten_ir::VariableType::Handle("PerlinNoiseSampler"),
+        tungsten_ir::VariableType::Handle("InterpolatedNoiseSampler"),
+    );
+    let init = |id, t, initializer, args| tungsten_check::ResolvedAutoConst {
+        core: tungsten_check::AutoCoreId::Table(TableId(id)),
+        name: "x",
+        t,
+        initializer,
+        args,
+    };
+    use tungsten_check::AutoArgValue::I64;
+    let inits = [
+        init(0, &perlin_t, "make_permutation_table", [1, 2, 3, 4, 5, 6].map(I64).to_vec()),
+        init(1, &base3d_t, "make_base3d_perm_table", vec![I64(1)]),
+    ];
+    let ext = tungsten_testsuite::externs::CaseExterns::new(&map, &inits).map_err(Failed::from)?;
     for (i, e) in env.spec().externs.iter().enumerate() {
         let args: Vec<Value> = e
             .params
@@ -173,13 +181,13 @@ fn runtime_externs_registered() -> Result<(), Failed> {
                     T::I32 => Value::I32(3),
                     T::I64 => Value::I64(3),
                     T::Vec3 => Value::Vec3(F64x3 { x: 0, y: 0, z: 0 }),
-                    T::PermutationTable => Value::PermTable(TableId(0)),
-                    T::InterpolatedNoiseSampler => Value::Sampler(TableId(1)),
+                    T::Handle("PerlinNoiseSampler") => Value::Handle(TableId(0)),
+                    T::Handle("InterpolatedNoiseSampler") => Value::Handle(TableId(1)),
                     other => panic!("no sample argument for {other:?}"),
                 }
             })
             .collect();
-        ext.call(tungsten_core::ExternId(i), &args)
+        ext.0.call(tungsten_core::ExternId(i), &args)
             .map_err(|_| Failed::from(format!("extern `{}` failed on sample arguments", e.name)))?;
     }
     Ok(())

@@ -8,5 +8,5 @@ program {
     }
     entry u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0)
 @expect "c" u = [[0, 0, 0], [1, 2, 3]]

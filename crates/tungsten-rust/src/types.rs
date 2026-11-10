@@ -3,8 +3,6 @@ use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model as opt;
 use tungsten_ir::model::VariableType;
 
-use super::{BASE3D_NOISE_SAMPLER_STRUCT_NAME, PERLIN_NOISE_SAMPLER_STRUCT_NAME};
-
 /// Value type of a variable.
 pub fn convert_type(t: &VariableType) -> rcl::Type {
     match t {
@@ -16,12 +14,9 @@ pub fn convert_type(t: &VariableType) -> rcl::Type {
         VariableType::I32 => rcl::Type::I32,
         VariableType::I64 => rcl::Type::I64,
         VariableType::Bool => rcl::Type::Bool,
-        VariableType::PermutationTable => rcl::Type::Ref(Box::new(rcl::Type::Struct(
-            PERLIN_NOISE_SAMPLER_STRUCT_NAME.to_string(),
-        ))),
-        VariableType::InterpolatedNoiseSampler => rcl::Type::Ref(Box::new(rcl::Type::Struct(
-            BASE3D_NOISE_SAMPLER_STRUCT_NAME.to_string(),
-        ))),
+        VariableType::Handle(name) => {
+            rcl::Type::Ref(Box::new(rcl::Type::Struct(sanitize_name(name))))
+        }
         VariableType::Extern(name) => rcl::Type::Struct(sanitize_name(name)),
         VariableType::Array(element, size) => {
             rcl::Type::Array(Box::new(convert_type(element)), *size)
@@ -34,15 +29,11 @@ pub fn convert_type(t: &VariableType) -> rcl::Type {
 //     convert_type(return_type)
 // }
 
-/// Owned type of a permutation table field in `AutoConsts` (parameters borrow it instead).
-pub fn auto_const_type(table: &opt::PermutationTableInput) -> rcl::Type {
-    match table {
-        opt::PermutationTableInput::PerlinNoise { .. } => {
-            rcl::Type::Struct(PERLIN_NOISE_SAMPLER_STRUCT_NAME.to_string())
-        }
-        opt::PermutationTableInput::Base3DNoise => {
-            rcl::Type::Struct(BASE3D_NOISE_SAMPLER_STRUCT_NAME.to_string())
-        }
+/// Owned type of an autoconst field in `AutoConsts` (parameters borrow a handle instead).
+pub fn auto_const_type(t: &VariableType) -> rcl::Type {
+    match t {
+        VariableType::Handle(name) => rcl::Type::Struct(sanitize_name(name)),
+        t => convert_type(t),
     }
 }
 

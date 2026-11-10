@@ -8,6 +8,7 @@ pub mod corpus;
 pub mod env;
 pub mod externs;
 pub mod harness;
+pub mod hash;
 pub mod knownfail;
 pub mod oracle;
 pub mod registry;

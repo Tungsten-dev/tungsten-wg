@@ -8,13 +8,13 @@ pub(crate) mod types;
 
 use std::collections::HashMap;
 
-use tungsten_core::Type;
+use tungsten_core::{HandleTypeId, RecordId, Type};
 use tungsten_ir::{Arena, Function, OptimizedProgram, Ref, Var, VariableType};
 
 use crate::error::{Item, Location, LowerError, LowerErrorKind, Step};
 use crate::map::LowerMap;
-use crate::registry::Registry;
-use types::{TypeFail, lower_type};
+use crate::registry::{Registry, intern};
+use types::{TypeFail, TypeNames, lower_type};
 
 pub(crate) use consts::const_to_expr;
 pub(crate) use program::run;
@@ -36,6 +36,25 @@ pub(crate) struct Ctx<'p, 'r> {
     /// The function being lowered, and its locals.
     pub func: Option<&'p Function>,
     pub locals: HashMap<Ref<Var>, tungsten_core::LocalId>,
+    /// Handle type names by `HandleTypeId`: the registry's, then those only the program mentions.
+    pub handles: Vec<String>,
+    /// The value autoconst hosts the current function reads, in first-read order.
+    pub auto_reads: Vec<tungsten_core::HostId>,
+}
+
+struct CtxNames<'a> {
+    reg: &'a Registry,
+    handles: &'a mut Vec<String>,
+}
+
+impl TypeNames for CtxNames<'_> {
+    fn record(&mut self, name: &'static str) -> Option<RecordId> {
+        self.reg.record_id(name)
+    }
+
+    fn handle(&mut self, name: &'static str) -> HandleTypeId {
+        intern(self.handles, name)
+    }
 }
 
 impl<'p, 'r> Ctx<'p, 'r> {
@@ -68,7 +87,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
     /// Lowers a type at the current location. Failures become errors and a placeholder.
     pub(crate) fn ty(&mut self, t: &VariableType) -> Type {
         let reg = self.reg;
-        match lower_type(t, &mut |n| reg.record_id(n)) {
+        match lower_type(t, &mut CtxNames { reg, handles: &mut self.handles }) {
             Ok(t) => t,
             Err(TypeFail::UnknownRecord(n)) => {
                 self.err(LowerErrorKind::UnknownRecord(n.to_string()));

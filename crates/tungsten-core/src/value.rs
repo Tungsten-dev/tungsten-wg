@@ -31,8 +31,7 @@ pub enum Value {
     Array(Vec<Value>),
     /// Fields in declaration order.
     Record(RecordId, Vec<Value>),
-    PermTable(TableId),
-    Sampler(TableId),
+    Handle(TableId),
 }
 
 /// Why evaluation got stuck. Unreachable for programs and cases that pass `check` and
@@ -132,8 +131,7 @@ pub fn clone_value(v: &Value) -> Value
             }
             Value::Record(*r, out)
         },
-        Value::PermTable(t) => Value::PermTable(*t),
-        Value::Sampler(t) => Value::Sampler(*t),
+        Value::Handle(t) => Value::Handle(*t),
     }
 }
 
@@ -219,18 +217,8 @@ pub fn value_has_type(p: &Program, v: &Value, t: &Type) -> bool
             }
             true
         },
-        (Value::PermTable(h), Type::PermTable) => match get(&p.tables, h.0) {
-            Some(d) => match d.kind {
-                TableKind::Perm => true,
-                TableKind::Sampler => false,
-            },
-            None => false,
-        },
-        (Value::Sampler(h), Type::Sampler) => match get(&p.tables, h.0) {
-            Some(d) => match d.kind {
-                TableKind::Perm => false,
-                TableKind::Sampler => true,
-            },
+        (Value::Handle(h), Type::Handle(ty)) => match get(&p.tables, h.0) {
+            Some(d) => d.ty.0 == ty.0,
             None => false,
         },
         _ => false,
@@ -261,7 +249,7 @@ mod tests {
             functions: vec![],
             consts: vec![],
             hosts: vec![],
-            tables: vec![TableDecl { kind: TableKind::Perm }, TableDecl { kind: TableKind::Sampler }],
+            tables: vec![TableDecl { ty: HandleTypeId(0) }, TableDecl { ty: HandleTypeId(1) }],
             inputs: vec![],
             entries: vec![],
             externs: vec![],
@@ -272,11 +260,13 @@ mod tests {
     #[test]
     fn tables() {
         let p = prog();
-        assert!(value_has_type(&p, &Value::PermTable(TableId(0)), &Type::PermTable));
-        assert!(!value_has_type(&p, &Value::PermTable(TableId(1)), &Type::PermTable), "kind must match");
-        assert!(value_has_type(&p, &Value::Sampler(TableId(1)), &Type::Sampler));
-        assert!(!value_has_type(&p, &Value::Sampler(TableId(2)), &Type::Sampler), "id in range");
-        assert!(!value_has_type(&p, &Value::PermTable(TableId(0)), &Type::Sampler));
+        let h0 = Type::Handle(HandleTypeId(0));
+        let h1 = Type::Handle(HandleTypeId(1));
+        assert!(value_has_type(&p, &Value::Handle(TableId(0)), &h0));
+        assert!(!value_has_type(&p, &Value::Handle(TableId(1)), &h0), "handle type must match");
+        assert!(value_has_type(&p, &Value::Handle(TableId(1)), &h1));
+        assert!(!value_has_type(&p, &Value::Handle(TableId(2)), &h1), "id in range");
+        assert!(!value_has_type(&p, &Value::Handle(TableId(0)), &h1), "a sampler is not a perm table");
     }
 
     #[test]

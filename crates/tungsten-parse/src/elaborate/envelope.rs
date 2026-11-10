@@ -31,7 +31,8 @@ impl<'a> Ctx<'a> {
                 entry_points: vec![],
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
-                permutation_tables: Arena::new(),
+                auto_params: Arena::new(),
+                auto_consts: Arena::new(),
                 density_inputs: Arena::new(),
             },
             source_map: Default::default(),
@@ -51,14 +52,14 @@ impl<'a> Ctx<'a> {
             if let DirectiveKind::Case {
                 name,
                 origin,
-                seed,
+                params,
                 hosts,
             } = &d.kind
             {
                 if case_index.insert(name.clone(), t.cases.len()).is_some() {
                     return err(d.span, format!("duplicate case \"{name}\""));
                 }
-                t.cases.push(self.case(d.span, name, origin, *seed, hosts)?);
+                t.cases.push(self.case(d.span, name, origin, params, hosts)?);
             }
         }
 
@@ -155,11 +156,40 @@ impl<'a> Ctx<'a> {
         span: Span,
         name: &str,
         origin: &[ast::Lit; 3],
-        seed: u64,
+        param_bindings: &[(ast::Label, AstValue)],
         bindings: &[(ast::Label, AstValue)],
     ) -> R<Case> {
         let [x, y, z] = origin.each_ref().map(attr_f64);
         let o = [x?, y?, z?];
+        let mut bound_params: HashMap<Ref<AutoParam>, Value> = HashMap::new();
+        for (label, v) in param_bindings {
+            let p = self.lookup_auto_param(label)?;
+            let ty = self.prog.auto_params[p].t.clone();
+            let value = self.param_value(v, &ty)?;
+            if bound_params.insert(p, value).is_some() {
+                return err(label.span, format!("`{}` is bound twice", label.display()));
+            }
+        }
+        let mut params = vec![];
+        for (p, _) in self.prog.auto_params.iter() {
+            match bound_params.remove(&p) {
+                Some(v) => params.push((p, v)),
+                None => {
+                    let label = self
+                        .auto_params
+                        .iter()
+                        .find(|(_, r)| **r == p)
+                        .map(|(k, _)| k.display());
+                    return err(
+                        span,
+                        format!(
+                            "case \"{name}\" doesn't bind the param `{}`",
+                            label.unwrap_or_default()
+                        ),
+                    );
+                }
+            }
+        }
         let mut bound: HashMap<Ref<HostInput>, Value> = HashMap::new();
         let mut hosts = vec![];
         for (label, v) in bindings {
@@ -195,7 +225,7 @@ impl<'a> Ctx<'a> {
         Ok(Case {
             name: name.to_string(),
             origin: o,
-            seed,
+            params,
             hosts,
             span,
         })
@@ -324,6 +354,33 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The value of an auto param. An `i64` also takes an unsuffixed literal, and a decimal or
+    /// hex one up to `u64::MAX`, reinterpreted as bits.
+    fn param_value(&self, v: &AstValue, ty: &VariableType) -> R<Value> {
+        if let (VariableType::I64, AstValueKind::Lit(l)) = (ty, &v.kind)
+            && let LitKind::Num { raw, neg } = &l.kind
+            && matches!(raw.kind, NumKind::Int | NumKind::Long)
+        {
+            if !*neg && raw.radix == 10 {
+                if let Ok(x) = raw.digits.parse::<u64>() {
+                    return Ok(Value::I64(x as i64));
+                }
+            }
+            let long = ast::Lit {
+                span: l.span,
+                kind: LitKind::Num {
+                    raw: crate::ast::RawNum { kind: NumKind::Long, suffixed: true, ..raw.clone() },
+                    neg: *neg,
+                },
+            };
+            return match numlit::convert(&long.kind, Some(NumKind::Long)) {
+                Ok(n) => Ok(n.into_value()),
+                Err(m) => err(l.span, m),
+            };
+        }
+        self.value(v, ty)
+    }
+
     /// A value, typed by the type it is expected to have.
     pub(super) fn value(&self, v: &AstValue, ty: &VariableType) -> R<Value> {
         stack::grow(|| self.value_inner(v, ty))
@@ -381,11 +438,7 @@ impl<'a> Ctx<'a> {
                 }
                 self.record_value(v, name, fields)?
             }
-            (
-                VariableType::PermutationTable
-                | VariableType::InterpolatedNoiseSampler,
-                _,
-            ) => {
+            (VariableType::Handle(_), _) => {
                 return err(v.span, format!("{} has no literal values", type_text(ty)));
             }
             _ => return mismatch(),

@@ -13,7 +13,8 @@ pub struct Labels {
     units: HashMap<Ref<ComputeUnit>, String>,
     constants: HashMap<Ref<Constant>, String>,
     hosts: HashMap<Ref<HostInput>, String>,
-    tables: HashMap<Ref<PermutationTableInput>, String>,
+    auto_params: HashMap<Ref<AutoParam>, String>,
+    auto_consts: HashMap<Ref<AutoConst>, String>,
     vars: HashMap<(Ref<Function>, Ref<Var>), String>,
     inputs: HashMap<Ref<DensityInput>, String>,
     entries: Vec<String>,
@@ -116,8 +117,13 @@ impl Labels {
             l.hosts.insert(r, s);
         }
 
-        for (i, (r, _)) in p.permutation_tables.iter().enumerate() {
-            l.tables.insert(r, format!("t{i}"));
+        let names: Vec<Name> = p.auto_params.values().map(|a| Name::Named(a.name.clone())).collect();
+        for (r, s) in name_labels(p.auto_params.iter().zip(&names).map(|((r, _), n)| (r, Some(n)))) {
+            l.auto_params.insert(r, s);
+        }
+
+        for (i, (r, _)) in p.auto_consts.iter().enumerate() {
+            l.auto_consts.insert(r, format!("a{i}"));
         }
 
         for (f, func) in p.functions.iter() {
@@ -174,7 +180,8 @@ impl Labels {
         unit(units: ComputeUnit) "a compute unit that is not in the program";
         constant(constants: Constant) "a constant that is not in the program";
         host(hosts: HostInput) "a host input that is not in the program";
-        table(tables: PermutationTableInput) "a permutation table that is not in the program";
+        auto_const(auto_consts: AutoConst) "an autoconst that is not in the program";
+        auto_param(auto_params: AutoParam) "an auto param that is not in the program";
         input(inputs: DensityInput) "a density input that is not in the program";
     }
 

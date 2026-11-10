@@ -245,7 +245,11 @@ Program {
         },
         ExternDecl {
             params: [
-                PermTable,
+                Handle(
+                    HandleTypeId(
+                        0,
+                    ),
+                ),
                 I32,
             ],
             ret: I32,
@@ -253,7 +257,11 @@ Program {
         },
         ExternDecl {
             params: [
-                Sampler,
+                Handle(
+                    HandleTypeId(
+                        1,
+                    ),
+                ),
                 Vec3,
             ],
             ret: F64,

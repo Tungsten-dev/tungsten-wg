@@ -14,6 +14,7 @@
 
 pub use tungsten_core as core_ir;
 
+mod auto;
 mod check;
 mod error;
 mod eval;
@@ -28,15 +29,18 @@ pub use error::{
     EntityKind, Item, Location, LowerError, LowerErrorKind, LowerErrors,
     ParameterProblem, Step,
 };
+pub use auto::{AutoArgValue, ParamBindError, ResolvedAutoConst};
 pub use check::{CheckError, CheckErrorKind, CheckErrors, Invalid, ReturnHint, UnassignedHint};
 pub use eval::{
     CaseBindError, DEFAULT_FUEL, EvalFailure, EvalOptions, EvaluateError, NamedCase, Prepared,
     check_lowered, evaluate, prepare,
 };
-pub use map::{CoreId, IdMap, LowerMap, RecordNames};
+pub use map::{
+    AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, CoreId, IdMap, LowerMap, RecordNames,
+};
 pub use tungsten_core::exec::{CaseResult, Failure};
 pub use tungsten_core::{Case, EvalError, ExternFail, Externs, StuckReason, Value};
-pub use registry::{Registry, RegistryBuilder, RegistryError};
+pub use registry::{AutoArgType, InitializerDecl, Registry, RegistryBuilder, RegistryError};
 
 use tungsten_ir::OptimizedProgram;
 

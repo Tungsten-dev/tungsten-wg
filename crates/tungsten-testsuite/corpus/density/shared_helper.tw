@@ -34,6 +34,6 @@ program {
     entry left @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     entry right @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0)
 @expect "c" left = [0, 10, 20, 30]
 @expect "c" right = [0, 20, 40, 60]

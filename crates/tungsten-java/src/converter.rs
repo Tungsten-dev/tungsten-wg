@@ -12,7 +12,7 @@ use tungsten_interface::naming::{NamingRules, java_sanitize};
 use crate::model as java;
 use tungsten_ir::model::{Name, VariableType};
 use tungsten_ir::model::{
-    Constant, Expression, Function, OptimizedProgram, PermutationTableInput, Ref, Var,
+    Constant, Expression, Function, OptimizedProgram, Ref, Var,
 };
 
 /// Converts one function body. Collects the helpers and constants it references so the
@@ -116,10 +116,7 @@ impl<'a> FunctionConverter<'a> {
             E::DensityVariable(input, _) => {
                 unit_return_type(self.program, self.program.density_inputs[*input].density_function).clone()
             }
-            E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
-                PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,
-                PermutationTableInput::Base3DNoise => VariableType::InterpolatedNoiseSampler,
-            },
+            E::AutoConst(r) => self.program.auto_consts[*r].t.clone(),
             E::HostInput(r) => self.program.host_inputs[*r].get_type(),
             E::Ambient(k) => match k {
                 tungsten_ir::model::AmbientKind::Pos3 => VariableType::Pos3,

@@ -19,15 +19,15 @@ every value with the interpreter, on the original and on the inlined program. CU
 Every file under `corpus/` gets these tests. The test names look like `ops/i32::interp`, so you can
 filter with `cargo test`.
 
-| Test | What it checks |
-| --- | --- |
-| `::roundtrip` | Printing a program and parsing it back gives the same program, and printing again gives the same text. |
-| `::lowering` | Lowering keeps the counts of functions, constants, hosts and so on, and gives the same result twice. It also compares the lowered program with a saved snapshot in `tests/snapshots/`. |
-| `::interp` | Every `@case` runs on the interpreter and matches its `@expect` lines. It runs with memoization on and off, and both must agree. |
-| `::inline` | After inlining, the interpreter gives the same cell values as before. |
-| `::rust::original` | The program is compiled by the Rust backend, run on every case, and every value is compared bit for bit with the interpreter (any NaN equals any NaN). |
-| `::rust::inlined` | The same for the inlined program. The expected values are still the interpreter's on the original program. |
-| `::load` | Only appears if the file doesn't load or a directive is invalid. The file then gets no other tests. |
+| Test               | What it checks                                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `::roundtrip`      | Printing a program and parsing it back gives the same program, and printing again gives the same text.                                                                                 |
+| `::lowering`       | Lowering keeps the counts of functions, constants, hosts and so on, and gives the same result twice. It also compares the lowered program with a saved snapshot in `tests/snapshots/`. |
+| `::interp`         | Every `@case` runs on the interpreter and matches its `@expect` lines. It runs with memoization on and off, and both must agree.                                                       |
+| `::inline`         | After inlining, the interpreter gives the same cell values as before.                                                                                                                  |
+| `::rust::original` | The program is compiled by the Rust backend, run on every case, and every value is compared bit for bit with the interpreter (any NaN equals any NaN).                                 |
+| `::rust::inlined`  | The same for the inlined program. The expected values are still the interpreter's on the original program.                                                                             |
+| `::load`           | Only appears if the file doesn't load or a directive is invalid. The file then gets no other tests.                                                                                    |
 
 Files that expect a rejection (`@expect reject`) only get `roundtrip`, `lowering` (if lowering
 works) and `interp`.
@@ -60,11 +60,11 @@ runtime files, compiler flags and the compiler version; for CUDA also the GPU li
 run builds nothing. Builds go to a temp directory and are renamed into place, so concurrent test binaries
 are safe. A failed build leaves its sources in `<hash>.failed/`.
 
-| Backend | Build |
-| --- | --- |
-| Rust | `rustc --edition 2024 -C opt-level=3 -C overflow-checks=on -C panic=unwind --cap-lints allow` (direct `rustc`: no `Cargo.toml` and no nested cargo locks; `--cap-lints allow` so a literal `1 / 0` still reaches runtime) |
-| Java | `javac --release 21`, run as `java -XX:+UseSerialGC -cp <classes> t_<hash>.Driver` |
-| CUDA | `nvcc -std=c++20 -O3 -w --fmad=false --prec-div=true --prec-sqrt=true --ftz=false -arch=sm_XY` (arch of GPU 0; never `--use_fast_math`) |
+| Backend | Build                                                                                                                                                                                                                     |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust    | `rustc --edition 2024 -C opt-level=3 -C overflow-checks=on -C panic=unwind --cap-lints allow` (direct `rustc`: no `Cargo.toml` and no nested cargo locks; `--cap-lints allow` so a literal `1 / 0` still reaches runtime) |
+| Java    | `javac --release 21`, run as `java -XX:+UseSerialGC -cp <classes> t_<hash>.Driver`                                                                                                                                        |
+| CUDA    | `nvcc -std=c++20 -O3 -w --fmad=false --prec-div=true --prec-sqrt=true --ftz=false -arch=sm_XY` (arch of GPU 0; never `--use_fast_math`)                                                                                   |
 
 A cold run of the whole corpus on both stages with CUDA takes about 45 s on a GTX 1650 Ti, a warm run about 25 s.
 
@@ -84,7 +84,7 @@ program {
     unit u { main run; }
     entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0) param(seed = 1)
 @expect "c" u[0, 0, 0] = -2147483648
 ```
 
@@ -126,9 +126,11 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   listed in `registry.toml`. They are written once in `runtime/rust/`. `min` and `max` follow Java
   (`-0.0 < 0.0`, NaN wins). `test_domain` fails for negative input so the extern-domain error can be
   tested.
-- **Toy tables.** Real Perlin and Base3D noise are not tested here. Instead the permutation table and
-  sampler are simple functions of the case's seed and the table's name (definition below). They are
-  exact in every language, so backends are compared bit for bit.
+- **Toy tables and initializers.** The testsuite acts as a small frontend. Real Perlin and Base3D noise are
+  not tested here: the permutation table and sampler are simple functions of integer initializer
+  arguments, and the value initializers (`make_salt`, `make_bits`, …) cover the other argument kinds and
+  scalar types (see `SPEC.md` §5.3). They are exact in every language, so backends are compared bit for
+  bit. `tests/isolation.rs` fails if `perlin`, `base3d` or `md5` appear in the library crates.
 - **The prelude.** The transcendentals are series approximations built from `+ - * /`, so every backend
   compiles the same arithmetic. The tests check exact points and agreement with libm to 1e-9.
 - **Known backend gaps.** Integer overflow, `>>>`, float to `i8` casts and failing constants on the
@@ -180,15 +182,15 @@ fail it. Backends that only emit used constants are `@knownfail` until they emit
 
 **Scoring per case:**
 
-| Situation | Result |
-| --- | --- |
-| Interpreter `OutOfFuel` anywhere | Not run, not scored |
-| Interpreter error on CUDA | Not run, not scored (also when the build fails) |
-| Interpreter clean, backend returns equal values | Pass |
-| Interpreter clean, backend differs, fails, crashes or times out | Fail |
-| Interpreter error, backend fails, crashes or times out | Pass; the kind is shown, never compared |
-| Interpreter error, backend returns | Fail |
-| `generate` panics or errors, or the build fails | Fail, for every case that would have run |
+| Situation                                                       | Result                                          |
+| --------------------------------------------------------------- | ----------------------------------------------- |
+| Interpreter `OutOfFuel` anywhere                                | Not run, not scored                             |
+| Interpreter error on CUDA                                       | Not run, not scored (also when the build fails) |
+| Interpreter clean, backend returns equal values                 | Pass                                            |
+| Interpreter clean, backend differs, fails, crashes or times out | Fail                                            |
+| Interpreter error, backend fails, crashes or times out          | Pass; the kind is shown, never compared         |
+| Interpreter error, backend returns                              | Fail                                            |
+| `generate` panics or errors, or the build fails                 | Fail, for every case that would have run        |
 
 A build failure always fails, even where the interpreter predicts an error, so "compiled means comparable" and
 a compile bug can't hide in an error-only test. `generate` runs inside `catch_unwind`, because backends panic on
@@ -261,24 +263,24 @@ turns `externs/math_*` red.
 
 ## Design decisions
 
-| Topic | Decision | Rejected, and why |
-| --- | --- | --- |
-| Scope | Rust, then Java, then CUDA, with the design fitting all of them | All at once: the largest block of work precedes anything running. Excluding CUDA: risks protocol rework. |
-| Build isolation | Batch per `(backend, dir, stage)` with per-test fallback | Always per test: too slow. Parsing compiler diagnostics: tied to compiler formats, and one error can hide others. Whole corpus as one batch: any edit rebuilds everything. Hash shards: batches with no meaning. |
-| Build failure on error cases | Always a failure | Accepting when all cases error: real compile bugs pass silently. Matching E0080: ties the harness to rustc codes. |
-| Test runner | `libtest-mimic`, one trial per check | One `#[test]` per level: no per-file filtering. `build.rs` generation: more machinery for the same result. |
-| `OutOfFuel` | Interpreter-only | Requiring a hang: costs a timeout per case and can't tell slow from infinite. Banning it: fuel couldn't be covered by the corpus. |
-| Unread failing const | Strict; backends must evaluate all listed consts, `@knownfail` until they do | Don't-care: weaker contract, though it would spare production output. Checker rejection: changes verified code and could trip on legitimate IR. |
-| Processes | One per `(test, stage)`, resume after a crash | Long-lived per batch: state leaks and restart logic. Per case: JVM start per case. |
-| Lowering checks | Invariants plus `insta` snapshots | Invariants only: misses silent lowering drift. Hand-rolled bless: same churn plus custom tooling. |
-| Backend conformance | Out of scope; gaps stay `@knownfail` | Fixing them here: bigger, and loses a clean record of bugs found. |
-| Toolchains | Auto-detect; `TW_REQUIRE` makes a missing one fail | CUDA opt-in: risks going stale. All explicit: Java regressions only seen in CI. |
-| Extern implementation | One shared Rust source for interpreter and Rust backend | Two copies: drift gives false alarms for one-line functions. |
-| Records | Generated from `registry.toml` | Hand-written: three edits per record, and mismatches surface only in tests that use them. |
-| Toy tables | Over the generated arguments (MD5 ids) | Passing strings: changes production backends purely for tests. |
-| Rust `rustc` | Direct `rustc` on a batch crate | Generated `Cargo.toml`: nested cargo locks for a crate with no dependencies. |
-| CUDA layout | One `nvcc` run per test (no `-rdc`), objects cached by content and linked per batch | Per-batch compile: a fallback would recompile everything. |
-| GPU jobs | One global lock around the process phase | Unbounded parallel GPU processes: sticky device errors and contention. |
+| Topic                        | Decision                                                                            | Rejected, and why                                                                                                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope                        | Rust, then Java, then CUDA, with the design fitting all of them                     | All at once: the largest block of work precedes anything running. Excluding CUDA: risks protocol rework.                                                                                                         |
+| Build isolation              | Batch per `(backend, dir, stage)` with per-test fallback                            | Always per test: too slow. Parsing compiler diagnostics: tied to compiler formats, and one error can hide others. Whole corpus as one batch: any edit rebuilds everything. Hash shards: batches with no meaning. |
+| Build failure on error cases | Always a failure                                                                    | Accepting when all cases error: real compile bugs pass silently. Matching E0080: ties the harness to rustc codes.                                                                                                |
+| Test runner                  | `libtest-mimic`, one trial per check                                                | One `#[test]` per level: no per-file filtering. `build.rs` generation: more machinery for the same result.                                                                                                       |
+| `OutOfFuel`                  | Interpreter-only                                                                    | Requiring a hang: costs a timeout per case and can't tell slow from infinite. Banning it: fuel couldn't be covered by the corpus.                                                                                |
+| Unread failing const         | Strict; backends must evaluate all listed consts, `@knownfail` until they do        | Don't-care: weaker contract, though it would spare production output. Checker rejection: changes verified code and could trip on legitimate IR.                                                                  |
+| Processes                    | One per `(test, stage)`, resume after a crash                                       | Long-lived per batch: state leaks and restart logic. Per case: JVM start per case.                                                                                                                               |
+| Lowering checks              | Invariants plus `insta` snapshots                                                   | Invariants only: misses silent lowering drift. Hand-rolled bless: same churn plus custom tooling.                                                                                                                |
+| Backend conformance          | Out of scope; gaps stay `@knownfail`                                                | Fixing them here: bigger, and loses a clean record of bugs found.                                                                                                                                                |
+| Toolchains                   | Auto-detect; `TW_REQUIRE` makes a missing one fail                                  | CUDA opt-in: risks going stale. All explicit: Java regressions only seen in CI.                                                                                                                                  |
+| Extern implementation        | One shared Rust source for interpreter and Rust backend                             | Two copies: drift gives false alarms for one-line functions.                                                                                                                                                     |
+| Records                      | Generated from `registry.toml`                                                      | Hand-written: three edits per record, and mismatches surface only in tests that use them.                                                                                                                        |
+| Toy tables                   | Over the generated arguments (MD5 ids)                                              | Passing strings: changes production backends purely for tests.                                                                                                                                                   |
+| Rust `rustc`                 | Direct `rustc` on a batch crate                                                     | Generated `Cargo.toml`: nested cargo locks for a crate with no dependencies.                                                                                                                                     |
+| CUDA layout                  | One `nvcc` run per test (no `-rdc`), objects cached by content and linked per batch | Per-batch compile: a fallback would recompile everything.                                                                                                                                                        |
+| GPU jobs                     | One global lock around the process phase                                            | Unbounded parallel GPU processes: sticky device errors and contention.                                                                                                                                           |
 
 Small choices, easy to revisit: md5 for cache keys, a 10-second watchdog, `_f32` suffix instead of overloads,
 `@cells` comparing after a full run.

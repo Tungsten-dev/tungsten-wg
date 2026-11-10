@@ -86,7 +86,7 @@ impl Names<'_> {
         or_id(self.map.consts.name(c), c.0)
     }
     fn host(&self, h: tungsten_core::HostId) -> String {
-        or_id(self.map.hosts.name(h), h.0)
+        or_id(self.map.host_name(h), h.0)
     }
     fn table(&self, t: tungsten_core::TableId) -> String {
         or_id(self.map.tables.name(t), t.0)
@@ -122,8 +122,10 @@ impl Names<'_> {
             Type::Pos3 => "pos3".into(),
             Type::Array(inner, n) => format!("[{}; {n}]", self.ty(inner)),
             Type::Record(r) => format!("extern {}", self.record(*r)),
-            Type::PermTable => "perm_table".into(),
-            Type::Sampler => "interpolated_noise_sampler".into(),
+            Type::Handle(h) => match self.map.handle_types.get(h.0) {
+                Some(name) => format!("handle {name}"),
+                None => format!("handle #{}", h.0),
+            },
         }
     }
 
@@ -132,6 +134,7 @@ impl Names<'_> {
             CoreItem::Function(f) => Item::Function { id: Some(f), name: self.func(f) },
             CoreItem::Const(c) => Item::Constant { id: Some(c), name: self.konst(c) },
             CoreItem::Unit(u) => Item::Unit { id: Some(u), name: self.unit(u) },
+            CoreItem::Host(h) if self.map.is_auto_host(h) => Item::AutoConst { id: None, name: self.host(h) },
             CoreItem::Host(h) => Item::Host { id: Some(h), name: self.host(h) },
             CoreItem::Input(x) => Item::Input { id: Some(x), name: self.input(x) },
             CoreItem::Entry(e) => Item::Entry { index: e },
@@ -276,6 +279,11 @@ impl Names<'_> {
                 self.unit(*unit)
             ),
             K::HostNotInFn { host } => format!("host `{}` is read but isn't in this fn's `@hosts`", self.host(*host)),
+            K::HostNotInUnit { unit, host } if self.map.is_auto_host(*host) => format!(
+                "autoconst `{}` isn't in the autos of unit `{}`",
+                self.host(*host),
+                self.unit(*unit)
+            ),
             K::HostNotInUnit { unit, host } => format!(
                 "host `{}` isn't in the hosts of unit `{}`",
                 self.host(*host),

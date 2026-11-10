@@ -183,7 +183,12 @@ fn dangling_lists() {
         value: ConstExpr::Double(1.0),
         name: "c".into(),
     });
-    let t = p.permutation_tables.insert(PermutationTableInput::Base3DNoise);
+    let t = p.auto_consts.insert(AutoConst {
+        name: "t".into(),
+        t: VariableType::Handle("Noise"),
+        initializer: "make".into(),
+        args: vec![],
+    });
     let leaf = p.functions.insert(function("leaf", &[], &[], VariableType::F64, |_| vec![]));
     let src = p.compute_units.insert(unit(leaf));
     let d = p.density_inputs.insert(DensityInput {
@@ -197,14 +202,14 @@ fn dangling_lists() {
     let mut u = unit(main);
     let ComputeUnit::DensityFunction {
         density_inputs,
-        permutation_table_inputs,
+        auto_consts,
         host_inputs,
         helper_functions,
         constants,
         ..
     } = &mut u;
     density_inputs.push(d);
-    permutation_table_inputs.push(t);
+    auto_consts.push(t);
     host_inputs.push(h);
     helper_functions.push(helper);
     constants.push(c);
@@ -213,13 +218,13 @@ fn dangling_lists() {
     p.functions.remove(helper);
     p.host_inputs.remove(h);
     p.constants.remove(c);
-    p.permutation_tables.remove(t);
+    p.auto_consts.remove(t);
     assert_eq!(
         errs(&p, &registry()),
         [
             "fn `main` › hosts 0: dangling reference to a host input",
             "unit `main` › inputs 0: dangling reference to a density input",
-            "unit `main` › tables 0: dangling reference to a permutation table",
+            "unit `main` › autos 0: dangling reference to an autoconst",
             "unit `main` › hosts 0: dangling reference to a host input",
             "unit `main` › helpers 0: dangling reference to a function",
             "unit `main` › consts 0: dangling reference to a constant",

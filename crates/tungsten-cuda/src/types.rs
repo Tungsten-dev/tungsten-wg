@@ -8,7 +8,6 @@ use tungsten_ir::model as opt;
 use tungsten_ir::model::VariableType;
 
 use crate::model as cuda;
-use crate::{BASE3D_NOISE_SAMPLER_TYPE, PERLIN_NOISE_SAMPLER_TYPE};
 
 /// Device type of a value.
 pub fn device_type(t: &VariableType) -> cuda::Type {
@@ -22,8 +21,7 @@ pub fn device_type(t: &VariableType) -> cuda::Type {
         VariableType::I32 => T::Int,
         VariableType::I64 => T::LongLong,
         VariableType::Bool => T::Bool,
-        VariableType::PermutationTable => T::const_ptr(T::named(PERLIN_NOISE_SAMPLER_TYPE)),
-        VariableType::InterpolatedNoiseSampler => T::const_ptr(T::named(BASE3D_NOISE_SAMPLER_TYPE)),
+        VariableType::Handle(name) => T::const_ptr(T::Named(format!("tw::{}", cuda_sanitize(name)))),
         VariableType::Extern(name) => T::Named(format!("tw::{}", cuda_sanitize(name))),
         VariableType::Array(element, n) => T::Array(Box::new(device_type(element)), *n),
     }
@@ -48,13 +46,11 @@ pub fn public_type(t: &VariableType) -> Option<cuda::Type> {
     })
 }
 
-/// Owned type of a permutation table field in `AutoConsts` (parameters point to it instead).
-pub fn auto_const_type(table: &opt::PermutationTableInput) -> cuda::Type {
-    match table {
-        opt::PermutationTableInput::PerlinNoise { .. } => {
-            cuda::Type::named(PERLIN_NOISE_SAMPLER_TYPE)
-        }
-        opt::PermutationTableInput::Base3DNoise => cuda::Type::named(BASE3D_NOISE_SAMPLER_TYPE),
+/// Owned type of an autoconst field in `AutoConsts` (parameters point to a handle instead).
+pub fn auto_const_type(t: &VariableType) -> cuda::Type {
+    match t {
+        VariableType::Handle(name) => cuda::Type::Named(format!("tw::{}", cuda_sanitize(name))),
+        t => device_type(t),
     }
 }
 
@@ -69,10 +65,7 @@ pub fn unit_return_type(
 
 /// Whether the device representation of `t` is a pointer (samplers).
 pub fn is_pointer(t: &VariableType) -> bool {
-    matches!(
-        t,
-        VariableType::PermutationTable | VariableType::InterpolatedNoiseSampler
-    )
+    matches!(t, VariableType::Handle(_))
 }
 
 pub fn is_vector(t: &VariableType) -> bool {

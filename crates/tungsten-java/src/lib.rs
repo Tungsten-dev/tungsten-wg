@@ -20,8 +20,8 @@
 //! - `size`: bytecode size estimates and warnings.
 //!
 //! Assumed runtime (not generated, imported from the runtime package): `Vec3`, `Pos3`, `Config`,
-//! `PositionIterator`, `PerlinNoiseSampler`, `InterpolatedNoiseSampler`, the `*Ref` holders and
-//! `Helpers` (extern functions and auto-const initializers). See SPEC.md §6 for the contract.
+//! `PositionIterator`, the `*Ref` holders, the frontend's handle types and `Helpers` (extern
+//! functions and auto-const initializers). See SPEC.md §6 for the contract.
 
 use std::collections::HashSet;
 
@@ -45,8 +45,6 @@ pub use backend::{JavaBackend, JavaCompile, JavaConfig, JavaOutput};
 pub use orchestration::TransformJavaOrchestration;
 
 /// Names of runtime and generated classes that the generated code refers to by name.
-pub const PERLIN_NOISE_SAMPLER_CLASS: &str = "PerlinNoiseSampler";
-pub const BASE3D_NOISE_SAMPLER_CLASS: &str = "InterpolatedNoiseSampler";
 pub const HELPERS_CLASS: &str = "Helpers";
 pub const CONFIG_CLASS: &str = "Config";
 pub const POSITION_ITERATOR_CLASS: &str = "PositionIterator";

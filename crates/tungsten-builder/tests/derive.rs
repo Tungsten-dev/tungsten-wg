@@ -11,8 +11,9 @@ fn program() -> ProgramBuilder {
     let mut pb = ProgramBuilder::new();
     let h1 = pb.host("h1", F64);
     let h2 = pb.host("h2", I32);
-    let perm = pb.perlin_table("a", None, 0);
-    let sampler = pb.sampler_table();
+    let seed = pb.param("seed", I64);
+    let perm = pb.auto_const("perm", Handle("PerlinNoiseSampler"), "make_perm", [seed.into(), 1i64.into()]);
+    let sampler = pb.auto_const("sampler", Handle("InterpolatedNoiseSampler"), "make_sampler", [seed.into()]);
     let k = pb.constant("k", 1.0);
     let k2 = pb.constant("k2", k * 2.0);
     let k3 = pb.constant("k3", k2 + k);
@@ -25,7 +26,7 @@ fn program() -> ProgramBuilder {
     // leaf(x) reads h1, k3 and the sampler.
     let mut f = FnBuilder::new("leaf", F64);
     let x = f.param("x", F64);
-    let s = f.local("s", InterpolatedNoiseSampler);
+    let s = f.local("s", Handle("InterpolatedNoiseSampler"));
     f.assign(s, sampler);
     f.ret(x + h1 + k3);
     let leaf = pb.finish_helper(f);
@@ -33,7 +34,7 @@ fn program() -> ProgramBuilder {
     // mid() reads d (an argument, so before leaf's items), then calls leaf, then reads h2 and
     // the permutation table.
     let mut f = FnBuilder::new("mid", F64);
-    let t = f.local("t", PermutationTable);
+    let t = f.local("t", Handle("PerlinNoiseSampler"));
     let r = f.local("r", F64);
     f.assign(r, leaf.call([d.read()]) + h2.cast(F64));
     f.assign(t, perm);
@@ -59,8 +60,9 @@ const TWIN: &str = r#"
 program {
     host h1: f64;
     host h2: i32;
-    table perm = perlin("a", none, 0);
-    table sampler = base3d;
+    param seed: i64;
+    auto perm: handle PerlinNoiseSampler = make_perm(param(seed), 1L);
+    auto sampler: handle InterpolatedNoiseSampler = make_sampler(param(seed));
     const k = 1.0;
     const k2 = (const(k) * 2.0);
     const k3 = (const(k2) + const(k));
@@ -69,14 +71,14 @@ program {
         return (ambient(pos3).x as f64);
     }
     fn leaf(x: f64) -> f64 @hosts(h1) {
-        vars { s: interpolated_noise_sampler }
-        s = table(sampler);
+        vars { s: handle InterpolatedNoiseSampler }
+        s = auto(sampler);
         return ((x + host(h1)) + const(k3));
     }
     fn mid() -> f64 @hosts(h2) {
-        vars { t: perm_table, r: f64 }
+        vars { t: handle PerlinNoiseSampler, r: f64 }
         r = (leaf(density(d)) + (host(h2) as f64));
-        t = table(perm);
+        t = auto(perm);
         return r;
     }
     fn main1() -> f64 {
@@ -92,7 +94,7 @@ program {
     unit main1 {
         main main1;
         helpers [leaf, mid];
-        tables [sampler, perm];
+        autos [sampler, perm];
         hosts [h1, h2];
         consts [k, k2, k3];
         inputs [d];
@@ -100,7 +102,7 @@ program {
     unit main2 {
         main main2;
         helpers [leaf];
-        tables [sampler];
+        autos [sampler];
         hosts [h1];
         consts [k, k2, k3];
     }
@@ -127,7 +129,7 @@ fn removals(p: &OptimizedProgram) -> Vec<(String, OptimizedProgram)> {
     for (u, cu) in p.compute_units.iter() {
         let ComputeUnit::DensityFunction {
             density_inputs,
-            permutation_table_inputs,
+            auto_consts,
             host_inputs,
             helper_functions,
             constants,
@@ -135,7 +137,7 @@ fn removals(p: &OptimizedProgram) -> Vec<(String, OptimizedProgram)> {
         } = cu;
         let lens = [
             density_inputs.len(),
-            permutation_table_inputs.len(),
+            auto_consts.len(),
             host_inputs.len(),
             helper_functions.len(),
             constants.len(),
@@ -146,7 +148,7 @@ fn removals(p: &OptimizedProgram) -> Vec<(String, OptimizedProgram)> {
                 let u2 = q.compute_units.translate(u, &p.compute_units);
                 let ComputeUnit::DensityFunction {
                     density_inputs,
-                    permutation_table_inputs,
+                    auto_consts,
                     host_inputs,
                     helper_functions,
                     constants,
@@ -154,7 +156,7 @@ fn removals(p: &OptimizedProgram) -> Vec<(String, OptimizedProgram)> {
                 } = &mut q.compute_units[u2];
                 match list {
                     0 => _ = density_inputs.remove(i),
-                    1 => _ = permutation_table_inputs.remove(i),
+                    1 => _ = auto_consts.remove(i),
                     2 => _ = host_inputs.remove(i),
                     3 => _ = helper_functions.remove(i),
                     _ => _ = constants.remove(i),

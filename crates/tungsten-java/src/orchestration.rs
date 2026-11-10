@@ -14,7 +14,7 @@ use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodege
 use crate::model::codegen::JavaCodeGenerator;
 use crate::model as java;
 use tungsten_ir::model::{HostInput, OptimizedProgram};
-use tungsten_rust::orchestration::{AutoConstArg, permutation_table_specs};
+use tungsten_ir::model::AutoConstArg;
 
 use java::Expression as J;
 use java::Statement as S;
@@ -47,29 +47,37 @@ fn host_consts_class(program: &OptimizedProgram, interface: &Interface) -> java:
     }
 }
 
-/// `public static final class AutoConsts`: seed-derived permutation tables, immutable and shareable.
+/// `public static final class AutoConsts`: values built once at creation, immutable and shareable.
 fn auto_consts_class(program: &OptimizedProgram, interface: &Interface) -> java::Class {
-    let specs = permutation_table_specs(program, interface);
     let mut fields = Vec::new();
     let mut assignments = Vec::new();
-    for ((_, table), spec) in program.permutation_tables.iter().zip(&specs) {
+    let params: Vec<(java::Type, String)> = program
+        .auto_params
+        .iter()
+        .map(|(r, p)| (convert_type(&p.t), interface.auto_param(r).to_string()))
+        .collect();
+    for (r, a) in program.auto_consts.iter() {
+        let field = interface.auto_const_field(r).to_string();
         fields.push(java::Field {
             modifiers: "public final".into(),
-            t: auto_const_type(table),
-            name: spec.field.clone(),
+            t: auto_const_type(&a.t),
+            name: field.clone(),
             init: None,
         });
-        let args = spec
+        let args = a
             .args
             .iter()
-            .map(|a| match a {
-                AutoConstArg::Seed => J::name("seed"),
+            .map(|arg| match arg {
+                AutoConstArg::Param(p) => J::name(interface.auto_param(*p)),
                 AutoConstArg::I64(v) => J::LongLit(*v),
+                AutoConstArg::F64(v) => J::DoubleLit(*v),
+                AutoConstArg::Bool(v) => J::BoolLit(*v),
+                AutoConstArg::Str(v) => J::StrLit(v.clone()),
             })
             .collect();
         assignments.push(S::Assign {
-            target: J::field(J::name("this"), &spec.field),
-            value: J::call(Some(J::name(HELPERS_CLASS)), &spec.initializer, args),
+            target: J::field(J::name("this"), &field),
+            value: J::call(Some(J::name(HELPERS_CLASS)), &a.initializer, args),
         });
     }
     let auto = java::Type::class(AUTO_CONSTS_CLASS);
@@ -78,23 +86,23 @@ fn auto_consts_class(program: &OptimizedProgram, interface: &Interface) -> java:
         modifiers: "private".into(),
         return_type: None,
         name: AUTO_CONSTS_CLASS.into(),
-        params: vec![(java::Type::Long, "seed".into())],
+        params: params.clone(),
         body: assignments,
     };
     let create = java::Method {
-        doc: Some("Builds every permutation table for `seed`; the result may be shared across threads.".into()),
+        doc: Some("Builds every autoconst; the result may be shared across threads.".into()),
         modifiers: "public static".into(),
         return_type: Some(auto),
         name: "create".into(),
-        params: vec![(java::Type::Long, "seed".into())],
+        params: params.clone(),
         body: vec![S::Return(Some(J::New {
             class: AUTO_CONSTS_CLASS.into(),
-            args: vec![J::name("seed")],
+            args: params.iter().map(|(_, n)| J::name(n)).collect(),
             comment: None,
         }))],
     };
     java::Class {
-        doc: Some("Seed-derived constants. Immutable after construction and safe to share across threads.".into()),
+        doc: Some("Values built at creation. Immutable after construction and safe to share across threads.".into()),
         modifiers: "public static final".into(),
         name: AUTO_CONSTS_CLASS.into(),
         fields,

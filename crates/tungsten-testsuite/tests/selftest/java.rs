@@ -20,7 +20,7 @@ const SHORT: Duration = Duration::from_millis(1500);
 fn jstub(id: &str, body: &str, extra: &str) -> TestSource {
     let source = format!(
         "//@@FILE Driver.java\npackage {id};\nimport tungsten.runtime.*;\npublic final class Driver {{\n    \
-         static final int REQUEST_LEN = 32;\n    static byte[] runCase(Proto.Reader r) {{ {body} }}\n    {extra}\n    \
+         static final int REQUEST_LEN = 24;\n    static byte[] runCase(Proto.Reader r) {{ {body} }}\n    {extra}\n    \
          public static void main(String[] a) {{ Proto.serve(REQUEST_LEN, Driver::runCase); }}\n}}\n"
     );
     TestSource { name: id.to_string(), id: id.to_string(), source }
@@ -132,7 +132,7 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
              return w.finish();"
         );
         let mut t = jstub("t_jgolden", &body, "");
-        t.source = t.source.replace("REQUEST_LEN = 32", &format!("REQUEST_LEN = {}", request.len()));
+        t.source = t.source.replace("REQUEST_LEN = 24", &format!("REQUEST_LEN = {}", request.len()));
         let env = TestEnv::new();
         let arts = h.build_tests(&records_source(env.spec()), std::slice::from_ref(&t));
         let Artifact::Binary { path, id } = &arts["t_jgolden"] else {
@@ -179,8 +179,8 @@ pub fn trials(h: Option<Arc<Harness>>) -> Vec<Trial> {
                     VariableType::I32 => "3".into(),
                     VariableType::I64 => "3L".into(),
                     VariableType::Vec3 => "new Vec3(0, 0, 0)".into(),
-                    VariableType::PermutationTable => "Helpers.make_permutation_table(1, 2, 3, 4, 5, 6)".into(),
-                    VariableType::InterpolatedNoiseSampler => "Helpers.make_base3d_perm_table(1)".into(),
+                    VariableType::Handle("PerlinNoiseSampler") => "Helpers.make_permutation_table(1, 2, 3, 4, 5, 6)".into(),
+                    VariableType::Handle("InterpolatedNoiseSampler") => "Helpers.make_base3d_perm_table(1)".into(),
                     other => panic!("no sample argument for {other:?}"),
                 })
                 .collect();

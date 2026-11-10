@@ -17,6 +17,7 @@ fn expression(e: &Expression) -> usize {
         Expression::BoolLit(_) | Expression::Null => 1,
         Expression::IntLit(_) => 2,
         Expression::LongLit(_) | Expression::FloatLit(_) | Expression::DoubleLit(_) => 3,
+        Expression::StrLit(_) => 2,
         Expression::Name(_) => 1,
         Expression::Field { base, .. } => expression(base) + 3,
         Expression::Index { base, index } => expression(base) + expression(index) + 1,

@@ -33,8 +33,12 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
     n("units", ir.compute_units.iter().count(), p.units.len())?;
     n("functions", ir.functions.iter().count(), p.functions.len())?;
     n("consts", ir.constants.iter().count(), p.consts.len())?;
-    n("hosts", ir.host_inputs.iter().count(), p.hosts.len())?;
-    n("tables", ir.permutation_tables.iter().count(), p.tables.len())?;
+    // A value autoconst is a core host, a handle autoconst a core table.
+    let is_handle = |a: &tungsten_ir::AutoConst| matches!(a.t, tungsten_ir::VariableType::Handle(_));
+    let handles = ir.auto_consts.values().filter(|a| is_handle(a)).count();
+    let values = ir.auto_consts.values().count() - handles;
+    n("hosts", ir.host_inputs.iter().count() + values, p.hosts.len())?;
+    n("tables", handles, p.tables.len())?;
     n("entries", ir.entry_points.len(), p.entries.len())?;
     for (i, f) in p.functions.iter().enumerate() {
         let id = tungsten_core::FnId(i);
@@ -46,7 +50,11 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
         n(&format!("fn {i} parameters"), ir.functions[r].parameters.len(), f.params)?;
         let vars = ir.functions[r].variables.values().count();
         n(&format!("fn {i} locals"), vars, f.locals.len())?;
-        n(&format!("fn {i} hosts"), ir.functions[r].host_inputs.len(), f.hosts.len())?;
+        // The value autoconsts the body reads come after its listed hosts.
+        let listed = ir.functions[r].host_inputs.len();
+        if f.hosts.len() < listed {
+            return Err(format!("fn {i} hosts: {listed} in the IR, {} after lowering", f.hosts.len()).into());
+        }
     }
     if is_reject {
         return Ok(()); // no snapshot for programs the checker rejects

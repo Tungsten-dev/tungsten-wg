@@ -203,9 +203,12 @@ pub fn driver_source(
     let mut s = String::new();
     writeln!(s, "package {id};\n\nimport tungsten.runtime.*;\n").unwrap();
     s.push_str("public final class Driver {\n");
-    writeln!(s, "    public static final int REQUEST_LEN = {};", 32 + io.host_bytes(env)?).unwrap();
+    writeln!(s, "    public static final int REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
     s.push_str("    static byte[] runCase(Proto.Reader r) {\n");
-    s.push_str("        Vec3 origin = new Vec3(r.f64(), r.f64(), r.f64());\n        long seed = r.u64();\n");
+    s.push_str("        Vec3 origin = new Vec3(r.f64(), r.f64(), r.f64());\n");
+    for (i, (_, t)) in io.params.iter().enumerate() {
+        decode_stmts(&mut s, &format!("ap{i}"), t, &mut ids, spec);
+    }
     s.push_str("        Gen.HostConsts host = new Gen.HostConsts();\n");
     for (r, h) in program.host_inputs.iter() {
         if let HostInput::Static { t, .. } = h {
@@ -214,7 +217,8 @@ pub fn driver_source(
             writeln!(s, "host.{} = {v};", interface.host_field(r)).unwrap();
         }
     }
-    s.push_str("        Gen.Orchestration orch = new Gen.Orchestration(Gen.AutoConsts.create(seed));\n");
+    let creation_args: Vec<String> = (0..io.params.len()).map(|i| format!("ap{i}")).collect();
+    writeln!(s, "        Gen.Orchestration orch = new Gen.Orchestration(Gen.AutoConsts.create({}));", creation_args.join(", ")).unwrap();
     s.push_str("        Proto.Writer w = new Proto.Writer();\n");
     for (e, name) in io.entries.iter().zip(method_names) {
         writeln!(s, "        {{ var res = orch.{name}(origin.x, origin.y, origin.z, host);").unwrap();

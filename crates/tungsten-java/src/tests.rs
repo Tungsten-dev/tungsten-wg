@@ -22,7 +22,8 @@ fn java(program: &OptimizedProgram) -> String {
 const SMALL: &str = r#"
 program {
     host sea_level: i32;
-    table temperature = perlin("minecraft:temperature", none, 0);
+    param seed: i64;
+    auto temperature: handle PerlinNoiseSampler @name("minecraft:temperature_0_") = make_permutation_table(param(seed), 6664882324328353151L, -587597586455377528L, 0L, 0L, 0L);
     const base = 0.25;
     const scale = (const(base) * 2.0);
     const points = [-1.0, 0.0, nan];
@@ -52,7 +53,7 @@ program {
     fn `minecraft:noise`() -> f64 {
         vars { v: f64, bits: i64 }
         v = (ext floor::<(f64) -> f64>(ambient(pos3).x::<f64> * const(scale))
-            + ext sin::<(f64) -> f64>(ext sample::<(perm_table, f64) -> f64>(table(temperature), ambient(pos3).x::<f64>)));
+            + ext sin::<(f64) -> f64>(ext sample::<(handle PerlinNoiseSampler, f64) -> f64>(auto(temperature), ambient(pos3).x::<f64>)));
         bits = ((v as i64) * -5L);
         // `&mut v` on a primitive becomes a DoubleRef with a write-back.
         bits = ext nudge::<(f64) -> i64>(&mut v);
@@ -70,7 +71,7 @@ program {
     }
 
     unit scalar { main `minecraft:scalar`; hosts [sea_level]; }
-    unit noise { main `minecraft:noise`; consts [base, scale, points]; tables [temperature]; }
+    unit noise { main `minecraft:noise`; consts [base, scale, points]; autos [temperature]; }
     input noise_in = noise @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
     input scalar_in = scalar @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     unit final_u {
@@ -216,4 +217,37 @@ fn every_setter_sets_its_field() {
     assert!(c.backend().naming_rules().used_set().contains(&java_sanitize("x y")));
     // Sanitizing is a warning, so it only fails the compile under `deny_warnings`.
     assert!(matches!(c.deny_warnings().compile(), Err(CompileError::Warnings { .. })));
+}
+
+#[test]
+fn autoconst_arguments_and_values() {
+    let src = r#"
+program {
+    param seed: i64;
+    param scale: f64;
+    param buffers: bool;
+    auto t: handle Table = make_table(param(seed), -9223372036854775808L, 1.5, -0.0, true, "q\"\\ \u{e9} \u{1d11e}\n");
+    auto v: f64 = make_v(param(scale), param(buffers), nan, inf, -inf);
+    auto i: i64 = make_i(7L, false);
+    fn run() -> f64 {
+        return (ext sample::<(handle Table, f64) -> f64>(auto(t), auto(v)) + (auto(i) as f64));
+    }
+    unit u { main run; autos [t, v, i]; }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+    let java = java(&program(src));
+    for expected in [
+        "public final Table t;",
+        "public final double v;",
+        "public static AutoConsts create(long seed, double scale, boolean buffers_1)",
+        // handles and values are read the same way
+        "Helpers.sample(auto_constants.t, auto_constants.v)",
+        // quotes, backslashes and line breaks keep their own escapes; the rest are UTF-16 units
+        "Helpers.make_table(seed, Long.MIN_VALUE, 1.5, (-0.0), true, \"q\\\"\\\\ \\u00e9 \\ud834\\udd1e\\n\")",
+        "Helpers.make_v(scale, buffers_1, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)",
+        "Helpers.make_i(7L, false)",
+    ] {
+        assert!(java.contains(expected), "missing `{expected}` in:\n{java}");
+    }
 }

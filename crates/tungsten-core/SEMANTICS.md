@@ -77,8 +77,7 @@ errors.
 | `Pos3` | three `i32`s | A cell position in a grid |
 | `Array(T, n)` | exactly `n` values of type `T` | The length is part of the type |
 | `Record(r)` | one value per field of record `r`, in declaration order | Record layouts come from the registry (`Program.records`) |
-| `PermTable` | a handle to a permutation table | Only passed to externs |
-| `Sampler` | a handle to a noise sampler | Only passed to externs |
+| `Handle(ty)` | an opaque handle to a runtime object of handle type `ty` | Only passed to externs |
 
 There is no type for "a density input" or "a function". You can only *read* a density input
 (with a `Density` expression) and *call* a function. Neither can be stored in a variable.
@@ -178,7 +177,7 @@ guarantee.
 | `Local(l)` | The current value of local `l`. Reading a local that hasn't been assigned yet is `Stuck(Unassigned)` (the checker rules this out) |
 | `Const(c)` | The value of constant `c` (computed once per case, §8) |
 | `Host(h)` | The case's value for host `h` |
-| `Table(t)` | A `PermTable(t)` or `Sampler(t)` handle, depending on the table's kind |
+| `Table(t)` | A `Handle(t)` value, typed `Handle(ty)` with the table's handle type |
 | `Ambient(a)` | The context value (§3) |
 | `Density { input, index }` | A value read out of a density input's buffer (§9) |
 | `Call { func, args }` | Evaluates the arguments left to right, then calls `func` with them (§7) |
@@ -509,7 +508,7 @@ Externs are assumed to be **pure**: the same id and arguments always give the sa
 interpreter may call an extern any number of times (with the memo off, it recomputes
 everything), so an extern with side effects would give results that depend on that.
 
-Tables (`PermTable`, `Sampler`) are only handles. Sampling noise or looking up a permutation is
+Tables (`Handle` values) are only handles. Sampling noise or looking up a permutation is
 an ordinary extern call that receives the handle as an argument. The `Externs` implementation
 decides what each handle means (usually through the table's name and seed in `tungsten-check`'s
 `LowerMap`).

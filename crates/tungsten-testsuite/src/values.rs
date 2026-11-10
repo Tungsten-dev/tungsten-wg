@@ -83,10 +83,10 @@ pub fn show(v: &Core) -> String {
     }
 }
 
-/// True if `v` contains a perm table or a sampler, which a test can't expect or encode.
+/// True if `v` contains a handle, which a test can't expect or encode.
 pub fn has_table(v: &Core) -> bool {
     match v {
-        Core::PermTable(_) | Core::Sampler(_) => true,
+        Core::Handle(_) => true,
         Core::Array(vs) | Core::Record(_, vs) => vs.iter().any(has_table),
         _ => false,
     }

@@ -198,6 +198,28 @@ TW_HDI InterpolatedNoiseSampler make_base3d_perm_table(long long seed) {
     return InterpolatedNoiseSampler{splitmix64((unsigned long long)seed)};
 }
 
+/// FNV-1a over the bytes of the NUL-terminated UTF-8 string, seeded with the i64.
+TW_HDI long long make_salt(long long seed, const char* name) {
+    unsigned long long h = (unsigned long long)seed ^ 0xcbf29ce484222325ULL;
+    for (const unsigned char* p = (const unsigned char*)name; *p; ++p) {
+        h ^= (unsigned long long)*p;
+        h *= 0x100000001b3ULL;
+    }
+    return (long long)h;
+}
+
+TW_HDI long long make_bits(double x) {
+    long long out;
+    __builtin_memcpy(&out, &x, sizeof(out));
+    return out;
+}
+
+TW_HDI double make_scale(double base, bool flip) { return flip ? -base : base; }
+TW_HDI bool make_flag(bool on, long long n) { return on && n > 0; }
+TW_HDI signed char make_i8(long long v) { return (signed char)v; }
+TW_HDI int make_i32(long long v) { return (int)v; }
+TW_HDI float make_f32(double v) { return (float)v; }
+
 }  // namespace tw
 
 #include "records.cuh"

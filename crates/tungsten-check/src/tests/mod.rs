@@ -2,6 +2,7 @@
 //! hand-built programs for what text can't express. Every successful lowering goes through
 //! [`ok`], which runs `check_wf` and the checker.
 
+mod auto;
 mod check_errors;
 mod check_rejects;
 mod determinism;
@@ -20,7 +21,7 @@ use tungsten_core::{Expr, FnId, Stmt};
 use tungsten_ir::*;
 use tungsten_parse::{Env, ExternSig, FileId};
 
-use crate::{Lowered, Registry, RegistryBuilder, lower};
+use crate::{AutoArgType, Lowered, Registry, RegistryBuilder, lower};
 
 /// Knows `sin`, `sample` and the record `Pair { a: f64, b: i32 }`.
 pub struct TestEnv;
@@ -33,7 +34,7 @@ impl Env for TestEnv {
                 return_type: VariableType::F64,
             }),
             "sample" => Some(ExternSig {
-                parameter_types: vec![VariableType::PermutationTable, VariableType::F64],
+                parameter_types: vec![VariableType::Handle("PerlinNoiseSampler"), VariableType::F64],
                 return_type: VariableType::F64,
             }),
             _ => None,
@@ -50,13 +51,26 @@ impl Env for TestEnv {
     }
 }
 
+/// The initializers of the shared corpus programs.
+pub fn corpus_initializers(b: RegistryBuilder) -> RegistryBuilder {
+    use AutoArgType::I64;
+    b.auto_initializer(
+        "make_permutation_table",
+        &[I64, I64, I64, I64, I64, I64],
+        VariableType::Handle("PerlinNoiseSampler"),
+    )
+    .auto_initializer("make_base3d_perm_table", &[I64], VariableType::Handle("InterpolatedNoiseSampler"))
+    .auto_initializer("make_perm", &[I64, I64], VariableType::Handle("PerlinNoiseSampler"))
+    .auto_initializer("make_base3d", &[I64], VariableType::Handle("InterpolatedNoiseSampler"))
+}
+
 /// The registry matching [`TestEnv`].
 pub fn registry() -> Registry {
-    RegistryBuilder::new()
+    corpus_initializers(RegistryBuilder::new())
         .extern_fn("sin", &[VariableType::F64], VariableType::F64)
         .extern_fn(
             "sample",
-            &[VariableType::PermutationTable, VariableType::F64],
+            &[VariableType::Handle("PerlinNoiseSampler"), VariableType::F64],
             VariableType::F64,
         )
         .record("Pair", &[("a", VariableType::F64), ("b", VariableType::I32)])
@@ -70,7 +84,7 @@ pub fn load(src: &str) -> OptimizedProgram {
         .program
 }
 
-/// A program with a host `h`, tables `t` (perlin) and `b3`, a const `c`, a `leaf` unit, and a
+/// A program with a host `h`, an i64 param `seed`, autoconsts `t` (named `n`) and `b3`, a const `c`, a `leaf` unit, and a
 /// unit `u` whose 0-param main `top_main` returns `top(1.0)`, where
 /// `fn top(p: f64) -> f64 @hosts(h) { <body> }`, with input `d` reading `leaf_u`. `decls` go
 /// before `top`; every fn they declare is listed in `u`'s helpers, next to `top`.
@@ -93,8 +107,9 @@ pub fn snippet(decls: &str, body: &str) -> String {
     format!(
         "program {{
     host h: f64;
-    table t = perlin(\"n\", none, 0);
-    table b3 = base3d;
+    param seed: i64;
+    auto t: handle PerlinNoiseSampler @name(\"n\") = make_perm(param(seed), 1L);
+    auto b3: handle InterpolatedNoiseSampler = make_base3d(param(seed));
     const c = 2.0;
     {decls}
     fn leaf() -> f64 {{ return 1.0; }}
@@ -106,7 +121,7 @@ pub fn snippet(decls: &str, body: &str) -> String {
         main top_main;
         helpers [{helpers}];
         hosts [h];
-        tables [t];
+        autos [t];
         consts [c];
         inputs [d];
     }}
@@ -168,7 +183,8 @@ pub fn empty() -> OptimizedProgram {
         entry_points: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
-        permutation_tables: Arena::new(),
+        auto_params: Arena::new(),
+        auto_consts: Arena::new(),
         density_inputs: Arena::new(),
     }
 }
@@ -207,7 +223,7 @@ pub fn unit(main: Ref<Function>) -> ComputeUnit {
     ComputeUnit::DensityFunction {
         function: main,
         density_inputs: vec![],
-        permutation_table_inputs: vec![],
+        auto_consts: vec![],
         host_inputs: vec![],
         helper_functions: vec![],
         constants: vec![],

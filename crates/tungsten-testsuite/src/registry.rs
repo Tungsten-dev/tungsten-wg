@@ -1,7 +1,7 @@
 //! `registry.toml` loader: the externs and records of the test environment.
 
 use serde::Deserialize;
-use tungsten_check::{Registry, RegistryBuilder};
+use tungsten_check::{AutoArgType, Registry, RegistryBuilder};
 use tungsten_ir::VariableType;
 use tungsten_parse::intern;
 
@@ -13,6 +13,15 @@ struct Raw {
     record: Vec<RawRecord>,
     #[serde(default, rename = "extern")]
     externs: Vec<RawExtern>,
+    #[serde(default)]
+    auto_initializer: Vec<RawInitializer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawInitializer {
+    name: String,
+    params: Vec<String>,
+    ret: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +54,13 @@ pub struct ExternSpec {
 }
 
 #[derive(Debug, Clone)]
+pub struct InitializerSpec {
+    pub name: String,
+    pub params: Vec<AutoArgType>,
+    pub ret: VariableType,
+}
+
+#[derive(Debug, Clone)]
 pub struct RecordSpec {
     pub name: String,
     pub fields: Vec<(&'static str, VariableType)>,
@@ -55,6 +71,17 @@ pub struct RecordSpec {
 pub struct RegistrySpec {
     pub externs: Vec<ExternSpec>,
     pub records: Vec<RecordSpec>,
+    pub initializers: Vec<InitializerSpec>,
+}
+
+fn parse_arg_type(s: &str) -> Result<AutoArgType, String> {
+    Ok(match s.trim() {
+        "i64" => AutoArgType::I64,
+        "f64" => AutoArgType::F64,
+        "bool" => AutoArgType::Bool,
+        "str" => AutoArgType::Str,
+        other => return Err(format!("unknown argument type `{other}`")),
+    })
 }
 
 /// Parses a type spelling of tungsten-parse §5.4: `f64`, `[f64; 3]`, `extern Pair`, ...
@@ -68,6 +95,9 @@ pub fn parse_type(s: &str) -> Result<VariableType, String> {
     if let Some(name) = s.strip_prefix("extern ") {
         return Ok(VariableType::Extern(intern(name.trim())));
     }
+    if let Some(name) = s.strip_prefix("handle ") {
+        return Ok(VariableType::Handle(intern(name.trim())));
+    }
     Ok(match s {
         "bool" => VariableType::Bool,
         "i8" => VariableType::I8,
@@ -77,8 +107,6 @@ pub fn parse_type(s: &str) -> Result<VariableType, String> {
         "f64" => VariableType::F64,
         "vec3" => VariableType::Vec3,
         "pos3" => VariableType::Pos3,
-        "perm_table" => VariableType::PermutationTable,
-        "interpolated_noise_sampler" => VariableType::InterpolatedNoiseSampler,
         _ => return Err(format!("unknown type `{s}`")),
     })
 }
@@ -107,7 +135,18 @@ impl RegistrySpec {
                 .map_err(|m| format!("record `{}`: {m}", r.name))?;
             records.push(RecordSpec { name: r.name, fields });
         }
-        Ok(RegistrySpec { externs, records })
+        let mut initializers = vec![];
+        for i in raw.auto_initializer {
+            let params = i
+                .params
+                .iter()
+                .map(|p| parse_arg_type(p))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|m| format!("auto initializer `{}`: {m}", i.name))?;
+            let ret = parse_type(&i.ret).map_err(|m| format!("auto initializer `{}`: {m}", i.name))?;
+            initializers.push(InitializerSpec { name: i.name, params, ret });
+        }
+        Ok(RegistrySpec { externs, records, initializers })
     }
 
     pub fn builtin() -> RegistrySpec {
@@ -125,6 +164,9 @@ impl RegistrySpec {
         }
         for r in &self.records {
             b = b.record(&r.name, &r.fields);
+        }
+        for i in &self.initializers {
+            b = b.auto_initializer(&i.name, &i.params, i.ret.clone());
         }
         b.build().map_err(|e| format!("{e:?}"))
     }

@@ -109,3 +109,40 @@ fn isomorphic_compares_floats_by_bits() {
         &load(src("nan(0x7ff8000000000000)"))
     ));
 }
+
+#[test]
+fn isomorphic_compares_autoconst_floats_by_bits() {
+    let src = |c: &str| format!("program {{ auto a: i64 = make({c}); }}");
+    let load = |s: String| load(&s, FileId(0), &NoEnv).unwrap().program;
+    assert!(!isomorphic(&load(src("0.0")), &load(src("-0.0"))));
+    assert!(!isomorphic(&load(src("nan")), &load(src("nan(0x7ff8000000000001)"))));
+    assert!(isomorphic(&load(src("nan")), &load(src("nan(0x7ff8000000000000)"))));
+    assert!(!isomorphic(&load(src("\"a\"")), &load(src("\"b\""))));
+}
+
+/// `Clone` keeps param refs valid and `compact` keeps the param order, which is the creation
+/// API's parameter order.
+#[test]
+fn clone_and_compact_keep_param_refs_and_order() {
+    let src = "program {
+        param b: i64;
+        param a: f64;
+        param c: bool;
+        auto x: i64 = make(param(c), param(a), param(b));
+    }";
+    let p = load(src, FileId(0), &NoEnv).unwrap().program;
+    for q in [p.clone(), compact(&p)] {
+        let names: Vec<_> = q.auto_params.values().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["b", "a", "c"]);
+        let a = q.auto_consts.values().next().unwrap();
+        let refs: Vec<_> = a
+            .args
+            .iter()
+            .map(|arg| match arg {
+                tungsten_ir::AutoConstArg::Param(r) => q.auto_params[*r].name.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(refs, ["c", "a", "b"]);
+    }
+}

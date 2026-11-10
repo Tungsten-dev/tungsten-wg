@@ -9,7 +9,8 @@ use crate::backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePol
 const SMALL: &str = r#"
 program {
     host sea_level: i32;
-    table temperature = perlin("minecraft:temperature", none, 0);
+    param seed: i64;
+    auto temperature: handle PerlinNoiseSampler @name("minecraft:temperature_0_") = make_permutation_table(param(seed), 6664882324328353151L, -587597586455377528L, 0L, 0L, 0L);
     const base = 0.25;
     const scale = (const(base) * 2.0);
     const points = [-1.0, 0.0, nan];
@@ -41,7 +42,7 @@ program {
     fn `minecraft:noise`() -> f64 {
         vars { v: f64, bits: i64 }
         v = (ext floor::<(f64) -> f64>(ambient(pos3).x::<f64> * const(scale))
-            + ext sin::<(f64) -> f64>(ext sample::<(perm_table, f64) -> f64>(table(temperature), ambient(pos3).x::<f64>)));
+            + ext sin::<(f64) -> f64>(ext sample::<(handle PerlinNoiseSampler, f64) -> f64>(auto(temperature), ambient(pos3).x::<f64>)));
         bits = ((v as i64) * -5L);
         // `&mut v` on a local and `&(v * 2.0)` on a temporary.
         bits = ext nudge::<(f64, f64) -> i64>(&mut v, &(v * 2.0));
@@ -59,7 +60,7 @@ program {
     }
 
     unit scalar { main `minecraft:scalar`; hosts [sea_level]; }
-    unit noise { main `minecraft:noise`; consts [base, scale, points]; tables [temperature]; }
+    unit noise { main `minecraft:noise`; consts [base, scale, points]; autos [temperature]; }
     input noise_in = noise @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.25, 0.25, 0.25);
     input scalar_in = scalar @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     unit final_u {
@@ -250,7 +251,7 @@ fn program_without_inputs_or_entries() {
     let output = generate(MINIMAL, CudaConfig::default());
     write_out(&output, "minimal");
     assert_contains("interface.cuh", &output.interface_header, &["struct AutoConsts {\n};", "struct DeviceHostConsts {\n};"]);
-    assert_contains("orchestration.cu", &output.orchestration_source, &["(void)seed;", "(void)host_consts;"]);
+    assert_contains("orchestration.cu", &output.orchestration_source, &["Orchestration::create(std::unique_ptr<Orchestration>& out)", "(void)host_consts;"]);
     assert!(!output.orchestration_source.contains("cudaEventSynchronize"));
 
     let output = generate("program { }", CudaConfig::default());
@@ -343,4 +344,42 @@ fn invalid_setter_value_is_an_error_not_a_panic() {
         r,
         Err(CompileError::Backend { source: BackendError::InvalidConfig(_), .. })
     ));
+}
+
+#[test]
+fn autoconst_arguments_and_values() {
+    let src = r#"
+program {
+    param seed: i64;
+    param scale: f64;
+    param buffers: bool;
+    auto t: handle Table = make_table(param(seed), -9223372036854775808L, 1.5, -0.0, true, "q\"\\? \u{e9} \u{1d11e}\n");
+    auto v: f64 = make_v(param(scale), param(buffers), nan, inf, -inf);
+    auto i: i64 = make_i(7L, false);
+    fn run() -> f64 {
+        return (ext sample::<(handle Table, f64) -> f64>(auto(t), auto(v)) + (auto(i) as f64));
+    }
+    unit u { main run; autos [t, v, i]; }
+    entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+    let output = generate(src, CudaConfig::default());
+    assert_contains("interface.cuh", &output.interface_header, &[
+        "tw::Table t;",
+        "double v;",
+        "long long i;",
+    ]);
+    // handles are read by address, values by copy
+    assert_contains("density.cu", &output.density_source, &[
+        "tw::sample(&ctx.auto_constants->t, ctx.auto_constants->v)",
+        "(double)ctx.auto_constants->i",
+    ]);
+    assert_contains("orchestration.cu", &output.orchestration_source, &[
+        // the copy to the device is a byte copy
+        "static_assert(std::is_trivially_copyable<dev::AutoConsts>::value",
+        // i64 is always hex; strings are UTF-8 with octal escapes and `?` escaped
+        "tw::make_table(seed, (long long)0x8000000000000000ULL, 1.5, -0.0, true, \"q\\\"\\\\\\? \\303\\251 \\360\\235\\204\\236\\012\")",
+        "tw::make_v(scale, buffers_1, TW_NAN_F64, TW_INF_F64, (-TW_INF_F64))",
+        "tw::make_i((long long)0x0000000000000007ULL, false)",
+    ]);
 }

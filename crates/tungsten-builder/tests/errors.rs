@@ -234,7 +234,7 @@ fn handles_from_another_program_builder() {
     let o_unit = other.finish_unit(f);
     let o_input = other.input(o_unit, Grid::new((1, 1, 1)));
     let o_host = other.host("h", F64);
-    let o_table = other.sampler_table();
+    let o_table = other.auto_const("t", Handle("InterpolatedNoiseSampler"), "make", []);
     let o_const = other.constant("k", 1.0);
     let mut f = FnBuilder::new("oh", F64);
     f.ret(1.0);
@@ -245,7 +245,7 @@ fn handles_from_another_program_builder() {
     pb.input(o_unit, Grid::new((1, 1, 1)));
     pb.constant("c", o_const * 2.0);
     let mut f = FnBuilder::new("m", F64);
-    let s = f.local("s", InterpolatedNoiseSampler);
+    let s = f.local("s", Handle("InterpolatedNoiseSampler"));
     f.assign(s, o_table);
     f.ret(o_input.read() + o_host + o_const + o_helper.call([]));
     pb.finish_unit(f);
@@ -255,7 +255,7 @@ fn handles_from_another_program_builder() {
         ("a unit", "program builder"),
         ("a unit", "program builder"),
         ("a constant", "program builder"),
-        ("a table", "program builder"),
+        ("an autoconst", "program builder"),
         ("an input", "program builder"),
         ("a host", "program builder"),
         ("a constant", "program builder"),

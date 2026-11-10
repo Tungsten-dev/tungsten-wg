@@ -49,12 +49,12 @@ let program: OptimizedProgram = pb.build()?;
 
 | Type | What it is |
 | --- | --- |
-| `ProgramBuilder` | Owns the program. Hands out `Copy` handles: `Unit`, `Helper`, `Input`, `Host`, `Table`, `Constant` |
+| `ProgramBuilder` | Owns the program. Hands out `Copy` handles: `Unit`, `Helper`, `Input`, `Host`, `Param`, `Auto`, `Constant` |
 | `FnBuilder` | One function, owned and borrowing nothing, so several can be open at once. `finish_unit` or `finish_helper` decides what it becomes |
 | `Local` | A parameter or local of one function, from `param`, `local` (unique name), `temp` (name hint) or `anon` |
 | `Expr` | An IR expression with its type and any mistakes found so far. Handles and literals convert into it |
 | `Grid`, `InputSpec` | Dims and scales, and everything that describes an input |
-| `Decls` | Extern and record declarations from `extern_fns!` and `record_decls!` |
+| `Decls` | Extern, record and initializer declarations from `extern_fns!`, `record_decls!` and `auto_initializers!` |
 
 **Recursive lowering** needs nothing special. The program and the current function are separate
 values, so a lowering function takes both, and can open a new `FnBuilder` while another is open:
@@ -113,7 +113,7 @@ anything by hand.
 | --- | --- | --- |
 | `Function.host_inputs` | Hosts the function reads itself | First use |
 | Unit helpers | Everything reachable from `main` | Callees before callers |
-| Unit hosts, tables, inputs | Read by `main` or any helper | First use |
+| Unit hosts, autoconsts, inputs | Read by `main` or any helper | First use |
 | Unit constants | Constants read, and those their values reach | Dependencies first |
 
 First use follows evaluation order and enters a callee at its first call, after the call's
@@ -126,7 +126,8 @@ never listed.
 | --- | --- | --- |
 | Input | Same source, dims, and scales by bits | The existing input. The first name wins |
 | Host | Same name | The existing host. Another type is `HostTypeConflict` |
-| Table | Equal `PermutationTableInput` | The existing table |
+| Param | Name | Same type: the existing param. Other type: `AutoParamConflict` |
+| Autoconst | Equal type, initializer and arguments | The existing autoconst. The first name wins |
 | Constant, helper, unit | Never | |
 
 So two units that each ask for the same input share it. Scales compare by bits, so `0.0` and `-0.0`
@@ -152,6 +153,27 @@ branches need `&mut ProgramBuilder`.
 Comparisons stay methods (`.lt()`, `.ge()`, `.eq_expr()`, …), as do the bit operators (`.bitand()`,
 `.shl()`, …).
 
+## Autoconsts
+
+An autoconst is built once, when the orchestration is created, by a runtime function the
+frontend names. The program only reads it. A param is a creation input of type `I64`, `F64` or
+`Bool`; creation takes one typed argument per param, in declaration order.
+
+```rust
+# use tungsten_wg::builder::prelude::*;
+let mut pb = ProgramBuilder::new();
+let seed = pb.param("seed", I64);
+let table = pb.auto_const("temperature", Handle("Table"), "make_table", [seed.into(), 1i64.into()]);
+let salt = pb.auto_const("salt", I64, "derive_salt", [seed.into(), "caves".into()]);
+// A handle is what externs take; a value reads like any expression.
+let read = Expr::from(salt).cast(F64);
+# let _ = (table, read);
+```
+
+Arguments are `AutoArg`s: a `Param`, an `i64`, an `f64`, a `bool` or a string. A handle's `t` is
+`Handle("Name")`, a value's is a scalar. `registry_from` knows the initializers from
+`auto_initializers!`, below.
+
 ## Externs and records
 
 Each signature is written once and gives both a typed call function and a declaration:
@@ -168,6 +190,17 @@ record_decls! {
     group records;
     Pair { a: F64, b: I32 },
 }
+// Handle types are written `handle "Name"`; initializers list argument kinds (`I64`, `F64`,
+// `Bool`, `Str`) and a return type.
+extern_fns! {
+    group table_externs;
+    table_get(t: handle "Table", i: I32): I32,
+}
+auto_initializers! {
+    group initializers;
+    make_table(I64, I64): handle "Table",
+    derive_salt(I64, Str): I64,
+}
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 # let mut pb = ProgramBuilder::new();
@@ -176,7 +209,7 @@ record_decls! {
 # let u = pb.finish_unit(f);
 # pb.entry(u, Grid::new((1, 1, 1)));
 # let program = pb.build()?;
-let registry = tungsten_wg::registry_from([surface_externs(), records()])?;
+let registry = tungsten_wg::registry_from([surface_externs(), records(), table_externs(), initializers()])?;
 let out = Compiler::new(program, registry, RustBackend::new(RustConfig::default())).compile()?;
 # Ok(())
 # }

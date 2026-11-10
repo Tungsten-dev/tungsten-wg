@@ -84,7 +84,7 @@ const NAMES: &[&str] = &[
     "e2",
     "inf",
     "nan",
-    "table",
+    "auto",
     "origin",
     "u",
     "d",
@@ -165,8 +165,8 @@ pub fn gen_type(rng: &mut Rng, depth: usize, valued: bool) -> VariableType {
         }
         8 => VariableType::F64,
         9 if valued => VariableType::Extern(intern(rng.pick(EXTERNS))),
-        10 => VariableType::PermutationTable,
-        11 => VariableType::InterpolatedNoiseSampler,
+        10 => VariableType::Handle("PerlinNoiseSampler"),
+        11 => VariableType::Handle("InterpolatedNoiseSampler"),
         _ => VariableType::Extern(intern(rng.pick(EXTERNS))),
     }
 }
@@ -208,7 +208,7 @@ pub struct Scope<'a> {
     pub vars: Vec<Ref<Var>>,
     pub consts: &'a [Ref<Constant>],
     pub hosts: &'a [Ref<HostInput>],
-    pub tables: &'a [Ref<PermutationTableInput>],
+    pub autos: &'a [Ref<AutoConst>],
     pub fns: &'a [Ref<Function>],
     pub inputs: &'a [Ref<DensityInput>],
 }
@@ -225,7 +225,7 @@ fn gen_leaf(rng: &mut Rng, sc: &Scope) -> Expression {
             6 if !sc.vars.is_empty() => Expression::Variable(*rng.pick(&sc.vars)),
             7 if !sc.consts.is_empty() => Expression::Constant(*rng.pick(sc.consts)),
             8 if !sc.hosts.is_empty() => Expression::HostInput(*rng.pick(sc.hosts)),
-            9 if !sc.tables.is_empty() => Expression::PermutationTable(*rng.pick(sc.tables)),
+            9 if !sc.autos.is_empty() => Expression::AutoConst(*rng.pick(sc.autos)),
             10 if !sc.inputs.is_empty() => Expression::DensityVariable(*rng.pick(sc.inputs), None),
             11 => Expression::Ambient(*rng.pick(&[
                 AmbientKind::Origin,
@@ -429,7 +429,8 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         entry_points: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
-        permutation_tables: Arena::new(),
+        auto_params: Arena::new(),
+        auto_consts: Arena::new(),
         density_inputs: Arena::new(),
     };
     let lib = opts.library;
@@ -445,18 +446,65 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         };
         hosts.push(p.host_inputs.insert(h));
     }
-    let mut tables = vec![];
+    let mut params = vec![];
     for _ in 0..if lib { 0 } else { rng.below(3) } {
-        let t = if rng.chance(1, 3) {
-            PermutationTableInput::Base3DNoise
+        let t = rng.pick(&[VariableType::I64, VariableType::F64, VariableType::Bool]).clone();
+        params.push(p.auto_params.insert(AutoParam { name: name(rng), t }));
+    }
+    let mut autos = vec![];
+    for _ in 0..if lib { 0 } else { rng.below(3) } {
+        let args = (0..rng.below(4))
+            .map(|_| match rng.below(5) {
+                0 if !params.is_empty() => AutoConstArg::Param(*rng.pick(&params)),
+                1 => AutoConstArg::F64(*rng.pick(&[
+                    0.0,
+                    -0.0,
+                    1.5,
+                    -2.25e-7,
+                    1e300,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NAN,
+                    f64::from_bits(0x7ff8_0000_0000_1234),
+                    5e-324,
+                ])),
+                2 => AutoConstArg::Bool(rng.chance(1, 2)),
+                3 => AutoConstArg::Str(
+                    rng.pick(&[
+                        "",
+                        "plain",
+                        "quote\" and \\ backslash",
+                        "line\nbreak\ttab\r",
+                        "nul\0byte",
+                        "h\u{e9}llo w\u{f6}rld",
+                        "\u{1d11e} \u{1f980}",
+                        "minecraft:offset",
+                    ])
+                    .to_string(),
+                ),
+                _ => AutoConstArg::I64(*rng.pick(&[0, 1, -1, i64::MIN, i64::MAX, 4242])),
+            })
+            .collect();
+        let t = if rng.chance(1, 2) {
+            VariableType::Handle(rng.pick(&["PerlinNoiseSampler", "InterpolatedNoiseSampler"]))
         } else {
-            PermutationTableInput::PerlinNoise {
-                ident: name(rng),
-                subident: rng.chance(1, 2).then(|| name(rng)),
-                subident_index: rng.below(8),
-            }
+            rng.pick(&[
+                VariableType::Bool,
+                VariableType::I8,
+                VariableType::I32,
+                VariableType::I64,
+                VariableType::F32,
+                VariableType::F64,
+            ])
+            .clone()
         };
-        tables.push(p.permutation_tables.insert(t));
+        let a = AutoConst {
+            name: name(rng),
+            t,
+            initializer: rng.pick(&["make_a", "make_b", "init_noise"]).to_string(),
+            args,
+        };
+        autos.push(p.auto_consts.insert(a));
     }
     let mut consts: Vec<Ref<Constant>> = vec![];
     for _ in 0..rng.below(5) {
@@ -521,7 +569,7 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         let u = p.compute_units.insert(ComputeUnit::DensityFunction {
             function: *rng.pick(&fns),
             density_inputs: vec![],
-            permutation_table_inputs: tables
+            auto_consts: autos
                 .iter()
                 .filter(|_| rng.chance(1, 2))
                 .copied()
@@ -568,7 +616,7 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
             vars,
             consts: &consts,
             hosts: &hosts,
-            tables: &tables,
+            autos: &autos,
             fns: &fn_list,
             inputs: &inputs,
         };
@@ -636,7 +684,11 @@ pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
         cases.push(Case {
             name: format!("case {i} \"quoted\"\n"),
             origin: [f64_edge(rng), 0.0, -1.0],
-            seed: rng.next(),
+            params: program
+                .auto_params
+                .iter()
+                .map(|(r, p)| (r, gen_value(rng, &p.t)))
+                .collect(),
             hosts,
             span: Span::default(),
         });

@@ -12,6 +12,22 @@ public final class Helpers {
         return new InterpolatedNoiseSampler(Toy.splitmix64(seed));
     }
 
+    /** FNV-1a over the UTF-8 bytes of the name, seeded with the seed. */
+    public static long make_salt(long seed, String name) {
+        long h = seed ^ 0xcbf29ce484222325L;
+        for (byte b : name.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            h ^= (b & 0xffL);
+            h *= 0x100000001b3L;
+        }
+        return h;
+    }
+    public static long make_bits(double x) { return Double.doubleToRawLongBits(x); }
+    public static double make_scale(double base, boolean flip) { return flip ? -base : base; }
+    public static boolean make_flag(boolean on, long n) { return on && n > 0; }
+    public static byte make_i8(long v) { return (byte) v; }
+    public static int make_i32(long v) { return (int) v; }
+    public static float make_f32(double v) { return (float) v; }
+
     public static int perm_get(PerlinNoiseSampler t, int i) { return t.lookup(i); }
     public static double sampler_sample(InterpolatedNoiseSampler s, Vec3 v) { return s.sample(v); }
 

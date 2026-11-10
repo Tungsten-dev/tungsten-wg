@@ -83,16 +83,14 @@ macro_rules! keywords {
 
 keywords! {
     Program = "program", Fn = "fn", Unit = "unit", Main = "main", Input = "input", Entry = "entry",
-    Host = "host", Table = "table", Const = "const", Use = "use", Let = "let", Vars = "vars",
+    Host = "host", Param = "param", Auto = "auto", Const = "const", Use = "use", Let = "let", Vars = "vars",
     Return = "return", Break = "break", If = "if", Else = "else", While = "while",
     Repeat = "repeat", True = "true", False = "false", As = "as", New = "new", Extern = "extern",
-    Ext = "ext", Mut = "mut", Dynamic = "dynamic", None = "none", Perlin = "perlin",
-    Base3d = "base3d", Density = "density", Ambient = "ambient", Helpers = "helpers",
-    Tables = "tables", Hosts = "hosts", Consts = "consts", Inputs = "inputs", Inf = "inf", Nan = "nan",
+    Ext = "ext", Mut = "mut", Dynamic = "dynamic", Density = "density", Ambient = "ambient", Helpers = "helpers",
+    Autos = "autos", Hosts = "hosts", Consts = "consts", Inputs = "inputs", Inf = "inf", Nan = "nan",
     InfF32 = "inf_f32", NanF32 = "nan_f32",
     Bool = "bool", I8 = "i8", I32 = "i32", I64 = "i64", F32 = "f32", F64 = "f64", Vec3 = "vec3",
-    Pos3 = "pos3", PermTable = "perm_table",
-    InterpolatedNoiseSampler = "interpolated_noise_sampler",
+    Pos3 = "pos3", Handle = "handle",
 }
 
 pub fn is_keyword(s: &str) -> bool {

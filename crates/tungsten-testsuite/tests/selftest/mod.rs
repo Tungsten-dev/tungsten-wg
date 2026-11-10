@@ -31,7 +31,7 @@ fn program(expr: &str, origins: &[f64]) -> String {
          entry u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);\n}}\n"
     );
     for (i, o) in origins.iter().enumerate() {
-        s += &format!("@case \"c{i}\" origin({o}, 0, 0) seed(1)\n");
+        s += &format!("@case \"c{i}\" origin({o}, 0, 0)\n");
     }
     s
 }
@@ -42,7 +42,7 @@ fn stub(id: &str, body: &str) -> TestSource {
         name: id.to_string(),
         id: id.to_string(),
         source: format!(
-            "pub mod driver {{\n    pub const REQUEST_LEN: usize = 32;\n    \
+            "pub mod driver {{\n    pub const REQUEST_LEN: usize = 24;\n    \
              pub fn run_case(r: &mut crate::proto::Reader) -> Vec<u8> {{ {body} }}\n}}\n"
         ),
     }
@@ -78,9 +78,9 @@ fn run_stub_with(
     };
     let mut requests = vec![];
     for i in 0..tf.cases.len() {
-        let named = oracle::named_case(&tf, i, &env)?;
+        let (named, params) = oracle::named_case(&tf, i, &env)?;
         let c = &tf.cases[i];
-        requests.push(io.encode_request(&env, c.origin, c.seed, &named.hosts)?);
+        requests.push(io.encode_request(&env, c.origin, &params, &named.hosts)?);
     }
     let make = || h.command(path, id);
     let startup = match h.lang {

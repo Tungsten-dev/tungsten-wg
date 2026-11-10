@@ -141,7 +141,7 @@ impl<'a> FunctionConverter<'a> {
                 };
                 J::Index { base: Box::new(J::field(J::name(PARAM_BUFFERS), &buffer)), index: Box::new(index) }
             }
-            Expression::PermutationTable(r) => {
+            Expression::AutoConst(r) => {
                 J::field(J::name(PARAM_AUTO_CONSTS), self.naming.auto_const_field(*r))
             }
             Expression::HostInput(r) => J::field(J::name(PARAM_HOST_CONSTS), self.naming.host_field(*r)),

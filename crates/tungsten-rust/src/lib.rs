@@ -20,8 +20,7 @@
 //!
 //! Assumed runtime (not generated): `Pos3`, `Vec3`, `Config { origin, origin_scale, position_scale,
 //! dimensions }`, `iter_3d(&Config)` yielding items with a `pos` field, `index(..)` accepting both the
-//! loop item and a `Pos3`, `make_boxed::<T>()`, `make_permutation_table`, `make_base3d_perm_table`,
-//! and the sampler types.
+//! loop item and a `Pos3`, `make_boxed::<T>()`, the autoconst initializer functions and the handle types they return.
 
 use std::collections::HashSet;
 
@@ -39,14 +38,11 @@ pub mod function;
 pub mod interned;
 pub mod model;
 pub mod orchestration;
-pub mod random;
 pub mod statement;
 pub mod transformer;
 pub mod types;
 
 /// Names of runtime items and generated structs that the generated code refers to by name.
-pub const PERLIN_NOISE_SAMPLER_STRUCT_NAME: &str = "PerlinNoiseSampler";
-pub const BASE3D_NOISE_SAMPLER_STRUCT_NAME: &str = "InterpolatedNoiseSampler";
 pub const HOST_CONSTS_STRUCT_NAME: &str = "HostConsts";
 pub const AUTO_CONSTS_STRUCT_NAME: &str = "AutoConsts";
 pub const CONFIG_STRUCT_NAME: &str = "Config";

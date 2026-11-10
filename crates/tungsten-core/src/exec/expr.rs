@@ -127,10 +127,7 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
             None => Err(stuck(StuckReason::Case)),
         },
         Expr::Table(t) => match get(&p.tables, t.0) {
-            Some(d) => match d.kind {
-                TableKind::Perm => Ok(Value::PermTable(*t)),
-                TableKind::Sampler => Ok(Value::Sampler(*t)),
-            },
+            Some(_) => Ok(Value::Handle(*t)),
             None => Err(stuck(StuckReason::BadIndex)),
         },
         Expr::Ambient(a) => Ok(match a {

@@ -28,20 +28,40 @@ pub fn print(p: &OptimizedProgram) -> String {
     sections.push(s);
 
     let mut s = String::new();
-    for (t, table) in p.permutation_tables.iter() {
-        let def = match table {
-            PermutationTableInput::Base3DNoise => "base3d".to_string(),
-            PermutationTableInput::PerlinNoise {
-                ident,
-                subident,
-                subident_index,
-            } => format!(
-                "perlin({}, {}, {subident_index})",
-                quote_string(ident),
-                subident.as_deref().map_or("none".to_string(), quote_string)
-            ),
+    for (r, param) in p.auto_params.iter() {
+        s.push_str(&format!(
+            "    param {}: {};\n",
+            labels.auto_param(r),
+            type_text(&param.t)
+        ));
+    }
+    sections.push(s);
+
+    let mut s = String::new();
+    for (r, a) in p.auto_consts.iter() {
+        let label = labels.auto_const(r);
+        let name = if a.name == label {
+            String::new()
+        } else {
+            format!(" @name({})", quote_string(&a.name))
         };
-        s.push_str(&format!("    table {} = {def};\n", labels.table(t)));
+        let args: Vec<String> = a
+            .args
+            .iter()
+            .map(|arg| match arg {
+                AutoConstArg::Param(p) => format!("param({})", labels.auto_param(*p)),
+                AutoConstArg::I64(v) => format!("{v}L"),
+                AutoConstArg::F64(v) => f64_lit(*v),
+                AutoConstArg::Bool(v) => v.to_string(),
+                AutoConstArg::Str(v) => quote_string(v),
+            })
+            .collect();
+        s.push_str(&format!(
+            "    auto {label}: {}{name} = {}({});\n",
+            type_text(&a.t),
+            a.initializer,
+            args.join(", ")
+        ));
     }
     sections.push(s);
 
@@ -127,7 +147,7 @@ fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> Stri
     let ComputeUnit::DensityFunction {
         function,
         density_inputs,
-        permutation_table_inputs,
+        auto_consts,
         host_inputs,
         helper_functions,
         constants,
@@ -150,10 +170,10 @@ fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> Stri
             .collect(),
     ));
     s.push_str(&list(
-        "tables",
-        permutation_table_inputs
+        "autos",
+        auto_consts
             .iter()
-            .map(|t| labels.table(*t))
+            .map(|t| labels.auto_const(*t))
             .collect(),
     ));
     s.push_str(&list(

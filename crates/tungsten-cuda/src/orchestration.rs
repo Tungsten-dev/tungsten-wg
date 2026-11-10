@@ -8,8 +8,7 @@ The host source is mostly fixed text with per-program loops, so it is written as
 
 use tungsten_interface::naming::{NamingRules, entry_base_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
-use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, VariableType};
-use tungsten_rust::orchestration::{AutoConstArg, permutation_table_specs};
+use tungsten_ir::model::{AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, VariableType};
 
 use super::function::build_kernel_wrapper;
 use super::launch::launch_shape;
@@ -20,7 +19,7 @@ use super::{
 };
 use crate::backend::CudaConfig;
 use crate::model as cuda;
-use crate::model::codegen::{CudaCodeGenerator, split_c_array, type_string};
+use crate::model::codegen::{CudaCodeGenerator, double_literal, split_c_array, type_string};
 
 /// The four generated files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,12 +134,12 @@ fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &
     };
 
     let auto_consts = cuda::Struct {
-        doc: Some("Seed-derived permutation tables. Built on the host, copied to the device once.".into()),
+        doc: Some("Values built once at creation. Built on the host, copied to the device once.".into()),
         name: AUTO_CONSTS_STRUCT.into(),
         members: program
-            .permutation_tables
+            .auto_consts
             .iter()
-            .map(|(r, table)| cuda::Item::Field { t: auto_const_type(table), name: interface.auto_const_field(r).into() })
+            .map(|(r, a)| cuda::Item::Field { t: auto_const_type(&a.t), name: interface.auto_const_field(r).into() })
             .collect(),
     };
 
@@ -261,9 +260,9 @@ struct Status {
         "    /// nvcc flags density.cu must be compiled with (empty: any).".into(),
         format!("    static constexpr const char* required_flags = \"{}\";", profile.required_flags()),
         String::new(),
-        "    /// Allocates everything on the current device and builds the permutation tables for `seed`.".into(),
+        "    /// Allocates everything on the current device and builds the autoconsts from the params.".into(),
         "    /// On failure `out` is left null.".into(),
-        "    static Status create(long long seed, std::unique_ptr<Orchestration>& out);".into(),
+        format!("    static Status create({}std::unique_ptr<Orchestration>& out);", create_params(program, interface)),
         "    ~Orchestration();".into(),
         "    Orchestration(const Orchestration&) = delete;".into(),
         "    Orchestration& operator=(const Orchestration&) = delete;".into(),
@@ -336,31 +335,53 @@ fn hex_i64(v: i64) -> String {
     format!("(long long)0x{:016x}ULL", v as u64)
 }
 
+/// A C++ string literal holding `s` as UTF-8. Bytes outside printable ASCII are three-digit octal
+/// escapes, which can't swallow the digit that follows them. `?` is escaped against trigraphs.
+fn string_literal(s: &str) -> String {
+    let mut out = String::from("\"");
+    for &b in s.as_bytes() {
+        match b {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'?' => out.push_str("\\?"),
+            b' '..=b'~' => out.push(b as char),
+            b => out.push_str(&format!("\\{:03o}", b)),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// `long long seed, double salt, ` (with the trailing separator): the creation parameters.
+fn create_params(program: &OptimizedProgram, interface: &Interface) -> String {
+    program
+        .auto_params
+        .iter()
+        .map(|(r, p)| {
+            let t = public_type(&p.t).expect("auto params are scalars");
+            format!("{} {}, ", type_string(&t), interface.auto_param(r))
+        })
+        .collect()
+}
+
 /// Statements of `create` that fill `auto_constants` on the host.
 fn auto_const_assignments(program: &OptimizedProgram, interface: &Interface) -> Vec<String> {
-    let specs = permutation_table_specs(program, interface);
     let mut out = Vec::new();
-    for ((_, table), spec) in program.permutation_tables.iter().zip(&specs) {
-        let args: Vec<String> = spec
+    for (r, a) in program.auto_consts.iter() {
+        let args: Vec<String> = a
             .args
             .iter()
-            .enumerate()
-            .map(|(i, a)| match (a, table) {
-                (AutoConstArg::Seed, _) => "seed".to_string(),
-                // `subident_index` is a count, not a seed half.
-                (AutoConstArg::I64(v), PermutationTableInput::PerlinNoise { .. }) if i == 3 => format!("{}LL", v),
-                (AutoConstArg::I64(v), _) => hex_i64(*v),
+            .map(|arg| match arg {
+                AutoConstArg::Param(p) => interface.auto_param(*p).to_string(),
+                AutoConstArg::I64(v) => hex_i64(*v),
+                AutoConstArg::F64(v) => double_literal(*v),
+                AutoConstArg::Bool(v) => v.to_string(),
+                AutoConstArg::Str(v) => string_literal(v),
             })
             .collect();
-        if let PermutationTableInput::PerlinNoise { ident, subident, subident_index } = table {
-            out.push(format!(
-                "// {} [{}]{}",
-                ident,
-                subident_index,
-                subident.as_deref().map(|s| format!(" / {}", s)).unwrap_or_default()
-            ));
-        }
-        out.push(format!("auto_constants->{} = tw::{}({});", spec.field, spec.initializer, args.join(", ")));
+        let field = interface.auto_const_field(r);
+        out.push(format!("// {}", a.name.chars().map(|c| if c.is_control() || c == '\\' || c == '?' { ' ' } else { c }).collect::<String>()));
+        out.push(format!("auto_constants->{} = tw::{}({});", field, a.initializer, args.join(", ")));
     }
     out
 }
@@ -382,7 +403,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
     let has_host_inputs = !host_inputs.is_empty();
 
     let includes = format!(
-        "#include \"{}\"\n#include \"{}\"\n\n#include <cuda_runtime.h>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <utility>",
+        "#include \"{}\"\n#include \"{}\"\n\n#include <cuda_runtime.h>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <type_traits>\n#include <utility>",
         config.public_header_name, config.interface_header_name
     );
     let check_macro = format!(
@@ -411,6 +432,10 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             a = axis
         ));
     }
+    asserts.push(format!(
+        "static_assert(std::is_trivially_copyable<dev::{a}>::value, \"{a} is copied to the device as bytes\");",
+        a = AUTO_CONSTS_STRUCT
+    ));
     asserts.push(format!(
         "static_assert(sizeof(HostConsts) == sizeof(dev::{d}) && alignof(HostConsts) == alignof(dev::{d}), \"HostConsts must mirror dev::{d}\");",
         d = DEVICE_HOST_CONSTS_STRUCT
@@ -476,7 +501,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
 
     let auto_consts = auto_const_assignments(program, interface);
     let mut create = vec![
-        "Status Orchestration::create(long long seed, std::unique_ptr<Orchestration>& out) {".to_string(),
+        format!("Status Orchestration::create({}std::unique_ptr<Orchestration>& out) {{", create_params(program, interface)),
         "    out.reset();".into(),
         "    std::unique_ptr<Impl> impl(new Impl());".into(),
         "    TUNGSTEN_CUDA_CHECK(cudaStreamCreateWithFlags(&impl->stream, cudaStreamNonBlocking));".into(),
@@ -493,15 +518,15 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
         ),
         "    }".into(),
         String::new(),
-        "    // Permutation tables are built on the host (on the heap: they can be large) and copied once.".into(),
+        "    // Autoconsts are built on the host (on the heap: they can be large) and copied once.".into(),
         "    {".into(),
         format!(
             "        std::unique_ptr<dev::{a}> auto_constants(new dev::{a}());",
             a = AUTO_CONSTS_STRUCT
         ),
     ];
-    if auto_consts.is_empty() {
-        create.push("        (void)seed;".into());
+    for (r, _) in program.auto_params.iter() {
+        create.push(format!("        (void){};", interface.auto_param(r)));
     }
     create.push(indent(&auto_consts, 2));
     create.extend([
@@ -526,7 +551,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
     ]);
     for e in entries {
         create.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result_{b}), {b}_len * sizeof({t}), cudaHostAllocDefault));",
+            "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result_{b}), Orchestration::{b}_len * sizeof({t}), cudaHostAllocDefault));",
             b = e.base,
             t = e.public_element
         ));
@@ -584,7 +609,7 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             }
         }
         methods.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result_{b}, s.slab + {l}::{f}, {b}_len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
+            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result_{b}, s.slab + {l}::{f}, Orchestration::{b}_len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
             b = e.base,
             l = layout_name(),
             f = interface.buffer_field(&e.inst),

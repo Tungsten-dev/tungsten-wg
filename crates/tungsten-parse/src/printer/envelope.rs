@@ -74,13 +74,26 @@ pub fn print_test_file(t: &TestFile) -> String {
     out.push_str(&print(&t.program));
     for c in &t.cases {
         out.push_str(&format!(
-            "@case {} origin({}, {}, {}) seed({})",
+            "@case {} origin({}, {}, {})",
             quote_string(&c.name),
             f64_lit(c.origin[0]),
             f64_lit(c.origin[1]),
             f64_lit(c.origin[2]),
-            c.seed
         ));
+        if !c.params.is_empty() {
+            let ps: Vec<String> = c
+                .params
+                .iter()
+                .map(|(p, v)| {
+                    let v = match v {
+                        Value::I64(x) => x.to_string(),
+                        v => value(v),
+                    };
+                    format!("{} = {v}", labels.auto_param(*p))
+                })
+                .collect();
+            out.push_str(&format!(" param({})", ps.join(", ")));
+        }
         if !c.hosts.is_empty() {
             let hs: Vec<String> = c
                 .hosts

@@ -45,5 +45,5 @@ program {
 
     entry find_top_surface @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
 }
-@case "c" origin(0, 0, 0) seed(1)
+@case "c" origin(0, 0, 0)
 @expect "c" find_top_surface = [0.0, 2.0, 4.0]

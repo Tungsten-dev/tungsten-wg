@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use tungsten_interface::Interface;
 use tungsten_interface::naming::cuda_sanitize;
 use tungsten_ir::model::{
-    BinaryOperator, Constant, Expression, Function, Name, OptimizedProgram, PermutationTableInput, Ref, Var,
+    BinaryOperator, Constant, Expression, Function, Name, OptimizedProgram, Ref, Var,
     VariableType,
 };
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
@@ -116,10 +116,7 @@ impl<'a> FunctionConverter<'a> {
             E::DensityVariable(input, _) => {
                 unit_return_type(self.program, self.program.density_inputs[*input].density_function).clone()
             }
-            E::PermutationTable(r) => match &self.program.permutation_tables[*r] {
-                PermutationTableInput::PerlinNoise { .. } => VariableType::PermutationTable,
-                PermutationTableInput::Base3DNoise => VariableType::InterpolatedNoiseSampler,
-            },
+            E::AutoConst(r) => self.program.auto_consts[*r].t.clone(),
             E::HostInput(r) => self.program.host_inputs[*r].get_type(),
             E::Ambient(k) => match k {
                 tungsten_ir::model::AmbientKind::Pos3 => VariableType::Pos3,

@@ -105,8 +105,9 @@ impl ProgramBuilder {
     pub fn input(&mut self, source: Unit, grid: Grid) -> Input;
     pub fn input_with(&mut self, spec: InputSpec) -> Input;
     pub fn host(&mut self, name: &str, t: VariableType) -> Host;
-    pub fn perlin_table(&mut self, ident: &str, sub: Option<&str>, index: usize) -> Table;
-    pub fn sampler_table(&mut self) -> Table;                // Base3DNoise
+    pub fn param(&mut self, name: &str, t: VariableType) -> Param;   // an auto param: I64, F64 or Bool
+    pub fn auto_const(&mut self, name: &str, t: VariableType, initializer: &str,
+                      args: impl IntoIterator<Item = AutoArg>) -> Auto;
     pub fn constant(&mut self, name: &str, value: impl Into<Expr>) -> Constant;
 
     pub fn fresh_name(&mut self, prefix: &str) -> String;    // prefix_0, prefix_1, ...
@@ -140,7 +141,8 @@ in this version, including for refinement, whose reruns are declared after their
 | --- | --- | --- |
 | Input | Source, dims, scales by `f64` bits, and later `mapping` and `previous` | Returns the existing input. The first name wins |
 | Host | Name | Same type: returns the existing host. Other type: `HostTypeConflict` |
-| Table | The `PermutationTableInput` value | Returns the existing table |
+| Param | Name | Same type: returns the existing param. Other type: `AutoParamConflict` |
+| Autoconst | `t`, `initializer` and `args`, with `F64` by bits | Returns the existing autoconst. The first name wins |
 | Constant, helper, unit | Not merged | Each call adds a new one |
 
 Merging inputs means one input can be listed by several units. Backends already share the buffer through `Instance`,
@@ -341,7 +343,7 @@ caught the same way at `finish_*`. This uses `Arena::contains`, which unlike `ge
 | `Function.host_inputs` | Hosts this function reads directly | First use |
 | Unit `helper_functions` | Everything reachable from `main` | Callees before callers |
 | Unit `host_inputs` | Union over `main` and its helpers | First use |
-| Unit `permutation_table_inputs` | Tables read by any of them | First use |
+| Unit `auto_consts` | Autoconsts read by any of them | First use |
 | Unit `constants` | Constants read, and those their initializers reach | Dependencies first |
 | Unit `density_inputs` | Inputs read by any of them | First use |
 
@@ -387,14 +389,29 @@ record_decls! {
     Piece { terrain_adjustment: I32, block_box: "BlockBox" },
 }
 
+// A handle type is written `handle "Name"`; initializers list their argument kinds.
+extern_fns! {
+    group noise_externs;
+    perm_get(t: handle "PerlinNoiseSampler", i: I32): I32,
+}
+
+auto_initializers! {
+    group noise_initializers;
+    make_permutation_table(I64, I64, I64, I64, I64, I64): handle "PerlinNoiseSampler",
+    derive_salt(I64, Str): I64,
+}
+
 let registry = tungsten_wg::registry_from([
     aquifer_externs(),
     structure_records(),
+    noise_initializers(),
 ])?;
 let out = tungsten_wg::Compiler::new(program, &registry, rust).compile()?;
 ```
 
 - `group name;` generates `pub fn name() -> Decls`. It's a function because `VariableType` can't be `const`.
+- `Decls` holds externs, records and autoconst initializers. `registry_from` passes the initializers to
+  `RegistryBuilder::auto_initializer`, so the registry covers everything a program can name.
 - Generated call functions take `impl Into<Expr>` and check arity and argument types, with `ArgumentType` and `Arity`.
   There is deliberately no untyped extern call, so the frontend's 29 inline `ExternCall` literals in the main lowering
   files would each get a declaration.

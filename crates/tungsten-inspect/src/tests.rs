@@ -17,7 +17,8 @@ fn program(src: &str) -> OptimizedProgram {
 const SMALL: &str = r#"
 program {
     host seed: i64;
-    table temperature = perlin("t:temperature", "first", 0);
+    param seed: i64;
+    auto temperature: handle PerlinNoiseSampler = make_permutation_table(param(seed), -5905185639843810347L, -1114563041767670988L, 0L, -8429377429593839218L, 8666437495923410133L);
     const base = 0.25;
     const scale = (const(base) * 2.0);
 
@@ -39,7 +40,7 @@ program {
 
     // Noise: a constant depending on a constant, and a permutation table. Used at two grids.
     fn `t:noise`() -> f64 {
-        return (ext sample::<(perm_table, f64) -> f64>(table(temperature), 1.0) * const(scale));
+        return (ext sample::<(handle PerlinNoiseSampler, f64) -> f64>(auto(temperature), 1.0) * const(scale));
     }
 
     // Shared by both entries; reads the seed at 1x1x1 (resampled).
@@ -68,7 +69,7 @@ program {
     fn `t:orphan`() -> f64 { return 4.0; }
 
     unit seed_u { main `t:seed`; hosts [seed]; }
-    unit noise_u { main `t:noise`; consts [base, scale]; tables [temperature]; }
+    unit noise_u { main `t:noise`; consts [base, scale]; autos [temperature]; }
     unit shared_u { main `t:shared`; inputs [seed_in]; }
     unit leaf_u { main `t:leaf`; }
     unit table_u { main `t:table`; }
@@ -245,7 +246,10 @@ fn inspects_small_program() {
             .any(|d| d.constant == "const:scale" && d.depends_on == "const:base")
     );
     assert_eq!(i.tables.len(), 1);
-    assert_eq!(i.tables[0].display, "perlin t:temperature[0] first");
+    assert_eq!(
+        i.tables[0].display,
+        "make_permutation_table(param seed, -5905185639843810347L, -1114563041767670988L, 0L, -8429377429593839218L, 8666437495923410133L)"
+    );
     assert_eq!(i.host_inputs[0].users, vec!["cu:t:seed".to_string()]);
     assert!(i.call_graph.edges.iter().any(|e| e.to == "fn:t:accumulate"));
 

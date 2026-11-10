@@ -167,10 +167,13 @@ impl<'a> FunctionConverter<'a> {
                 let index = self.checked_index(index, (dx * dy * dz) as usize);
                 C::index(buffer_pointer(element, C::field(C::name(PARAM_CTX), "buffers"), &buffer), index)
             }
-            Expression::PermutationTable(r) => C::address_of(C::arrow(
+            Expression::AutoConst(r) => match &self.program.auto_consts[*r].t {
+                VariableType::Handle(_) => C::address_of(C::arrow(
                 C::field(C::name(PARAM_CTX), "auto_constants"),
                 self.naming.auto_const_field(*r),
-            )),
+                )),
+                _ => C::arrow(C::field(C::name(PARAM_CTX), "auto_constants"), self.naming.auto_const_field(*r)),
+            },
             Expression::HostInput(r) => {
                 C::arrow(C::field(C::name(PARAM_CTX), "host_consts"), self.naming.host_field(*r))
             }

@@ -15,7 +15,8 @@ fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
         entry_points: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
-        permutation_tables: Arena::new(),
+        auto_params: Arena::new(),
+        auto_consts: Arena::new(),
         density_inputs: Arena::new(),
     };
     let mut variables = Arena::new();
@@ -35,7 +36,7 @@ fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
     p.compute_units.insert(ComputeUnit::DensityFunction {
         function: f,
         density_inputs: vec![],
-        permutation_table_inputs: vec![],
+        auto_consts: vec![],
         host_inputs: vec![],
         helper_functions: vec![],
         constants: vec![],
@@ -195,7 +196,7 @@ fn types_and_values_at_the_limit() {
             t: nested_array(depth.min(N)),
         });
         format!(
-            "{}@case \"c\" origin(0.0, 0.0, 0.0) seed(1) host(h = {})\n",
+            "{}@case \"c\" origin(0.0, 0.0, 0.0) host(h = {})\n",
             print(&p),
             value(depth)
         )

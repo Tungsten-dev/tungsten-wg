@@ -1,6 +1,6 @@
 # Generic autoconsts
 
-Status: design agreed, not implemented. Lands after `specs/compiler.md`, and so after milestone 5 of
+Status: implemented, all six milestones (see "Implementation notes" at the end). Lands after `specs/compiler.md`, and so after milestone 5 of
 `specs/program-level-inputs.md`, which deletes `tungsten-legacy`. It lands before `specs/workers.md`, which restates the
 creation API from §5.1 on its final types.
 
@@ -531,3 +531,79 @@ Unit `auto_consts` lists are derived like the other lists, in first-use order, a
 | Text format | `param` and `auto`, old keywords removed | Keeping `table` for handles: two item kinds for one arena |
 | `@case` | `param(...)` replaces `seed(...)` | `seed(n)` as sugar: two spellings, and the printer has to pick one |
 | Spec location | `specs/auto-consts.md` | Root `SPEC.md`: holds the testsuite design |
+
+## Implementation notes
+
+Milestones 1 and 2.
+
+- **Handle interning.** The registry interns the handle names its declarations mention (records, then
+  externs), and lowering continues that numbering with the names only the program mentions, in walk
+  order (autoconst types first). `LowerMap.handle_types` has the names. This is a superset of §4.2's
+  "registry first, then the arenas" and stays deterministic.
+- **`LowerMap` data.** It carries `auto_params` (an `IdMap` with an `AutoParamId`, since core has no
+  params), `auto_param_types` and `auto_consts: Vec<AutoConstInfo>` (the core id, name, type,
+  initializer and arguments, in arena order). `resolved_auto_consts` works from these, so `Prepared`
+  doesn't need the IR. `LowerMap.tables` maps `Ref<AutoConst>` to `TableId`.
+- **Argument kinds.** Milestone 2 has `AutoConstArg::{Param, I64}` and `AutoArgValue::{I64, F64, Bool}`.
+  Param values can already be `F64` or `Bool`; `F64`, `Bool` and `Str` autoconst arguments, and
+  `AutoArgValue::Str`, wait for milestone 5. A non-handle autoconst is lowered as an error
+  (`BadAutoConstType`) until milestone 4.
+- **`@case` params.** `param(name = value)` takes an `i64` as an unsuffixed or `L` literal, decimal or hex,
+  up to `u64::MAX`. The printer writes an `i64` param as a bare signed decimal. The parse `Case` has
+  `params: Vec<(Ref<AutoParam>, Value)>` in program order.
+- **Printer.** Params are labelled by their name (the host rule, so duplicates get `##N`). Autoconsts are
+  `a<N>`, with `@name("…")` when the name differs.
+- **Wire format.** `TestIo` has `params`, and each driver decodes them into `ap<N>` locals and passes them
+  to `Orchestration::new`, `AutoConsts.create` and `Orchestration::create` in arena order.
+- **Builder.** `perlin_table` and `sampler_table` are gone. `ProgramBuilder::param` and `auto_const` with
+  `Param`, `Auto` and `AutoArg` replace them. In `extern_fns!` a handle type is written `(handle "Name")`
+  for now (the unparenthesized form is milestone 6).
+- **Testsuite.** `md5` is gone from the workspace. The harness's cache keys and module names use a small
+  stable hash (`src/hash.rs`). The toy initializers dispatch by name in `CaseExterns::new`.
+  `tungsten-rust/src/random.rs` is no longer part of the crate (its `mod` line is removed); the file
+  itself still has to be deleted.
+- **Snapshots.** The `tests/snapshots` golden files of the lowered core programs changed (`PermTable` is
+  now `Handle(HandleTypeId(..))`) and were regenerated.
+- **Not touched.** `specs/builder.md`, the READMEs of `tungsten-check` and `tungsten-core`'s `EXEC.md`
+  still describe tables; that is milestone 6.
+
+Milestones 3 to 6.
+
+- **`AutoArgType` lives in `tungsten-ir`.** `tungsten-check` re-exports it, so `RegistryBuilder::auto_initializer`
+  takes the type §3.1 shows. The builder's `Decls` can't depend on the checker, and both need the type.
+  `AutoConstArg` implements `PartialEq`, `Eq` and `Hash` by hand (`F64` by bits), as does `AutoArgSpec` in
+  `LowerMap`. `AutoArg` in the builder stopped being `Copy`, because of `Str`.
+- **Lowering checks.** They run in a pass of their own, auto params first, then autoconsts, before hosts.
+  `Item::AutoParam` locates the two param errors. `HandleHost` also catches a handle inside an array.
+  `AutoArgType`'s `found` and `AutoInitializerReturn` print types the way the parser does (`i64`, `handle Name`).
+  A dangling `Param` ref is reported only as `DanglingRef`, not also as a type mismatch.
+- **Value autoconsts.** `LowerMap` gains `auto_hosts` (`Ref<AutoConst>` to `HostId`), `auto_host_names`,
+  `host_name(HostId)` (which names a value autoconst's host after the autoconst) and `is_auto_host`.
+  `host_names` has a `None` entry for each of those hosts, so `host(name = …)` can't bind them, and
+  `LowerMap.tables` now holds the handle autoconsts only. A function's `hosts` is its listed hosts, then the
+  value autoconsts its body reads, in first-read order. `CaseBindError::AutoValueUnknown` carries the `HostId`.
+  The checker's message for an unlisted read says `autoconst `x` isn't in the autos of unit `u``.
+- **`F64`, `Bool`, `Str`.** In `.tw`, an argument is read as a literal of its own kind, so `0.0` and `-0.0`
+  are different arguments, and `nan`, `inf` and `-inf` work. An unsuffixed integer, or an `f32` or other
+  integer kind, is an error. Backends spell `F64` with their usual literal formatter, which writes NaN as the
+  canonical NaN: a non-canonical payload in an argument doesn't survive to generated code. Strings are
+  escaped by `escape_default` in Rust, as UTF-16 units (`\uXXXX`) in Java, and as three-digit octal UTF-8
+  bytes with `?` escaped in CUDA. Rust gets `rcl::Type::StaticStr` and `Expression::StrLiteral`, Java
+  `Expression::StrLit`.
+- **CUDA.** The generated layout checks gain `static_assert(std::is_trivially_copyable<dev::AutoConsts>)`.
+- **Toy initializers.** `registry.toml` declares them (`[[auto_initializer]]`), and `SPEC.md` §5.3 defines
+  them: `make_salt` (FNV-1a over the UTF-8 bytes), `make_bits`, `make_scale`, `make_flag`, `make_i8`,
+  `make_i32` and `make_f32`. `CaseExterns::new` returns the externs and the `auto_values`.
+- **Builder.** `extern_fns!` takes `handle "Name"` unparenthesized (a token muncher), the parenthesized
+  spelling still works, and `record_decls!` still takes one token per field type. `auto_initializers!`
+  and `Decls::initializers` are new, and `registry_from` passes them on.
+- **Reserved names.** `PerlinNoiseSampler` and `InterpolatedNoiseSampler` left the reserved-name lists in
+  `tungsten-interface/naming.rs`: a handle type is the frontend's name.
+- **Isolation.** `tungsten-testsuite/tests/isolation.rs` scans library code (everything outside
+  `tungsten-testsuite`, tests and docs, and the part of a file after `#[cfg(test)]`) for `perlin`,
+  `base3d` and `md5`. It skips `random.rs` (below) and `rcl_new.rs`, a file a Java test writes.
+- **Not done: `crates/tungsten-rust/src/random.rs`.** It's unreferenced and still mentions MD5, but the
+  tool refused to delete it. Delete it by hand, then drop the skip in `isolation.rs`.
+- **Corpus.** `corpus/autoconst/{values,mixed,param_names,unread,no_params,inlined_helpers}.tw` cover the
+  §10 corpus row, including `i64::MIN`, `-0.0`, NaN, `true`/`false` and strings with quotes, a backslash,
+  non-ASCII and non-BMP text. The expected values were computed separately in Python.

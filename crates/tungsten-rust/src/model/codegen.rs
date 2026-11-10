@@ -491,6 +491,7 @@ impl RustCodeGenerator {
             icl::Expression::F32Literal(val) => self.format_f32_literal(*val),
             icl::Expression::F64Literal(val) => self.format_f64_literal(*val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
+            icl::Expression::StrLiteral(val) => format!("\"{}\"", val.escape_default()),
             icl::Expression::BinaryOp { op, left, right } => {
                 format!(
                     "({} {} {})",
@@ -682,6 +683,7 @@ impl RustCodeGenerator {
             icl::Type::F32 => "f32".to_string(),
             icl::Type::F64 => "f64".to_string(),
             icl::Type::Bool => "bool".to_string(),
+            icl::Type::StaticStr => "&'static str".to_string(),
             icl::Type::Void => "()".to_string(),
             icl::Type::Ref(inner) => format!("&{}", self.type_to_rust_string(inner)),
             icl::Type::MutRef(inner) => format!("&mut {}", self.type_to_rust_string(inner)),

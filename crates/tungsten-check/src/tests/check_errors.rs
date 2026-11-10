@@ -228,8 +228,8 @@ fn host_not_in_unit() {
 #[test]
 fn table_not_listed() {
     one(
-        "table t2 = perlin(\"m\", none, 0);",
-        "return ext sample(table(t2), p);",
+        "auto t2: handle PerlinNoiseSampler @name(\"m\") = make_perm(param(seed), 2L);",
+        "return ext sample(auto(t2), p);",
         "fn `top` › stmt 0 › value › arg 0: table `m` isn't in the tables of unit `top_main`",
     );
 }
@@ -390,7 +390,7 @@ fn core_prog(functions: Vec<Function>, consts: Vec<ConstDecl>) -> Program {
         functions,
         consts,
         hosts: vec![HostDecl { ty: Type::F64 }],
-        tables: vec![TableDecl { kind: TableKind::Perm }],
+        tables: vec![TableDecl { ty: HandleTypeId(0) }],
         inputs: vec![],
         entries: vec![],
         externs: vec![ExternDecl { params: vec![], ret: Type::F64, domain_error: false }],

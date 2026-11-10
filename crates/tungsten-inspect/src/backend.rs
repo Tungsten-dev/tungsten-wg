@@ -48,8 +48,8 @@ impl Default for Views {
 /// Bytes per buffer element. Defaults model the Rust runtime.
 /// Override e.g. `f64 = 4` to model a GPU backend that downcasts.
 ///
-/// `Array(t, n)` is `n × size(t)`. Other types (`DensityInput`, `PermutationTable`,
-/// `InterpolatedNoiseSampler`, `Extern`) are not valid buffer elements: size 0 and a note in
+/// `Array(t, n)` is `n × size(t)`. Other types (`DensityInput`,
+/// `Handle`, `Extern`) are not valid buffer elements: size 0 and a note in
 /// [`Inspection::notes`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElementSizes {

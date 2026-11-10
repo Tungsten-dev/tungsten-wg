@@ -81,7 +81,8 @@ impl LabelKey {
 pub enum Item {
     Use(UseItem),
     Host(HostItem),
-    Table(TableItem),
+    Param(ParamItem),
+    Auto(AutoItem),
     Const(ConstItem),
     Fn(FnItem),
     Unit(UnitItem),
@@ -105,21 +106,31 @@ pub struct HostItem {
     pub ty: Option<Ty>,
 }
 
+/// `param label: type;`
 #[derive(Debug, Clone)]
-pub struct TableItem {
+pub struct ParamItem {
     pub span: Span,
     pub label: Label,
-    pub def: TableDef,
+    pub ty: Ty,
+}
+
+/// `auto label: type @name("n") = initializer(args);`
+#[derive(Debug, Clone)]
+pub struct AutoItem {
+    pub span: Span,
+    pub label: Label,
+    pub ty: Ty,
+    pub name: Option<String>,
+    pub initializer: String,
+    pub args: Vec<AutoArg>,
 }
 
 #[derive(Debug, Clone)]
-pub enum TableDef {
-    Perlin {
-        ident: String,
-        subident: Option<String>,
-        index: u64,
-    },
-    Base3d,
+pub enum AutoArg {
+    Param(Label),
+    /// A number or bool literal; elaboration picks `i64`, `f64` or `bool` by its kind.
+    Lit(Lit),
+    Str(String),
 }
 
 #[derive(Debug, Clone)]
@@ -155,7 +166,7 @@ pub struct UnitItem {
     pub hash: Option<u64>,
     pub main: Option<Label>,
     pub helpers: Option<Vec<Label>>,
-    pub tables: Option<Vec<Label>>,
+    pub autos: Option<Vec<Label>>,
     pub hosts: Option<Vec<Label>>,
     pub consts: Option<Vec<Label>>,
     pub inputs: Option<Vec<Label>>,
@@ -194,10 +205,12 @@ pub struct Ty {
 
 #[derive(Debug, Clone)]
 pub enum TyKind {
-    /// Anything but `Array` and `Extern`.
+    /// Anything but `Array`, `Extern` and `Handle`.
     Prim(VariableType),
     Array(Box<Ty>, usize),
     Extern(String),
+    /// `handle Name`.
+    Handle(String),
 }
 
 #[derive(Debug, Clone)]
@@ -340,7 +353,7 @@ pub enum ExprKind {
     Name(Label),
     Const(Label),
     Host(Label),
-    Table(Label),
+    Auto(Label),
     Density {
         input: Label,
         index: Option<Box<Expr>>,
@@ -389,7 +402,7 @@ impl ExprKind {
             | ExprKind::Name(_)
             | ExprKind::Const(_)
             | ExprKind::Host(_)
-            | ExprKind::Table(_)
+            | ExprKind::Auto(_)
             | ExprKind::Ambient(_) => {}
             ExprKind::Density { index, .. } => index.iter().for_each(|e| f(e)),
             ExprKind::Call { args, .. }
@@ -447,7 +460,7 @@ pub enum DirectiveKind {
     Case {
         name: String,
         origin: [Lit; 3],
-        seed: u64,
+        params: Vec<(Label, AstValue)>,
         hosts: Vec<(Label, AstValue)>,
     },
     ExpectReject(Option<String>),

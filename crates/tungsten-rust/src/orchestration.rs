@@ -15,71 +15,51 @@ use super::{
 use crate::interned::Interned;
 use crate::model as rcl;
 use crate::model::codegen::RustCodeGenerator;
-use crate::random::xoroshiro_seed;
 use tungsten_interface::naming::{NamingRules, entry_method_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{
-    ComputeUnit, HostInput, OptimizedProgram, PermutationTableInput, Ref, VariableType,
+    AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, Ref, VariableType,
 };
 
-/// An argument of an auto-const initializer.
-#[derive(Debug, Clone, PartialEq)]
-pub enum AutoConstArg {
-    /// The world seed passed to `Orchestration::new`.
-    Seed,
-    I64(i64),
-}
-
-/// One field of `AutoConsts` and how to initialize it. This is the extension point:
-/// a model can later supply its own specs (fields, initializer functions, parameters).
-#[derive(Debug, Clone, PartialEq)]
-pub struct AutoConstSpec {
-    pub field: String,
-    pub t: rcl::Type,
+/// One field of `AutoConsts` and how to initialize it.
+struct AutoConstSpec {
+    field: String,
+    t: rcl::Type,
     /// Name of the runtime function returning the value.
-    pub initializer: String,
-    pub args: Vec<AutoConstArg>,
+    initializer: String,
+    args: Vec<(AutoConstArg, rcl::Type)>,
 }
 
-/// Specs derived from the program's permutation tables.
-pub fn permutation_table_specs(
-    program: &OptimizedProgram,
-    interface: &Interface,
-) -> Vec<AutoConstSpec> {
+/// Params in declaration order, as (name, type).
+fn auto_params(program: &OptimizedProgram, interface: &Interface) -> Vec<(String, rcl::Type)> {
     program
-        .permutation_tables
+        .auto_params
         .iter()
-        .map(|(r, table)| {
-            let (initializer, args) = match table {
-                PermutationTableInput::PerlinNoise {
-                    ident,
-                    subident,
-                    subident_index,
-                } => {
-                    let id = xoroshiro_seed(ident);
-                    let sub = subident.as_deref().map(xoroshiro_seed).unwrap_or((0, 0));
-                    (
-                        "make_permutation_table",
-                        vec![
-                            AutoConstArg::Seed,
-                            AutoConstArg::I64(id.0 as i64),
-                            AutoConstArg::I64(id.1 as i64),
-                            AutoConstArg::I64(*subident_index as i64),
-                            AutoConstArg::I64(sub.0 as i64),
-                            AutoConstArg::I64(sub.1 as i64),
-                        ],
-                    )
-                }
-                PermutationTableInput::Base3DNoise => {
-                    ("make_base3d_perm_table", vec![AutoConstArg::Seed])
-                }
-            };
-            AutoConstSpec {
-                field: interface.auto_const_field(r).to_string(),
-                t: auto_const_type(table),
-                initializer: initializer.to_string(),
-                args,
-            }
+        .map(|(r, p)| (interface.auto_param(r).to_string(), convert_type(&p.t)))
+        .collect()
+}
+
+fn auto_const_specs(program: &OptimizedProgram, interface: &Interface) -> Vec<AutoConstSpec> {
+    program
+        .auto_consts
+        .iter()
+        .map(|(r, a)| AutoConstSpec {
+            field: interface.auto_const_field(r).to_string(),
+            t: auto_const_type(&a.t),
+            initializer: a.initializer.clone(),
+            args: a
+                .args
+                .iter()
+                .map(|arg| match arg {
+                    AutoConstArg::I64(v) => (AutoConstArg::I64(*v), rcl::Type::I64),
+                    AutoConstArg::F64(v) => (AutoConstArg::F64(*v), rcl::Type::F64),
+                    AutoConstArg::Bool(v) => (AutoConstArg::Bool(*v), rcl::Type::Bool),
+                    AutoConstArg::Str(v) => (AutoConstArg::Str(v.clone()), rcl::Type::StaticStr),
+                    AutoConstArg::Param(p) => {
+                        (AutoConstArg::Param(*p), convert_type(&program.auto_params[*p].t))
+                    }
+                })
+                .collect(),
         })
         .collect()
 }
@@ -162,25 +142,40 @@ fn var(name: &str, t: rcl::Type) -> Rc<rcl::Variable> {
     })
 }
 
-/// `fn make_auto_consts(seed, &mut AutoConsts)`: assigns every field from its spec's initializer.
-fn make_auto_consts_fn<'m>(specs: &[AutoConstSpec]) -> rcl::Function<'m> {
+/// `fn make_auto_consts(<params>, &mut AutoConsts)`: assigns every field from its initializer.
+fn make_auto_consts_fn<'m>(
+    program: &OptimizedProgram,
+    interface: &Interface,
+    specs: &[AutoConstSpec],
+) -> rcl::Function<'m> {
     use rcl::Expression as E;
     let mut f = rcl::Function::new(Some("make_auto_consts".to_string()), None);
     let target_type = rcl::Type::MutRef(Box::new(rcl::Type::Struct(
         AUTO_CONSTS_STRUCT_NAME.to_string(),
     )));
-    f.add_parameter("seed".to_string(), rcl::Type::I64);
+    let params = auto_params(program, interface);
+    for (name, t) in &params {
+        f.add_parameter(name.clone(), t.clone());
+    }
     f.add_parameter("auto_consts".to_string(), target_type.clone());
-    let seed = var("seed", rcl::Type::I64);
+    let param_vars: std::collections::HashMap<_, _> = program
+        .auto_params
+        .iter()
+        .zip(&params)
+        .map(|((r, _), (name, t))| (r, var(name, t.clone())))
+        .collect();
     let auto_consts = var("auto_consts", target_type);
 
     for spec in specs {
         let arguments = spec
             .args
             .iter()
-            .map(|a| match a {
-                AutoConstArg::Seed => E::Variable(seed.clone()),
+            .map(|(a, _)| match a {
+                AutoConstArg::Param(p) => E::Variable(param_vars[p].clone()),
                 AutoConstArg::I64(v) => E::I64Literal(*v),
+                AutoConstArg::F64(v) => E::F64Literal(*v),
+                AutoConstArg::Bool(v) => E::BoolLiteral(*v),
+                AutoConstArg::Str(v) => E::StrLiteral(v.clone()),
             })
             .collect::<Vec<_>>();
         f.add_statement(rcl::Statement::AssignPlace {
@@ -190,7 +185,7 @@ fn make_auto_consts_fn<'m>(specs: &[AutoConstSpec]) -> rcl::Function<'m> {
             },
             value: E::LateBoundCall {
                 function_name: spec.initializer.clone(),
-                argument_types: vec![rcl::Type::I64; arguments.len()],
+                argument_types: spec.args.iter().map(|(_, t)| t.clone()).collect(),
                 return_type: spec.t.clone(),
                 arguments,
             },
@@ -203,16 +198,18 @@ fn boxed_struct(name: &str) -> rcl::Type {
     rcl::Type::Box(Box::new(rcl::Type::Struct(name.to_string())))
 }
 
-/// `Orchestration::new(seed)`: allocates the boxed buffers and auto constants and initializes the latter.
-fn new_fn<'m>() -> rcl::Function<'m> {
+/// `Orchestration::new(<params>)`: allocates the boxed buffers and auto constants and initializes the latter.
+fn new_fn<'m>(program: &OptimizedProgram, interface: &Interface) -> rcl::Function<'m> {
     use rcl::Expression as E;
     use rcl::Statement as S;
     let mut f = rcl::Function::new(
         Some("new".to_string()),
         Some(rcl::Type::Struct("Self".to_string())),
     );
-    f.add_parameter("seed".to_string(), rcl::Type::I64);
-    let seed = var("seed", rcl::Type::I64);
+    let params = auto_params(program, interface);
+    for (name, t) in &params {
+        f.add_parameter(name.clone(), t.clone());
+    }
     let buffers = var("buffers", boxed_struct(INTERNAL_BUFFERS_STRUCT_NAME));
     let auto_constants = var("auto_constants", boxed_struct(AUTO_CONSTS_STRUCT_NAME));
     let init = var("_init", rcl::Type::Void);
@@ -237,12 +234,13 @@ fn new_fn<'m>() -> rcl::Function<'m> {
         variable: init,
         init: Some(E::LateBoundCall {
             function_name: "make_auto_consts".to_string(),
-            argument_types: vec![rcl::Type::I64],
+            argument_types: params.iter().map(|(_, t)| t.clone()).collect(),
             return_type: rcl::Type::Void,
-            arguments: vec![
-                E::Variable(seed),
-                E::MutRef(Box::new(E::Variable(auto_constants.clone()))),
-            ],
+            arguments: params
+                .iter()
+                .map(|(name, t)| E::Variable(var(name, t.clone())))
+                .chain([E::MutRef(Box::new(E::Variable(auto_constants.clone())))])
+                .collect(),
         }),
         mutable: false,
     });
@@ -384,7 +382,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         self.model
             .add_import(format!("super::{}::*", self.density_module_name));
 
-        let specs = permutation_table_specs(program, interface);
+        let specs = auto_const_specs(program, interface);
         for s in [
             host_consts_struct(program, interface),
             auto_consts_struct(&specs),
@@ -395,11 +393,11 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
             self.model.structs.push(s);
         }
 
-        let init = self.intern(make_auto_consts_fn(&specs));
+        let init = self.intern(make_auto_consts_fn(program, interface, &specs));
         self.model.functions.push(init);
 
         let names = entry_method_names(program, &naming, HashSet::from(["new".to_string()]));
-        let mut methods = vec![self.intern(new_fn())];
+        let mut methods = vec![self.intern(new_fn(program, interface))];
         for (entry, name) in program.entry_points.iter().zip(names) {
             let entry = Instance::from_entry(entry);
             let method = entry_method(program, interface, name, &entry);
