@@ -1,0 +1,35 @@
+// The vanilla noise shape at full size: a (5,49,5) grid interpolated to (16,384,16). With memo off,
+// each of the 27 corner reads per cell rebuilds the grid, so the interpreter takes minutes here.
+@tier(large)
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn grid_leaf() -> f64 {
+        let c: pos3 = ambient(pos3);
+        return (((c.x + (10 * c.y)) + (100 * c.z)) as f64);
+    }
+    unit grid_u {
+        main grid_leaf;
+    }
+
+    input noise = grid_u @dims(5, 49, 5) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(4, 8, 4);
+
+    fn noise_main() -> f64 {
+        return density(noise);
+    }
+    unit noise_t {
+        main noise_main;
+        inputs [noise];
+    }
+    entry noise_t @dims(16, 384, 16) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" noise_t[0, 0, 0] = 0.0
+@expect "c" noise_t[15, 383, 15] = 857.5
+@expect "c" noise_t[3, 7, 3] = 84.5
+@expect "c" noise_t[4, 8, 4] = 111.0
+@expect "c" noise_t[13, 201, 6] = 404.5
+@expect "c" noise_t[15, 0, 0] = 3.75
+@expect "c" noise_t[0, 383, 0] = 478.75
+@expect "c" noise_t[0, 0, 15] = 375.0

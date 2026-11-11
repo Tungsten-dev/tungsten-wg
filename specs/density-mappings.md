@@ -391,3 +391,29 @@ Each lands green.
 - **Mapping as core semantics:** move it into `tungsten-core` if the proof work needs it.
 - **Scale agreement:** source scale equal to reader scale × factor holds across today's frontend grids.
   A lint could report it later, without rejecting.
+
+## 10. Implementation notes
+
+### Vanilla mapping scan (gate for milestone 2)
+
+Done on 2026-11-11 with `tungsten-mc-compile` at `9d4d2cf` (plus its uncommitted working-tree changes) against
+tungsten-wg `v0.2` (`9a9c848`). A scan converted the vanilla overworld (`spmt::conversion::convert`), walked every
+`(unit, reader dims)` pair reachable from the seven entries, and looked at each `DensityVariable` in the unit's main
+function and helpers. It was run before and after `perform_inline`:
+
+| | Pairs | Un-indexed reads | Indexed reads across shapes | Un-indexed `(1,1,1)` from a larger grid | Mismatches |
+| --- | --- | --- | --- | --- | --- |
+| Not inlined | 73 | 152 | 169 | 0 | **0** |
+| Inlined | 53 | 118 | 169 | 0 | **0** |
+
+**No reads found.** Vanilla reads every input that has different dims through an explicit index (`flat_y_zero_index`,
+`biome_column_index`, `corner*_8`, the aquifer). So strict 1-to-1 rejects nothing in vanilla, and the gate had nothing
+to decide.
+
+### Milestone 2
+
+- Lowering folds `/ 1` and `* 1` out of the desugared indices and drops zero terms of `flat`. The bits don't change.
+- `MappingDimsMismatch` and `MappingOutOfRange` report the first failing axis. The error is reported at the input,
+  and it names the reading unit by its main function, as other lowering errors do.
+- The formula agreement test is `tungsten-check/src/tests/mapping.rs`. It checks every cell of an `(8,16,8)` reader
+  of a `(3,3,3)` `@lerp(4, 8, 4)` input with edge values against a copy of `tungsten-mc`'s `interpolate`.

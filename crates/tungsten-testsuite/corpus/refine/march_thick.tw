@@ -1,0 +1,18 @@
+// March: a window two cells thick (dims.y = 2) moves as a whole.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn pos_main() -> i32 { return ((ambient(pos3).y * 10) + ambient(pos3).x); }
+    unit pos { main pos_main; }
+    entry pos @dims(1, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of pos @march(0, 4, 0) {
+        rerun pos @dims(1, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 2, 0)
+@refine "c" step offset(0, 4, 0)
+@expect "c" pos = [0, 10]
+@expect "c" after(1) pos = [20, 30]
+@expect "c" after(2) pos = [40, 50]

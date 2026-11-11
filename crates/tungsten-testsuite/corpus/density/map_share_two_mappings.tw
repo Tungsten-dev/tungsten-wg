@@ -1,0 +1,26 @@
+// Two inputs over one buffer (same unit, dims and scales) with different mappings.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> f64 {
+        return (1.0 + (2.0 * (ambient(pos3).x as f64)));
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input a = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(2, *, *);
+    input b = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, *);
+
+    fn top() -> f64 {
+        return ((density(a) * 10.0) + density(b));
+    }
+    unit t {
+        main top;
+        inputs [a, b];
+    }
+    entry t @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [11.0, 12.0]

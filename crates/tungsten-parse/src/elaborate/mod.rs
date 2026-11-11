@@ -105,6 +105,20 @@ pub struct Case {
     /// Every auto param, in program order.
     pub params: Vec<(Ref<AutoParam>, Value)>,
     pub hosts: Vec<(Ref<HostInput>, Value)>,
+    /// The case's `@refine` directives, in source order.
+    pub refines: Vec<RefineCall>,
+    pub span: Span,
+}
+
+/// One `@refine`: a call of `refinement` after the case's orchestrate step. Hosts not bound here
+/// keep their value from the call before.
+#[derive(Debug, Clone)]
+pub struct RefineCall {
+    /// Index into `program.refinements`.
+    pub refinement: usize,
+    /// Within `[0, march]` on every axis.
+    pub offset: [i32; 3],
+    pub hosts: Vec<(Ref<HostInput>, Value)>,
     pub span: Span,
 }
 
@@ -123,6 +137,9 @@ pub struct Expect {
     pub case: usize,
     /// Index into `entry_points`. `None` for `error(Kind)`, which covers the whole case.
     pub entry: Option<usize>,
+    /// `after(n)`: checked after the case's `n`th `@refine` (from 1), and `entry` is that
+    /// refinement's entry. `None` checks the orchestrate step.
+    pub after: Option<usize>,
     pub kind: ExpectKind,
     pub span: Span,
 }

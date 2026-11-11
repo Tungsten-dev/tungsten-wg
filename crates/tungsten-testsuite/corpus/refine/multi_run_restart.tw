@@ -1,0 +1,24 @@
+// Multiple: each case starts with a fresh orchestrate, so state from another case's refine calls doesn't carry over.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn seed_main() -> i32 { return 0; }
+    unit seed { main seed_main; }
+    input prev = seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    
+    fn acc_main() -> i32 { return (density(prev) + 1); }
+    unit acc { main acc_main; inputs [prev]; }
+    entry seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+@case "first" origin(0, 0, 0)
+@case "second" origin(0, 0, 0)
+@refine "first" step offset(0, 0, 0)
+@refine "first" step offset(0, 0, 0)
+@refine "second" step offset(0, 0, 0)
+@expect "first" after(2) seed = [2]
+@expect "second" seed = [0]
+@expect "second" after(1) seed = [1]

@@ -1,0 +1,16 @@
+// Two refinements of one entry with the same name.
+program {
+    fn seed_main() -> f64 { return 0.0; }
+    unit seed { main seed_main; }
+    fn d_main() -> f64 { return 2.0; }
+    unit du { main d_main; }
+    input prev = seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    input d = du @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn w_main() -> f64 { return (density(prev) + density(d)); }
+    unit w { main w_main; inputs [prev, d]; }
+    entry seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    refinement step of seed { rerun seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with w; rerun du @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+    refinement step of seed { rerun seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+}
+@expect reject(RefineDuplicateName)

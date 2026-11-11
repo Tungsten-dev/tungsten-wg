@@ -1,4 +1,4 @@
-// A (1,1,1) input is read at cell 0 by every cell of the reader.
+// A (1,1,1) input is read at cell 0 by every cell of the reader, through `@expand(*, *, *)`.
 program {
     fn base_main() -> f64 {
         return 2.5;
@@ -10,7 +10,7 @@ program {
     fn top_main() -> f64 {
         return (density(b) * 2.0);
     }
-    input b = base @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input b = base @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
     unit top {
         main top_main;
         inputs [b];

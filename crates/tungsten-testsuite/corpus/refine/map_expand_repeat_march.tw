@@ -1,0 +1,19 @@
+// Mappings: `@expand` with `*` on the marched axis reads the frozen input's only layer at every offset.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn col_main() -> i32 { return (ambient(pos3).x * 7); }
+    unit col { main col_main; }
+    input c = col @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(1, *, *);
+    fn top_main() -> i32 { return (density(c) + ambient(pos3).y); }
+    unit top { main top_main; inputs [c]; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of top @march(0, 4, 0) {
+        rerun top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 4, 0)
+@expect "c" top = [0, 7]
+@expect "c" after(1) top = [4, 11]

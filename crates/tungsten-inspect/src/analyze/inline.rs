@@ -75,6 +75,19 @@ fn translate(ctx: &Ctx, v: InlineVerdict) -> InlineVerdictInfo {
                     fn_display(function)
                 ),
             ),
+            InlineRejection::MappedRead { function } => (
+                Verdict::MappedRead {
+                    function: ctx.function_id(function),
+                },
+                format!(
+                    "blocked: read through a mapping in fn {} (identity mapping required)",
+                    fn_display(function)
+                ),
+            ),
+            InlineRejection::Refinement => (
+                Verdict::Refinement,
+                "blocked: a refinement runs it or reads it directly".to_string(),
+            ),
             InlineRejection::ReadInSeveralFunctions => (
                 Verdict::ReadInSeveralFunctions,
                 "blocked: read in more than one function of the caller".to_string(),

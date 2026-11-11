@@ -231,6 +231,8 @@ fn verdict_kind(v: &Verdict) -> &'static str {
         Verdict::CallerGridAmbiguous => "caller grid ambiguous",
         Verdict::GridMismatch { .. } => "grid mismatch",
         Verdict::IndexedRead { .. } => "indexed read",
+        Verdict::MappedRead { .. } => "mapped read",
+        Verdict::Refinement => "refinement",
         Verdict::ReadInSeveralFunctions => "read in several functions",
         Verdict::NotRead => "not read",
     }

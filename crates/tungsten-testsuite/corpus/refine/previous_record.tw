@@ -1,0 +1,22 @@
+// `@previous`: a record element carries more state than one value.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn seed_main() -> extern Pair { return new Pair { a: 1.0, b: ambient(pos3).x }; }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    
+    fn acc_main() -> extern Pair { let q: extern Pair = density(prev); return new Pair { a: (q.a * 2.0), b: (q.b + 1) }; }
+    unit acc { main acc_main; inputs [prev]; }
+    entry seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@expect "c" seed = [new Pair { a: 1.0, b: 0 }, new Pair { a: 1.0, b: 1 }]
+@expect "c" after(1) seed = [new Pair { a: 2.0, b: 1 }, new Pair { a: 2.0, b: 2 }]
+@expect "c" after(2) seed = [new Pair { a: 4.0, b: 2 }, new Pair { a: 4.0, b: 3 }]

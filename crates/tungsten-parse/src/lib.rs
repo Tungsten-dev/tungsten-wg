@@ -14,7 +14,7 @@ mod stack;
 mod tables;
 
 pub use elaborate::{
-    Case, CellSample, Env, Expect, ExpectKind, ExternSig, KnownFail, NoEnv, TestFile, Value,
+    Case, CellSample, Env, Expect, ExpectKind, ExternSig, KnownFail, NoEnv, RefineCall, TestFile, Value,
     elaborate, load,
 };
 pub use intern::intern;

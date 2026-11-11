@@ -585,6 +585,10 @@ pub enum Verdict {
     IndexedRead {
         function: String,
     },
+    MappedRead {
+        function: String,
+    },
+    Refinement,
     ReadInSeveralFunctions,
     NotRead,
 }

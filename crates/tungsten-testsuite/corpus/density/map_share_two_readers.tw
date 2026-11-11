@@ -1,0 +1,34 @@
+// One mapped input listed by two units that run at different dims. Each reader is checked on its own grid.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> i32 {
+        return (ambient(pos3).x * 10);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(2, *, *);
+
+    fn am() -> i32 {
+        return density(d);
+    }
+    unit a {
+        main am;
+        inputs [d];
+    }
+    fn bm() -> i32 {
+        return (density(d) + 1);
+    }
+    unit b {
+        main bm;
+        inputs [d];
+    }
+    entry a @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b @dims(5, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" a = [0, 0, 10, 10]
+@expect "c" b = [1, 1, 11, 11, 21]

@@ -1,0 +1,10 @@
+// Lerp: a 17-wide reader of a 5-wide input with factor 4 needs a high corner at x = 5, even though its weight is 0.
+program {
+    fn leaf() -> f64 { return 1.0; }
+    unit leaf_u { main leaf; }
+    input d = leaf_u @dims(5, 1, 5) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(4, *, 4);
+    fn top() -> f64 { return density(d); }
+    unit t { main top; inputs [d]; }
+    entry t @dims(17, 1, 16) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@expect reject(MappingOutOfRange)

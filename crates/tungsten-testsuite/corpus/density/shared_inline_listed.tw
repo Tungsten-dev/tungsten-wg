@@ -8,7 +8,7 @@ program {
         main leaf_main;
     }
 
-    input x = leaf @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input x = leaf @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
 
     fn mid_main() -> i32 {
         return (density(x) * ambient(pos3).x);

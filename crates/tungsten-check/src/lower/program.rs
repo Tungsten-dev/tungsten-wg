@@ -6,13 +6,15 @@ use std::collections::{HashMap, HashSet};
 use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
-    AutoConst, AutoConstArg, ComputeUnit, DensityInput, DensityMapping, EntryPoint, Function, HostInput, Name,
+    AutoConst, AutoConstArg, ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name,
     OptimizedProgram, VariableType,
 };
 
+use super::refine::{Inst, RefineGraph};
+use super::step::StepCfg;
 use super::{Ctx, get};
 use crate::error::{EntityKind, Item, LowerError, LowerErrorKind, ParameterProblem, Step};
-use crate::map::{AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, IdMap, LowerMap};
+use crate::map::{AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, IdMap, Instance, LowerMap};
 use crate::registry::{AutoArgType, Registry};
 use super::const_to_expr;
 
@@ -23,11 +25,31 @@ fn name_str(n: &Name) -> Option<&str> {
     }
 }
 
-/// Lowers `p` without the extern/record tables (the caller copies those from the registry).
-pub(crate) fn run(
-    p: &OptimizedProgram,
-    reg: &Registry,
-) -> (core::Program, LowerMap, Vec<LowerError>) {
+/// What one lowering produced, without the extern/record tables (the caller copies those from
+/// the registry).
+pub(crate) struct Output {
+    pub program: core::Program,
+    pub map: LowerMap,
+    pub errors: Vec<LowerError>,
+    /// By core entry: the instance it computes.
+    pub instances: Vec<Instance>,
+    /// A refine step only: its offset host and buffer hosts, with the instance each holds.
+    pub offset: Option<HostId>,
+    pub buffers: Vec<(HostId, Instance)>,
+}
+
+/// Lowers `p` as the normal program: the entries, then a hidden entry per instance a refine call
+/// reads from `run` that no entry computes (`specs/refinement.md` §7.1).
+pub(crate) fn run(p: &OptimizedProgram, reg: &Registry) -> Output {
+    lower_with(p, reg, None)
+}
+
+/// Lowers refine call `refinement` of `p`, which lowered without errors (§7.2).
+pub(crate) fn run_step(p: &OptimizedProgram, reg: &Registry, refinement: usize) -> Output {
+    lower_with(p, reg, Some(refinement))
+}
+
+fn lower_with(p: &OptimizedProgram, reg: &Registry, refinement: Option<usize>) -> Output {
     let mut cx = Ctx {
         p,
         reg,
@@ -39,17 +61,33 @@ pub(crate) fn run(
         locals: HashMap::new(),
         handles: reg.handle_names.clone(),
         auto_reads: vec![],
+        step: None,
     };
     cx.auto_params();
     let (tables, auto_hosts) = cx.auto_consts();
     let mut hosts = cx.hosts();
     hosts.extend(auto_hosts);
+    if let Some(r) = refinement {
+        cx.step = StepCfg::new(p, r, hosts.len());
+        hosts.extend(cx.step_hosts());
+        cx.map.step_host_names = cx.step_host_names();
+    }
     let consts = cx.consts();
     let functions = cx.functions();
     let units = cx.units();
     let inputs = cx.inputs();
-    let entries = cx.entries();
-    cx.refinements();
+    let (entries, instances) = cx.entries();
+    if refinement.is_none() {
+        cx.refinements();
+        cx.mapping_readers();
+    }
+    let (offset, buffers) = match &cx.step {
+        Some(cfg) => (
+            Some(cfg.offset),
+            cfg.buffer_insts.iter().enumerate().map(|(k, i)| (cfg.hosts[k + 1], cx.instance(i))).collect(),
+        ),
+        None => (None, vec![]),
+    };
     let program = core::Program {
         units,
         functions,
@@ -62,7 +100,7 @@ pub(crate) fn run(
         records: vec![],
     };
     cx.map.handle_types = std::mem::take(&mut cx.handles);
-    (program, cx.map, cx.errors)
+    Output { program, map: cx.map, errors: cx.errors, instances, offset, buffers }
 }
 
 /// Ids in arena iteration order, with display names.
@@ -457,6 +495,9 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 hosts.push(h);
             }
         }
+        if let Some(cfg) = &self.step {
+            hosts.extend(cfg.hosts.iter().copied());
+        }
         self.map.locals.push(locals);
         core::Function {
             params,
@@ -484,9 +525,14 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 ..
             } = u;
             let main = self.at(Step::Main, |cx| cx.fn_ref(*function));
+            let buffered: Vec<bool> = density_inputs
+                .iter()
+                .map(|r| self.step.as_ref().is_some_and(|c| c.buffers.contains_key(r)))
+                .collect();
             let inputs = density_inputs
                 .iter()
                 .enumerate()
+                .filter(|(i, _)| !buffered[*i])
                 .map(|(i, &r)| self.at(Step::List { list: "inputs", index: i }, |cx| cx.input_ref(r)))
                 .collect();
             let mut tables = vec![];
@@ -508,6 +554,9 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 if !hosts.contains(&h) {
                     hosts.push(h);
                 }
+            }
+            if let Some(cfg) = &self.step {
+                hosts.extend(cfg.hosts.iter().copied());
             }
             let helpers = helper_functions
                 .iter()
@@ -534,20 +583,16 @@ impl<'p, 'r> Ctx<'p, 'r> {
     fn inputs(&mut self) -> Vec<core::InputDecl> {
         let p = self.p;
         let mut out = vec![];
-        for (i, (_, d)) in p.density_inputs.iter().enumerate() {
+        for (i, (r, d)) in p.density_inputs.iter().enumerate() {
             let id = InputId(i);
             let name = self.map.inputs.name(id).unwrap_or_default().to_string();
             self.enter(Item::Input {
                 id: Some(id),
                 name,
             });
-            let source = self.at(Step::Source, |cx| cx.unit_ref(d.density_function));
-            if d.mapping != DensityMapping::Identity {
-                self.err(LowerErrorKind::NotSupportedYet("density mappings are".into()));
-            }
-            if d.previous {
-                self.err(LowerErrorKind::NotSupportedYet("`@previous` inputs are".into()));
-            }
+            let source_unit = self.step.as_ref().and_then(|c| c.sources.get(&r).copied());
+            let source = self.at(Step::Source, |cx| cx.unit_ref(source_unit.unwrap_or(d.density_function)));
+            self.mapping_shape(d);
             out.push(core::InputDecl {
                 source,
                 dims: dims(d.dimensions),
@@ -558,17 +603,22 @@ impl<'p, 'r> Ctx<'p, 'r> {
         out
     }
 
-    fn refinements(&mut self) {
-        let p = self.p;
-        self.enter(Item::Program);
-        for r in &p.refinements {
-            self.err(LowerErrorKind::NotSupportedYet(format!("refinement `{}` is", r.name)));
-        }
-    }
-
-    fn entries(&mut self) -> Vec<core::Entry> {
+    /// The entries and the instance of each. Normally the program's entries, then the hidden
+    /// ones; in a step, its running instances.
+    fn entries(&mut self) -> (Vec<core::Entry>, Vec<Instance>) {
         let p = self.p;
         let mut out = vec![];
+        let mut instances = vec![];
+        if let Some(cfg) = &self.step {
+            let running = cfg.running.clone();
+            for run in &running {
+                let unit = self.unit_ref(run.unit);
+                out.push(inst_entry(unit, &run.target));
+                instances.push(self.instance(&run.target));
+            }
+            return (out, instances);
+        }
+        let mut seen: Vec<Inst> = vec![];
         for (index, e) in p.entry_points.iter().enumerate() {
             let EntryPoint {
                 density_function,
@@ -584,7 +634,39 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 origin_scale: f64x3(*scaled_origin),
                 position_scale: f64x3(*scaled_position),
             });
+            let inst = Inst::of_entry(e);
+            instances.push(self.instance(&inst));
+            seen.push(inst);
         }
-        out
+        for walk in RefineGraph::new(p).walks {
+            for inst in walk.frozen_reads.iter().chain(&walk.with_targets) {
+                if seen.contains(inst) || self.map.units.id(inst.cu).is_none() {
+                    continue;
+                }
+                seen.push(*inst);
+                let unit = self.map.units.id(inst.cu).unwrap_or(UnitId(0));
+                out.push(inst_entry(unit, inst));
+                instances.push(self.instance(inst));
+            }
+        }
+        (out, instances)
+    }
+
+    pub(super) fn instance(&self, i: &Inst) -> Instance {
+        Instance {
+            unit: self.map.units.id(i.cu).unwrap_or(UnitId(0)),
+            dims: i.dims,
+            origin_scale: i.origin,
+            position_scale: i.position,
+        }
+    }
+}
+
+fn inst_entry(unit: UnitId, i: &Inst) -> core::Entry {
+    core::Entry {
+        unit,
+        dims: dims(i.dims),
+        origin_scale: core::F64x3 { x: i.origin[0], y: i.origin[1], z: i.origin[2] },
+        position_scale: core::F64x3 { x: i.position[0], y: i.position[1], z: i.position[2] },
     }
 }

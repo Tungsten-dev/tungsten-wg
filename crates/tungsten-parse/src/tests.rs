@@ -2292,3 +2292,82 @@ fn refinement_errors() {
     // Duplicate names and empty rerun lists are the validator's to reject, so they must load.
     load_ok(&with_units("refinement r of e { } refinement r of e { }"));
 }
+
+/// `refinement step of e @march(0, 3, 0)` plus `other` with a host `h`, and `envelope` after the
+/// program.
+fn refine_file(envelope: &str) -> String {
+    format!(
+        "program {{
+            host h: f64;
+            fn base() -> f64 {{ return 1.0; }}
+            fn other() -> f64 @hosts(h) {{ return host(h); }}
+            unit base {{ main base; }}
+            unit other {{ main other; hosts [h]; }}
+            entry e = other @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+            entry f = base @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+            refinement step of e @march(0, 3, 0) {{
+                rerun other @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+            }}
+        }}
+        @case \"c\" origin(0, 0, 0) host(h = 1.0)
+        {envelope}"
+    )
+}
+
+#[test]
+fn refine_directives_parse_and_print() {
+    let tf = load_ok(&refine_file(
+        "@expect \"c\" after(2) e[0, 0, 0] = 3.0
+         @refine \"c\" step offset(0, 3, 0) host(h = 2.0)
+         @expect \"c\" e[0, 0, 0] = 1.0
+         @refine \"c\" step offset(0, 0, 0)
+         @expect \"c\" after(1) e[*] = 2.0",
+    ));
+    let calls = &tf.cases[0].refines;
+    assert_eq!(calls.len(), 2);
+    assert_eq!((calls[0].refinement, calls[0].offset, calls[0].hosts.len()), (0, [0, 3, 0], 1));
+    assert_eq!((calls[1].offset, calls[1].hosts.len()), ([0, 0, 0], 0));
+    let afters: Vec<_> = tf.expects.iter().map(|e| e.after).collect();
+    assert_eq!(afters, [Some(2), None, Some(1)]);
+    let text = print_test_file(&tf);
+    assert!(text.contains("@refine \"c\" step offset(0, 3, 0) host(h = 2.0)\n@refine \"c\" step offset(0, 0, 0)\n"), "{text}");
+    assert!(text.contains("@expect \"c\" after(2) other[0, 0, 0] = 3.0\n"), "{text}");
+    let again = load_ok(&text);
+    assert_eq!(print_test_file(&again), text);
+}
+
+#[test]
+fn refine_directive_errors() {
+    let bad = [
+        ("@refine \"nope\" step offset(0, 0, 0)", "no case named \"nope\""),
+        ("@refine \"c\" nope offset(0, 0, 0)", "unknown refinement `nope`"),
+        ("@refine \"c\" step offset(0, 4, 0)", "offset 4 on axis y is outside [0, 3]"),
+        ("@refine \"c\" step offset(1, 0, 0)", "offset 1 on axis x is outside [0, 0]"),
+        ("@refine \"c\" step offset(0, -1, 0)", "offset -1 on axis y is outside [0, 3]"),
+        ("@refine \"c\" step offset(0, 0, 0) host(h = 1.0, h = 2.0)", "`h` is bound twice"),
+        ("@refine \"c\" step offset(0, 0, 0) host(nope = 1.0)", "unknown host `nope`"),
+        ("@refine \"c\" step offset(0, 0)", "expected `,`"),
+        ("@expect \"c\" after(1) e[*] = 1.0", "has 0 `@refine` directives"),
+        ("@refine \"c\" step offset(0, 0, 0)\n@expect \"c\" after(0) e[*] = 1.0", "has 1 `@refine` directives"),
+        ("@refine \"c\" step offset(0, 0, 0)\n@expect \"c\" after(1) f[*] = 1.0", "checks entry `e`"),
+        (
+            "@refine \"c\" step offset(0, 0, 0)\n@expect \"c\" after(1) e[*] = 1.0\n@expect \"c\" after(1) e[0, 0, 0] = 1.0",
+            "two expectations cover the same cell",
+        ),
+    ];
+    let message = |src: &str| load(src, FileId(0), &TestEnv).err().expect("should not load").message;
+    for (env, want) in bad {
+        let e = message(&refine_file(env));
+        assert!(e.contains(want), "{env}: {e}");
+    }
+    // Orchestrate and each refine step are separate, so the same cell can be expected in each.
+    load_ok(&refine_file(
+        "@refine \"c\" step offset(0, 0, 0)\n@expect \"c\" e[*] = 1.0\n@expect \"c\" after(1) e[*] = 1.0",
+    ));
+    // A name shared by two entries' refinements can't be called.
+    let shared = refine_file("@refine \"c\" step offset(0, 0, 0)").replace(
+        "        }\n        @case",
+        "    refinement step of f { }\n        }\n        @case",
+    );
+    assert!(message(&shared).contains("used by several entries"), "{shared}");
+}

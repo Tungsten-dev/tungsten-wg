@@ -126,9 +126,46 @@ pub enum LowerErrorKind {
     AutoInitializerReturn { initializer: String, returns: String, declared: String },
     #[error("string argument {index} contains a NUL character")]
     AutoArgHasNul { index: usize },
-    /// Temporary, until the interpreter implements these (`specs/combined-rollout.md` phase 2A).
-    #[error("{0} not supported yet")]
-    NotSupportedYet(String),
+    #[error("mapping factor {factor} on axis {axis} is below 1")]
+    MappingBadFactor { axis: char, factor: i32 },
+    #[error("mapping repeats axis {axis}, but the input is {size} wide on it")]
+    MappingRepeatOnWideAxis { axis: char, size: i32 },
+    #[error("`@lerp` needs an `f32` or `f64` input, but its unit returns `{t}`")]
+    MappingNotFloat { t: String },
+    #[error("unit `{unit}` reads it un-indexed at {reader} on axis {axis}, but it is {input} on that axis")]
+    MappingDimsMismatch { unit: String, axis: char, input: i32, reader: i32 },
+    #[error(
+        "unit `{unit}` reads it at {reader} on axis {axis} (march {march}), past the input's {input} cells on that axis"
+    )]
+    MappingOutOfRange { unit: String, axis: char, input: i32, reader: i32, march: i32 },
+    #[error("entry {entry} doesn't exist")]
+    RefineBadEntry { entry: usize },
+    #[error("entry {entry} already has a refinement `{name}`")]
+    RefineDuplicateName { entry: usize, name: String },
+    #[error("march {march} on axis {axis} is negative")]
+    RefineBadMarch { axis: char, march: i32 },
+    #[error("the entry's own instance isn't rerun")]
+    RefineEntryNotRerun,
+    #[error("rerun {index} lists the same instance as rerun {first}")]
+    RefineDuplicateRerun { index: usize, first: usize },
+    #[error("rerun {index} (`{unit}`) isn't reached from the entry through reruns")]
+    RefineRerunUnreachable { index: usize, unit: String },
+    #[error("rerun {index}: `{with}` returns `{found}`, but its target `{unit}` returns `{expected}`")]
+    RefineTypeMismatch { index: usize, unit: String, with: String, expected: String, found: String },
+    #[error("rerun {index} (`{unit}`) has a different position scale on marched axis {axis}")]
+    RefineMarchScaleMismatch { index: usize, unit: String, axis: char },
+    #[error("the instances that run form a cycle through `{unit}`")]
+    RefineCycle { unit: String },
+    #[error("refined unit `{unit}` is also {why}")]
+    RefinedUnitInNormalGraph { unit: String, why: String },
+    #[error("`@previous` input listed by `{unit}`, which no refinement runs as a `with` unit")]
+    PreviousOutsideRefinedUnit { unit: String },
+    #[error("`@previous` input listed by `{with}`, which refinement `{refinement}` runs for a different instance")]
+    PreviousNotTarget { with: String, refinement: String },
+    #[error("a `@previous` input must have no mapping")]
+    PreviousMapped,
+    #[error("`{unit}` reads this `@previous` input with an explicit index")]
+    PreviousIndexed { unit: String },
 }
 
 /// Where an error is: an item and a path inside it.
@@ -159,6 +196,8 @@ pub enum Item {
     AutoConst { id: Option<TableId>, name: String },
     AutoParam { name: String },
     Entry { index: usize },
+    /// `program.refinements[index]`.
+    Refinement { index: usize, name: String },
     /// Before the walk enters an item. No lowering error is reported here; checker wf errors
     /// in extern and record decls are.
     Registry,
@@ -177,6 +216,7 @@ impl fmt::Display for Item {
             Item::AutoConst { name, .. } => write!(f, "autoconst `{name}`"),
             Item::AutoParam { name } => write!(f, "auto param `{name}`"),
             Item::Entry { index } => write!(f, "entry {index}"),
+            Item::Refinement { name, .. } => write!(f, "refinement `{name}`"),
             Item::Registry => write!(f, "registry"),
             Item::Program => write!(f, "program"),
         }

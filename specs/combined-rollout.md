@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phase 1 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1 and 2A done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -146,32 +146,32 @@ the phase on all three backends. `tungsten-core` is untouched.
 
 Do this first. See `specs/density-mappings.md` §8 and `specs/program-level-inputs.md` §8.
 
-- [ ] Using `tungsten-mc-compile` in `../tungsten-frontends` on v0.2, list every un-indexed read whose reader dims differ
+- [x] Using `tungsten-mc-compile` in `../tungsten-frontends` on v0.2, list every un-indexed read whose reader dims differ
       from the input's dims and whose input isn't `(1,1,1)`
-- [ ] Record the list in the Implementation notes of `specs/density-mappings.md`
-- [ ] **Stop and ask** about each read found. Strict 1-to-1 isn't merged until each one is decided
+- [x] Record the list in the Implementation notes of `specs/density-mappings.md`
+- [x] **Stop and ask** about each read found. Strict 1-to-1 isn't merged until each one is decided
 
 ### 5.2 Mappings (M2)
 
-- [ ] Validation with the new `LowerErrorKind` variants (§4). Compute reader pairs through one function that includes
+- [x] Validation with the new `LowerErrorKind` variants (§4). Compute reader pairs through one function that includes
       `march`, which is 0 until §5.3 fills it in
-- [ ] Desugaring in `tungsten-check/src/lower/expr.rs` (§5.1)
-- [ ] `InlineRejection::MappedRead` in `Planner::plan` (§5.4)
-- [ ] Corpus migration (§6): `dims_different.tw` becomes a reject file, and files reading a `(1,1,1)` input from a larger
+- [x] Desugaring in `tungsten-check/src/lower/expr.rs` (§5.1)
+- [x] `InlineRejection::MappedRead` in `Planner::plan` (§5.4)
+- [x] Corpus migration (§6): `dims_different.tw` becomes a reject file, and files reading a `(1,1,1)` input from a larger
       grid add `@expand(*, *, *)`
-- [ ] New `density/map_*` and `reject/` files (§8), with §3.2 notes for all three backends
-- [ ] Formula agreement test against `tungsten-mc`'s `interpolate`, by bits (§8)
+- [x] New `density/map_*` and `reject/` files (§8), with §3.2 notes for all three backends
+- [x] Formula agreement test against `tungsten-mc`'s `interpolate`, by bits (§8)
 
 ### 5.3 Refinement (M2)
 
-- [ ] Validation with the new `LowerErrorKind` variants (§5), next to the mapping validation. Remove the temporary kind
-- [ ] Fill in `march` for the mapping reader rule (density §4.2)
-- [ ] `eval_sequence`, the per-entry store and refine-step lowering (§7)
-- [ ] `InlineRejection::Refinement`, checked before `MappedRead`, and `consumer_grid` (§8.1)
-- [ ] `@refine` and `@expect .. after(n)`, with their load-time errors (§8.2)
-- [ ] New `refine/` and `reject/` files (§9), with §3.2 notes for all three backends
-- [ ] One L2 snapshot per refinement, named `<path>.<refinement>` (§9)
-- [ ] Marched slices equal full grid, on the interpreter (§9)
+- [x] Validation with the new `LowerErrorKind` variants (§5), next to the mapping validation. Remove the temporary kind
+- [x] Fill in `march` for the mapping reader rule (density §4.2)
+- [x] `eval_sequence`, the per-entry store and refine-step lowering (§7)
+- [x] `InlineRejection::Refinement`, checked before `MappedRead`, and `consumer_grid` (§8.1)
+- [x] `@refine` and `@expect .. after(n)`, with their load-time errors (§8.2)
+- [x] New `refine/` and `reject/` files (§9), with §3.2 notes for all three backends
+- [x] One L2 snapshot per refinement, named `<path>.<refinement>` (§9)
+- [x] Marched slices equal full grid, on the interpreter (§9)
 
 **Exit.** `cargo test --workspace` is green. The interpreter and inliner pass every new file, since `@knownfail` can't excuse
 them. Generated output for the existing corpus differs only in the §6 migration files.
@@ -268,3 +268,28 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   has the same limit, but `MappingBadFactor` is still reachable with factor 0.
 - Exit criterion checked by generating all 86 corpus programs before and after the phase, on three backends and two stages
   (516 outputs, driver included), and comparing bytes: no differences.
+
+**Phase 2A.**
+
+- **Vanilla gate.** The scan found no un-indexed read across shapes (recorded in `specs/density-mappings.md` §10),
+  so there was nothing to ask about.
+- **Migration beyond §6.** `density/shared_dims.tw` read a `(4,1,1)` input un-indexed from a `(2,2,1)` entry. That
+  read is now illegal, so its `square` entry uses an explicit index with the same values. Unit tests and
+  `tungsten-parse/tests/corpus/basic.tw` that relied on flat-number reads across shapes moved the same way.
+  `tests/snapshots/density__dims_different.snap` is no longer referenced, since that file is now a reject file.
+- **Vanilla shapes** are two `@tier(large)` files in `large/`, not `density/`: backend trials build one batch per
+  directory and run the interpreter on all its files, so a slow file slows the whole directory. The lerp file
+  (`(5,49,5)` to `(16,384,16)`) takes about 12 minutes in a release build with memo off, as density-mappings §5.1
+  predicts.
+- **Interpreter API.** `Lowered` has `instances`, `visible` and `steps` (`LoweredStep`, one per refinement).
+  Hidden entries come after the program's entries in the orchestrate program. `Prepared::eval_sequence` takes a
+  `SequenceCase` (complete hosts per call) and returns a `SequenceResult`. A step in which any cell fails, hidden
+  entries included, ends the sequence. The testsuite's `Interp` has `steps` next to `results`.
+- **Inliner.** `InlineRejection::Refinement` is checked first in `Planner::plan`, before `sole_user`, so a `with`
+  unit reports it instead of `Unused`. Every unit listed in some `reruns` counts as running. That is a superset of
+  the reachable ones, and an unreachable one is a validation error anyway.
+- **Text.** `after(n)` counts from 1, and `after(0)` is a load error. A `@refine` naming a refinement name that
+  several entries use is a load error. `specs/refinement.md` §2's example uses `main` as an entry label, which is a
+  keyword. The corpus uses other labels.
+- **Left for 2B.** The rule that a case with `OutOfFuel` at any refine step isn't sent to a backend (§8.3) only
+  checks orchestrate today. The guard makes every refinement program a `GenFailed`, so it can't matter yet.

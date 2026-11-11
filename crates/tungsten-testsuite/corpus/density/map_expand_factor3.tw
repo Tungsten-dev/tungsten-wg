@@ -1,0 +1,26 @@
+// Expand: a factor that isn't a power of two.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> i32 {
+        let c: pos3 = ambient(pos3);
+        return ((c.x * 10) + 5);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(3, *, *);
+
+    fn top() -> i32 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(6, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [5, 5, 5, 15, 15, 15]

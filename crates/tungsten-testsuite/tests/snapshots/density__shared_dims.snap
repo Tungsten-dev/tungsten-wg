@@ -191,7 +191,37 @@ Program {
                             input: InputId(
                                 0,
                             ),
-                            index: None,
+                            index: Some(
+                                Binary {
+                                    op: Add,
+                                    left: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            X,
+                                        ),
+                                        ty: I32,
+                                    },
+                                    right: Binary {
+                                        op: Multiply,
+                                        left: Field {
+                                            base: Ambient(
+                                                Pos3,
+                                            ),
+                                            sel: Pos3(
+                                                Y,
+                                            ),
+                                            ty: I32,
+                                        },
+                                        right: Lit(
+                                            I32(
+                                                2,
+                                            ),
+                                        ),
+                                    },
+                                },
+                            ),
                         },
                     },
                 ),

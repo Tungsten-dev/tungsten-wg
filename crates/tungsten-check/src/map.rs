@@ -183,6 +183,8 @@ pub struct LowerMap {
     pub auto_hosts: HashMap<Ref<AutoConst>, HostId>,
     /// By value autoconst, in order: the name of host `hosts.len() + i`.
     pub auto_host_names: Vec<String>,
+    /// A refine step's own hosts, after the value autoconsts: the offset, then the buffers.
+    pub step_host_names: Vec<String>,
     /// Auto params in declaration order.
     pub auto_params: IdMap<AutoParam, AutoParamId>,
     /// By `AutoParamId`.
@@ -200,15 +202,29 @@ pub struct LowerMap {
     pub records: Vec<RecordNames>,
 }
 
+/// A buffer: a unit at dims and scales, with the scales as bits. Refine steps keep one store
+/// of these per entry (`specs/refinement.md` §7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Instance {
+    pub unit: UnitId,
+    pub dims: (i32, i32, i32),
+    pub origin_scale: [u64; 3],
+    pub position_scale: [u64; 3],
+}
+
 impl LowerMap {
-    /// The display name of a host: its name, or for a value autoconst's host, the autoconst's.
+    /// The display name of a host: its name, or for a value autoconst's host, the autoconst's,
+    /// or for a refine step's own host, its description.
     pub fn host_name(&self, h: HostId) -> Option<&str> {
         match self.hosts.name(h) {
             Some(n) => Some(n),
-            None => self
-                .auto_host_names
-                .get(h.0.checked_sub(self.hosts.len())?)
-                .map(String::as_str),
+            None => {
+                let k = h.0.checked_sub(self.hosts.len())?;
+                match self.auto_host_names.get(k) {
+                    Some(n) => Some(n),
+                    None => self.step_host_names.get(k - self.auto_host_names.len()).map(String::as_str),
+                }
+            }
         }
     }
 

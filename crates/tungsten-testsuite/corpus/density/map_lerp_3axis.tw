@@ -1,0 +1,26 @@
+// Lerp: all three axes interpolated, x first, then y, then z.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> f64 {
+        let c: pos3 = ambient(pos3);
+        return (((c.x + (10 * c.y)) + (100 * c.z)) as f64);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, 2, 2);
+
+    fn top() -> f64 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [0.0, 0.5, 5.0, 5.5, 50.0, 50.5, 55.0, 55.5]

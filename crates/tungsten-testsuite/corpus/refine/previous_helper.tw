@@ -1,0 +1,22 @@
+// `@previous`: read in a helper of the refined unit.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn seed_main() -> i32 { return 1; }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn g() -> i32 { return density(prev); }
+    fn acc_main() -> i32 { return (g() + 5); }
+    unit acc { main acc_main; helpers [g]; inputs [prev]; }
+    entry seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@expect "c" seed = [1, 1]
+@expect "c" after(1) seed = [6, 6]
+@expect "c" after(2) seed = [11, 11]

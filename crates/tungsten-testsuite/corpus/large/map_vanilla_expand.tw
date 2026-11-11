@@ -1,0 +1,42 @@
+// Two vanilla expand shapes at full size: a (5,1,5) column read from (5,49,5), and a (4,1,4) biome
+// grid read from (16,384,16).
+@tier(large)
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn col_leaf() -> f64 {
+        let c: pos3 = ambient(pos3);
+        return ((c.x + (100 * c.z)) as f64);
+    }
+    unit col_u {
+        main col_leaf;
+    }
+
+    input col = col_u @dims(5, 1, 5) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(1, *, 1);
+    input biome = col_u @dims(4, 1, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(4, *, 4);
+
+    fn col_main() -> f64 {
+        return density(col);
+    }
+    unit col_t {
+        main col_main;
+        inputs [col];
+    }
+    fn biome_main() -> f64 {
+        return density(biome);
+    }
+    unit biome_t {
+        main biome_main;
+        inputs [biome];
+    }
+    entry col_t @dims(5, 49, 5) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry biome_t @dims(16, 384, 16) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" col_t[0, 0, 0] = 0.0
+@expect "c" col_t[4, 48, 4] = 404.0
+@expect "c" col_t[2, 30, 3] = 302.0
+@expect "c" biome_t[0, 0, 0] = 0.0
+@expect "c" biome_t[15, 383, 15] = 303.0
+@expect "c" biome_t[5, 100, 9] = 201.0

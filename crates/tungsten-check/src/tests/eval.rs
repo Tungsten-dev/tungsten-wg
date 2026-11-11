@@ -330,6 +330,11 @@ fn eager_const_failure() {
 
 /// A leaf unit returning `x + 10*y + 100*z` of its cell, read by `top` through input `d`.
 fn density_prog(input_dims: &str, entry_dims: &str, read: &str) -> String {
+    mapped_prog(input_dims, "", entry_dims, read)
+}
+
+/// [`density_prog`] with `mapping` after the input's grid attributes.
+fn mapped_prog(input_dims: &str, mapping: &str, entry_dims: &str, read: &str) -> String {
     format!(
         "program {{
             fn leaf() -> f64 {{
@@ -337,7 +342,7 @@ fn density_prog(input_dims: &str, entry_dims: &str, read: &str) -> String {
                 return (((c.x + (10 * c.y)) + (100 * c.z)) as f64);
             }}
             fn top() -> f64 {{ return {read}; }}
-            input d = leaf_u @dims({input_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+            input d = leaf_u @dims({input_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) {mapping};
             unit leaf_u {{ main leaf; }}
             unit t {{ main top; inputs [d]; }}
             entry t @dims({entry_dims}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
@@ -352,7 +357,7 @@ fn oks(xs: &[f64]) -> Vec<Result<Value, EvalError>> {
 #[test]
 fn density_unit_input() {
     // A (1,1,1) input is read at cell 0 from every reader cell.
-    let r = run(&density_prog("1, 1, 1", "2, 2, 1", "density(d)"));
+    let r = run(&mapped_prog("1, 1, 1", "@expand(*, *, *)", "2, 2, 1", "density(d)"));
     assert_eq!(r.entries[0], oks(&[0.0, 0.0, 0.0, 0.0]));
 }
 
@@ -364,13 +369,16 @@ fn density_equal_dims() {
 
 #[test]
 fn density_different_dims() {
-    // The reader's flat index into the input's buffer: reader (2,1,1) cell k reads buf[k]
-    // of a (1,2,1) input, i.e. its cell decode(k) = (0,k,0).
-    let r = run(&density_prog("1, 2, 1", "2, 1, 1", "density(d)"));
+    // Strict 1-to-1: an un-indexed Identity read across shapes is a lowering error, for a
+    // smaller and for a larger input.
+    for (input, reader) in [("1, 2, 1", "2, 1, 1"), ("2, 1, 1", "3, 1, 1"), ("1, 1, 1", "2, 1, 1")] {
+        let e = crate::lower(&load(&density_prog(input, reader, "density(d)")), &registry()).unwrap_err();
+        assert!(matches!(e.0[..], [crate::LowerError { kind: crate::LowerErrorKind::MappingDimsMismatch { .. }, .. }]), "{e}");
+    }
+    // An explicit index stays legal across shapes: reader (2,1,1) cell k reads buf[k] of a
+    // (1,2,1) input, i.e. its cell (0,k,0).
+    let r = run(&density_prog("1, 2, 1", "2, 1, 1", "density(d, ambient(pos3).x)"));
     assert_eq!(r.entries[0], oks(&[0.0, 10.0]));
-    // A larger reader grid: cells past the input's length are OutOfBounds.
-    let r = run(&density_prog("2, 1, 1", "3, 1, 1", "density(d)"));
-    assert_eq!(r.entries[0], vec![Ok(f64v(0.0)), Ok(f64v(1.0)), Err(EvalError::OutOfBounds)]);
 }
 
 #[test]
@@ -431,11 +439,11 @@ fn shared_input_failure() {
         unit a { main a_main; helpers [g]; inputs [d]; }
         unit b { main b_main; inputs [d]; }
         entry a @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-        entry b @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        entry b @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
     }";
     for memo in [true, false] {
         let r = run_with(src, &[], EvalOptions { memo, ..EvalOptions::default() });
-        assert_eq!(r.entries, vec![vec![Err(EvalError::DivByZero); 4], vec![Err(EvalError::DivByZero); 2]]);
+        assert_eq!(r.entries, vec![vec![Err(EvalError::DivByZero); 4], vec![Err(EvalError::DivByZero); 4]]);
         assert_eq!(r.failures, vec![Failure::Input { id: InputId(0), cell: 2, error: EvalError::DivByZero }]);
     }
 }

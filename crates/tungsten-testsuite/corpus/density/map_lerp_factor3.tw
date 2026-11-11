@@ -1,0 +1,26 @@
+// Lerp: factor 3, whose fractions 1/3 and 2/3 aren't exact.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> f64 {
+        let c: pos3 = ambient(pos3);
+        if (c.x == 0) { return 0.1; } return 0.7;
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(3, *, *);
+
+    fn top() -> f64 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [0.1, 0.3, 0.5]

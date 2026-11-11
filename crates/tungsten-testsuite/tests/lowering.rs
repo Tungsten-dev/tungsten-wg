@@ -39,7 +39,10 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
     let values = ir.auto_consts.values().count() - handles;
     n("hosts", ir.host_inputs.iter().count() + values, p.hosts.len())?;
     n("tables", handles, p.tables.len())?;
-    n("entries", ir.entry_points.len(), p.entries.len())?;
+    // Hidden entries for refine calls come after the program's own.
+    n("visible entries", ir.entry_points.len(), lowered.visible)?;
+    n("entry instances", p.entries.len(), lowered.instances.len())?;
+    n("refine steps", ir.refinements.len(), lowered.steps.len())?;
     for (i, f) in p.functions.iter().enumerate() {
         let id = tungsten_core::FnId(i);
         let r = lowered
@@ -64,6 +67,10 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
     settings.set_prepend_module_to_snapshot(false);
     settings.bind(|| {
         insta::assert_debug_snapshot!(name.replace('/', "__"), lowered.program);
+        // One snapshot per refinement's step program, named `<path>.<refinement>`.
+        for step in &lowered.steps {
+            insta::assert_debug_snapshot!(format!("{}.{}", name.replace('/', "__"), step.name), step.program);
+        }
     });
     Ok(())
 }

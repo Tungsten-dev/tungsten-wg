@@ -1,0 +1,23 @@
+// Expand: all `*` reads cell 0 of a (1,1,1) input from every cell of a 3D reader.
+program {
+    fn leaf() -> i32 {
+        let c: pos3 = ambient(pos3);
+        return (7 + c.x);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
+
+    fn top() -> i32 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t[*] = 7

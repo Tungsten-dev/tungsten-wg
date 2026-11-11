@@ -1,0 +1,39 @@
+// A mapped read in a helper that two units share, at different reader dims.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> i32 {
+        return (ambient(pos3).x * 10);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(2, *, *);
+
+    fn g() -> i32 {
+        return density(d);
+    }
+    fn am() -> i32 {
+        return (g() * 2);
+    }
+    unit a {
+        main am;
+        helpers [g];
+        inputs [d];
+    }
+    fn bm() -> i32 {
+        return (g() + 5);
+    }
+    unit b {
+        main bm;
+        helpers [g];
+        inputs [d];
+    }
+    entry a @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" a = [0, 0, 20, 20]
+@expect "c" b = [5, 5]

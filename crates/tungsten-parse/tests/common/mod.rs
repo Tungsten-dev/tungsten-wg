@@ -723,6 +723,37 @@ pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
                 HostInput::Dynamic => None,
             })
             .collect();
+        // `@refine` needs a refinement whose name no other refinement uses, and a march with an
+        // offset in range.
+        let callable: Vec<usize> = program
+            .refinements
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| {
+                program.refinements.iter().filter(|o| o.name == r.name).count() == 1
+                    && r.march.0 >= 0
+                    && r.march.1 >= 0
+                    && r.march.2 >= 0
+            })
+            .map(|(k, _)| k)
+            .collect();
+        let mut refines = vec![];
+        if !callable.is_empty() {
+            for _ in 0..rng.below(3) {
+                let refinement = *rng.pick(&callable);
+                let (mx, my, mz) = program.refinements[refinement].march;
+                let offset = [mx, my, mz].map(|m| rng.below(m.min(1000) as usize + 1) as i32);
+                let hosts = program
+                    .host_inputs
+                    .iter()
+                    .filter_map(|(r, h)| match h {
+                        HostInput::Static { t, .. } if rng.chance(1, 2) => Some((r, gen_value(rng, t))),
+                        _ => None,
+                    })
+                    .collect();
+                refines.push(RefineCall { refinement, offset, hosts, span: Span::default() });
+            }
+        }
         cases.push(Case {
             name: format!("case {i} \"quoted\"\n"),
             origin: [f64_edge(rng), 0.0, -1.0],
@@ -732,10 +763,28 @@ pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
                 .map(|(r, p)| (r, gen_value(rng, &p.t)))
                 .collect(),
             hosts,
+            refines,
             span: Span::default(),
         });
     }
     let mut expects = vec![];
+    for (ci, c) in cases.iter().enumerate() {
+        for (n, r) in c.refines.iter().enumerate() {
+            let ei = program.refinements[r.refinement].entry;
+            let e = &program.entry_points[ei];
+            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[e.density_function];
+            let ret = program.functions[*function].return_type.clone();
+            if rng.chance(1, 2) {
+                expects.push(Expect {
+                    case: ci,
+                    entry: Some(ei),
+                    after: Some(n + 1),
+                    kind: ExpectKind::All(gen_value(rng, &ret)),
+                    span: Span::default(),
+                });
+            }
+        }
+    }
     for (ci, _) in cases.iter().enumerate() {
         for (ei, e) in program.entry_points.iter().enumerate() {
             let ComputeUnit::DensityFunction { function, .. } =
@@ -757,6 +806,7 @@ pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
             expects.push(Expect {
                 case: ci,
                 entry: Some(ei),
+                after: None,
                 kind,
                 span: Span::default(),
             });

@@ -1,0 +1,26 @@
+// Lerp: an f32 input on three axes, with inexact corners.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> f32 {
+        let c: pos3 = ambient(pos3);
+        return ((((c.x as f32) * 0.3f) + ((c.y as f32) * 1.7f)) + ((c.z as f32) * -0.9f));
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(3, 2, 2);
+
+    fn top() -> f32 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(3, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [0.0f, 0.10000001f, 0.20000002f, 0.85f, 0.95000005f, 1.05f, -0.45f, -0.34999996f, -0.24999997f, 0.40000004f, 0.50000006f, 0.6f]

@@ -430,7 +430,8 @@ directive = "@knownfail" "(" IDENT "," STRING ("," "case" "=" STRING)? ("," "sta
           | "@cells" "(" "sample" "=" UINT "," "seed" "=" UINT ")"
           | "@case" STRING "origin" "(" num "," num "," num ")" ("param" "(" binding ("," binding)* ")")* ("host" "(" binding ("," binding)* ")")*
           | "@expect" "reject" ("(" IDENT ")")?
-          | "@expect" STRING expectation ;
+          | "@refine" STRING label "offset" "(" INT "," INT "," INT ")" ("host" "(" binding ("," binding)* ")")*
+          | "@expect" STRING ("after" "(" UINT ")")? expectation ;
 binding     = label "=" value ;
 expectation = "error" "(" IDENT ")"
             | label "[" INT "," INT "," INT "]" "=" value
@@ -446,6 +447,15 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
 - **`@case`**: the name is unique. Every declared param is bound exactly once with `param(name = value)`, by its label, and `param(…)` is left out when the program has no params. An `i64` param takes an unsuffixed or `L` literal, decimal or hex up to `u64::MAX` (reinterpreted as bits); an `f64` or `bool` param takes that literal. Every `Static` host must be
   bound exactly once per case, a binding to an unknown or `dynamic` host is an error, and values
   are checked against the host's type. `origin` is an attribute position (ints are allowed).
+- **`@refine`**: one refine call of the named case, after its orchestrate step (`specs/refinement.md` §8.2).
+  A case's `@refine`s run in source order. The label names a refinement, and it is an error if refinements
+  of several entries share that name. Each offset component must be within `[0, march]` on its axis, so a
+  test can't break the caller contract by accident. A host not bound in `host(…)` keeps its value from the
+  call before; only `Static` hosts can be bound, each at most once per directive. Stored in `Case::refines`.
+- **`after(n)`**: the expectation checks the case after its `n`th `@refine` (from 1) instead of after
+  orchestrate, and `n` must not exceed the case's `@refine` count. A cell expectation must name that
+  refinement's entry. Duplicate coverage is checked per (case, step), so the same cell can be expected
+  after orchestrate and after each call.
 - **`@expect reject[(Kind)]`**: `Kind` is stored as a string, so the parser doesn't depend on the
   checker, and the harness matches it against the checker's error enum. A reject file can't have
   `@case` or other `@expect` directives.

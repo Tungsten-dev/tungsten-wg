@@ -2,7 +2,10 @@
 
 mod consts;
 mod expr;
+mod mapping;
 mod program;
+mod refine;
+mod step;
 mod stmt;
 pub(crate) mod types;
 
@@ -17,7 +20,7 @@ use crate::registry::{Registry, intern};
 use types::{TypeFail, TypeNames, lower_type};
 
 pub(crate) use consts::const_to_expr;
-pub(crate) use program::run;
+pub(crate) use program::{run, run_step};
 
 /// `Arena::get` without the panics: `contains` compares tags without asserting.
 pub(crate) fn get<T>(a: &Arena<T>, r: Ref<T>) -> Option<&T> {
@@ -40,6 +43,8 @@ pub(crate) struct Ctx<'p, 'r> {
     pub handles: Vec<String>,
     /// The value autoconst hosts the current function reads, in first-read order.
     pub auto_reads: Vec<tungsten_core::HostId>,
+    /// Set while lowering one refine call (`specs/refinement.md` §7.2).
+    step: Option<step::StepCfg>,
 }
 
 struct CtxNames<'a> {

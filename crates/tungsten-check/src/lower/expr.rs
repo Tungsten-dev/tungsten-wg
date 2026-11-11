@@ -109,8 +109,13 @@ impl<'p, 'r> Ctx<'p, 'r> {
                     });
                     InputId(0)
                 });
-                let index = index.as_ref().map(|i| self.boxed(Step::Index, i));
-                Expr::Density { input, index }
+                match index {
+                    Some(i) => {
+                        let i = self.at(Step::Index, |cx| cx.expr(i));
+                        self.read(*r, input, Some(i))
+                    }
+                    None => self.desugar_read(*r, input).unwrap_or_else(|| self.read(*r, input, None)),
+                }
             }
             Expression::AutoConst(r) => match self.map.auto_hosts.get(r) {
                 Some(&h) => {
@@ -122,6 +127,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 None => Expr::Table(self.table_ref(*r)),
             },
             Expression::HostInput(r) => Expr::Host(self.host_ref(*r)),
+            Expression::Ambient(AmbientKind::Pos3) => self.marched_pos3(),
             Expression::Ambient(k) => Expr::Ambient(match k {
                 AmbientKind::Origin => Ambient::Origin,
                 AmbientKind::Pos3 => Ambient::Pos3,

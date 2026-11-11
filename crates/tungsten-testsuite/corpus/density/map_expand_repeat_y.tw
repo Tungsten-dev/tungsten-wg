@@ -1,0 +1,26 @@
+// Expand: `*` on y repeats the input's only layer for every reader layer.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> i32 {
+        let c: pos3 = ambient(pos3);
+        return (c.x + (100 * c.z));
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(3, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(1, *, 1);
+
+    fn top() -> i32 {
+        return density(d);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(3, 4, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 100, 101, 102, 100, 101, 102, 100, 101, 102, 100, 101, 102]

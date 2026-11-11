@@ -44,7 +44,7 @@ program {
     }
 
     unit leaf_u { main leaf; consts [two, four]; }
-    input inner = leaf_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
+    input inner = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(0.5, 0.5, 0.5);
     unit root_u {
         main root;
         helpers [helper];

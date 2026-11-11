@@ -496,3 +496,14 @@ instance's `@previous`; `with` units getting their own kernels per target; conte
 - **Per-column offsets**, if skipping finished columns through `@previous` costs too much.
 - **Whether a frozen instance can be declared with an explicit `reuse` line,** to catch a marked instance omitted by accident.
   Unlisted currently means frozen, silently.
+
+## 13. Implementation notes
+
+### Milestone 2 (`specs/combined-rollout.md` phase 2A)
+
+- Errors carry `Item::Refinement` for per-refinement rules, `Item::Input` for the `@previous` rules and
+  `Item::Program` for `RefinedUnitInNormalGraph`.
+- `RefineBadEntry` and `RefineBadMarch` have unit tests on hand-built IR instead of `reject/` files, since text
+  can't express them (`specs/combined-rollout.md`, phase 1 notes).
+- A step program adds its offset and buffer hosts to every unit's and function's host list, not only those
+  that read them. Units that don't run in the step are never evaluated, so this changes nothing.

@@ -1495,13 +1495,56 @@ impl Parser {
                 };
                 DirectiveKind::ExpectReject(kind)
             }
+            "refine" => {
+                let case_span = self.span();
+                let case = self.string()?;
+                let refinement = self.label()?;
+                self.expect_word("offset")?;
+                let offset_span = self.span();
+                self.expect(Tok::LParen)?;
+                let x = self.int()?;
+                self.expect(Tok::Comma)?;
+                let y = self.int()?;
+                self.expect(Tok::Comma)?;
+                let z = self.int()?;
+                self.expect(Tok::RParen)?;
+                let offset_span = offset_span.to(self.prev_span());
+                let mut hosts = vec![];
+                while self.eat_kw(Kw::Host) {
+                    self.expect(Tok::LParen)?;
+                    hosts.extend(self.comma_list(Tok::RParen, |p| {
+                        let l = p.label()?;
+                        p.expect(Tok::Assign)?;
+                        Ok((l, p.value()?))
+                    })?);
+                }
+                DirectiveKind::Refine {
+                    case,
+                    case_span,
+                    refinement,
+                    offset: [x, y, z],
+                    offset_span,
+                    hosts,
+                }
+            }
             "expect" => {
                 let case_span = self.span();
                 let case = self.string()?;
+                let after = if self.at_word("after") && self.at(1).tok == Tok::LParen {
+                    let start = self.span();
+                    self.bump();
+                    self.bump();
+                    let n = self.uint()?;
+                    self.expect(Tok::RParen)?;
+                    Some((n, start.to(self.prev_span())))
+                } else {
+                    None
+                };
                 let expectation = self.expectation()?;
                 DirectiveKind::Expect {
                     case,
                     case_span,
+                    after,
                     expectation,
                 }
             }

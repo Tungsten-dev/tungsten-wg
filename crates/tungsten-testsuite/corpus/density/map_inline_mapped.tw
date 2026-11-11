@@ -1,0 +1,25 @@
+// Inlining: a read through a mapping that moves cells isn't inlined (`MappedRead`).
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn leaf() -> i32 {
+        return (ambient(pos3).x * 10);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(2, *, *);
+
+    fn top() -> i32 {
+        return (density(d) + 1);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [1, 1, 11, 11]

@@ -55,7 +55,7 @@ fn inputs_across_units() {
     let src = "program {
         fn leaf() -> f64 { return 1.0; }
         fn shared() -> f64 { return density(z); }
-        fn amain() -> f64 { return (density(x) + density(y)); }
+        fn amain() -> f64 { return (density(x, 0) + density(y, 0)); }
         fn bmain() -> f64 { return shared(); }
         input x = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
         input y = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);

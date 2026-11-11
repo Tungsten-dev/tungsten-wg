@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use tungsten_ir::*;
 
-use super::{Case, CellSample, Ctx, Expect, ExpectKind, KnownFail, R, TestFile, Value, err};
+use super::{Case, CellSample, Ctx, Expect, ExpectKind, KnownFail, R, RefineCall, TestFile, Value, err};
 use crate::ast::{
     self, AstValue, AstValueKind, DirectiveKind, Expectation, LitKind, NumKind, TyKind,
 };
@@ -64,6 +64,19 @@ impl<'a> Ctx<'a> {
             }
         }
 
+        // `@refine`s next, in source order, so `after(n)` can be checked against them.
+        for d in &file.directives {
+            if let DirectiveKind::Refine { case, case_span, refinement, offset, offset_span, hosts } = &d.kind {
+                let Some(&ci) = case_index.get(case) else {
+                    return err(*case_span, format!("no case named \"{case}\""));
+                };
+                let call = self.refine_call(d.span, refinement, offset, *offset_span, hosts)?;
+                t.cases[ci].refines.push(call);
+            }
+        }
+
+        // Expectations are tracked per (case, step): step 0 is orchestrate, n the nth `@refine`.
+        let mut slots: HashMap<(usize, usize), usize> = HashMap::new();
         let mut covered: HashSet<(usize, usize, usize)> = HashSet::new();
         let mut covered_all: HashSet<(usize, usize)> = HashSet::new();
         let mut errors: HashSet<usize> = HashSet::new();
@@ -73,7 +86,7 @@ impl<'a> Ctx<'a> {
 
         for d in &file.directives {
             match &d.kind {
-                DirectiveKind::Case { .. } => other_span = Some(d.span),
+                DirectiveKind::Case { .. } | DirectiveKind::Refine { .. } => other_span = Some(d.span),
                 DirectiveKind::KnownFail {
                     backend,
                     reason,
@@ -120,15 +133,37 @@ impl<'a> Ctx<'a> {
                 DirectiveKind::Expect {
                     case,
                     case_span,
+                    after,
                     expectation,
                 } => {
                     other_span = Some(d.span);
                     let Some(&ci) = case_index.get(case) else {
                         return err(*case_span, format!("no case named \"{case}\""));
                     };
+                    let after = match after {
+                        None => None,
+                        Some((n, span)) => {
+                            let calls = &t.cases[ci].refines;
+                            if *n == 0 || *n as usize > calls.len() {
+                                return err(
+                                    *span,
+                                    format!(
+                                        "`after({n})`, but case \"{case}\" has {} `@refine` directives (counted from 1)",
+                                        calls.len()
+                                    ),
+                                );
+                            }
+                            let entry = self.prog.refinements[calls[*n as usize - 1].refinement].entry;
+                            Some((*n as usize, entry, *span))
+                        }
+                    };
+                    let next = slots.len();
+                    let slot = *slots.entry((ci, after.map_or(0, |a| a.0))).or_insert(next);
                     let exp = self.expectation(
                         d.span,
                         ci,
+                        slot,
+                        after,
                         expectation,
                         &mut covered,
                         &mut covered_all,
@@ -228,8 +263,68 @@ impl<'a> Ctx<'a> {
             origin: o,
             params,
             hosts,
+            refines: vec![],
             span,
         })
+    }
+
+    /// One `@refine`. The offset is within `[0, march]`, so a test can't break the caller
+    /// contract (`specs/refinement.md` §6.3) by accident.
+    fn refine_call(
+        &self,
+        span: Span,
+        label: &ast::Label,
+        offset: &[i64; 3],
+        offset_span: Span,
+        bindings: &[(ast::Label, AstValue)],
+    ) -> R<RefineCall> {
+        let name = label.display();
+        let found: Vec<usize> = self
+            .prog
+            .refinements
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.name == name)
+            .map(|(i, _)| i)
+            .collect();
+        let refinement = match found[..] {
+            [i] => i,
+            [] => return err(label.span, format!("unknown refinement `{name}`")),
+            _ => return err(label.span, format!("refinement name `{name}` is used by several entries")),
+        };
+        let march = self.prog.refinements[refinement].march;
+        let march = [march.0, march.1, march.2];
+        let mut out = [0i32; 3];
+        for k in 0..3 {
+            if offset[k] < 0 || offset[k] > march[k] as i64 {
+                return err(
+                    offset_span,
+                    format!(
+                        "offset {} on axis {} is outside [0, {}], the march of `{name}`",
+                        offset[k],
+                        ['x', 'y', 'z'][k],
+                        march[k].max(0)
+                    ),
+                );
+            }
+            out[k] = offset[k] as i32;
+        }
+        let mut bound: HashSet<Ref<HostInput>> = HashSet::new();
+        let mut hosts = vec![];
+        for (l, v) in bindings {
+            let h = self.lookup_host(l)?;
+            let ty = match &self.prog.host_inputs[h] {
+                HostInput::Static { t, .. } => t.clone(),
+                HostInput::Dynamic => {
+                    return err(l.span, "a dynamic host input can't be bound in a `@refine`");
+                }
+            };
+            if !bound.insert(h) {
+                return err(l.span, format!("`{}` is bound twice", l.display()));
+            }
+            hosts.push((h, self.value(v, &ty)?));
+        }
+        Ok(RefineCall { refinement, offset: out, hosts, span })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -237,6 +332,8 @@ impl<'a> Ctx<'a> {
         &self,
         span: Span,
         case: usize,
+        slot: usize,
+        after: Option<(usize, usize, Span)>,
         ex: &Expectation,
         covered: &mut HashSet<(usize, usize, usize)>,
         covered_all: &mut HashSet<(usize, usize)>,
@@ -247,6 +344,22 @@ impl<'a> Ctx<'a> {
             let Some(&i) = self.entry_keys.get(&label.key()) else {
                 return err(label.span, format!("unknown entry `{}`", label.display()));
             };
+            if let Some((n, entry, at)) = after
+                && entry != i
+            {
+                return err(
+                    at,
+                    format!(
+                        "`after({n})` checks entry `{}`, the entry of that `@refine`'s refinement, not `{}`",
+                        self.entry_keys
+                            .iter()
+                            .find(|(_, e)| **e == entry)
+                            .map(|(k, _)| k.display())
+                            .unwrap_or_default(),
+                        label.display()
+                    ),
+                );
+            }
             let e = &self.prog.entry_points[i];
             let ComputeUnit::DensityFunction { function, .. } =
                 &self.prog.compute_units[e.density_function];
@@ -260,11 +373,12 @@ impl<'a> Ctx<'a> {
             |what: &str| -> R<()> { err(span, format!("two expectations cover the same {what}")) };
         match ex {
             Expectation::Error(kind) => {
-                if any.contains(&case) || !errors.insert(case) {
+                if any.contains(&slot) || !errors.insert(slot) {
                     dup("case")?;
                 }
                 Ok(Expect {
                     case,
+                    after: after.map(|a| a.0),
                     entry: None,
                     kind: ExpectKind::Error(kind.clone()),
                     span,
@@ -272,10 +386,10 @@ impl<'a> Ctx<'a> {
             }
             Expectation::Cell { entry, pos, value } => {
                 let (i, ty, (dx, dy, dz)) = entry_of(entry)?;
-                if errors.contains(&case) {
+                if errors.contains(&slot) {
                     dup("case")?;
                 }
-                any.insert(case);
+                any.insert(slot);
                 for (c, d) in pos.iter().zip([dx, dy, dz]) {
                     if *c < 0 || *c >= d as i64 {
                         return err(
@@ -289,11 +403,12 @@ impl<'a> Ctx<'a> {
                 }
                 let idx = pos[0] as usize
                     + dx as usize * (pos[1] as usize + dy as usize * pos[2] as usize);
-                if covered_all.contains(&(case, i)) || !covered.insert((case, i, idx)) {
+                if covered_all.contains(&(slot, i)) || !covered.insert((slot, i, idx)) {
                     dup("cell")?;
                 }
                 Ok(Expect {
                     case,
+                    after: after.map(|a| a.0),
                     entry: Some(i),
                     kind: ExpectKind::Cell(
                         [pos[0] as i32, pos[1] as i32, pos[2] as i32],
@@ -304,17 +419,18 @@ impl<'a> Ctx<'a> {
             }
             Expectation::All { entry, value } => {
                 let (i, ty, _) = entry_of(entry)?;
-                if errors.contains(&case) {
+                if errors.contains(&slot) {
                     dup("case")?;
                 }
-                any.insert(case);
-                if covered.iter().any(|(c, e, _)| (*c, *e) == (case, i))
-                    || !covered_all.insert((case, i))
+                any.insert(slot);
+                if covered.iter().any(|(c, e, _)| (*c, *e) == (slot, i))
+                    || !covered_all.insert((slot, i))
                 {
                     dup("cell")?;
                 }
                 Ok(Expect {
                     case,
+                    after: after.map(|a| a.0),
                     entry: Some(i),
                     kind: ExpectKind::All(self.value(value, &ty)?),
                     span,
@@ -322,10 +438,10 @@ impl<'a> Ctx<'a> {
             }
             Expectation::Grid { entry, values } => {
                 let (i, ty, (dx, dy, dz)) = entry_of(entry)?;
-                if errors.contains(&case) {
+                if errors.contains(&slot) {
                     dup("case")?;
                 }
-                any.insert(case);
+                any.insert(slot);
                 let cells = (dx.max(0) as i64) * (dy.max(0) as i64) * (dz.max(0) as i64);
                 if values.len() as i64 != cells {
                     return err(
@@ -336,8 +452,8 @@ impl<'a> Ctx<'a> {
                         ),
                     );
                 }
-                if covered.iter().any(|(c, e, _)| (*c, *e) == (case, i))
-                    || !covered_all.insert((case, i))
+                if covered.iter().any(|(c, e, _)| (*c, *e) == (slot, i))
+                    || !covered_all.insert((slot, i))
                 {
                     dup("cell")?;
                 }
@@ -347,6 +463,7 @@ impl<'a> Ctx<'a> {
                     .collect::<R<Vec<_>>>()?;
                 Ok(Expect {
                     case,
+                    after: after.map(|a| a.0),
                     entry: Some(i),
                     kind: ExpectKind::Grid(vs),
                     span,

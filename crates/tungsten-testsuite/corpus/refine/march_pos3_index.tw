@@ -1,0 +1,18 @@
+// March: `Pos3` moves by the offset, while the buffer index stays in the buffer.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn pos_main() -> i32 { return (ambient(pos3).x + (10 * ambient(pos3).y)); }
+    unit pos { main pos_main; }
+    entry pos @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of pos @march(0, 5, 0) {
+        rerun pos @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 3, 0)
+@refine "c" step offset(0, 5, 0)
+@expect "c" pos = [0, 1]
+@expect "c" after(1) pos = [30, 31]
+@expect "c" after(2) pos = [50, 51]

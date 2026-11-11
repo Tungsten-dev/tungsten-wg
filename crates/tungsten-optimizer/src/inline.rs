@@ -56,6 +56,12 @@ pub enum InlineRejection {
     GridMismatch { caller: GridInfo, input: GridInfo },
     /// `function` reads it with an explicit index (an identity mapping is required).
     IndexedRead { function: Ref<Function> },
+    /// `function` reads it un-indexed through a mapping that isn't the identity on its grid
+    /// (`specs/density-mappings.md` §5.4).
+    MappedRead { function: Ref<Function> },
+    /// A refinement runs it, or a unit a refinement runs reads it (`specs/refinement.md` §8.1):
+    /// inlining would recompute frozen data at each step.
+    Refinement,
     /// More than one function of the caller reads it.
     ReadInSeveralFunctions,
     /// The caller declares the input but never reads it.
@@ -236,8 +242,34 @@ impl<'m> Planner<'m> {
                 }
             }
         }
+        // A refined unit runs on its target's grid.
+        for r in self.program.refinements.iter().flat_map(|r| &r.reruns) {
+            if r.with == Some(unit) {
+                grids.push(GridInfo {
+                    dimensions: r.dimensions,
+                    scaled_origin: r.scaled_origin,
+                    scaled_position: r.scaled_position,
+                });
+            }
+        }
         let first = *grids.first()?;
         grids.iter().all(|g| *g == first).then_some(first)
+    }
+
+    /// Whether `unit` is a `with` unit, is listed in some `reruns`, or is read by a unit that a
+    /// refinement runs. Every listed unit counts as running: an unreached one is a validation
+    /// error anyway.
+    fn in_refinement(&self, unit: Ref<ComputeUnit>) -> bool {
+        let reruns = || self.program.refinements.iter().flat_map(|r| &r.reruns);
+        if reruns().any(|r| r.cu == unit || r.with == Some(unit)) {
+            return true;
+        }
+        reruns().flat_map(|r| [Some(r.cu), r.with]).flatten().any(|runner| {
+            self.program
+                .compute_units
+                .try_get(runner)
+                .is_some_and(|u| self.listed_inputs(u).iter().any(|i| i.density_function == unit))
+        })
     }
 
     /// Placeholder for criterion 1 of `plan` ("caller must not already be too complex").
@@ -260,6 +292,9 @@ impl<'m> Planner<'m> {
     ///
     /// Returns the first failing criterion, in the order checked here.
     fn plan(&self, callee: Ref<ComputeUnit>) -> Result<InlinePlan, InlineRejection> {
+        if self.in_refinement(callee) {
+            return Err(InlineRejection::Refinement);
+        }
         let caller = self.sole_user(callee)?;
         let caller_unit = &self.program.compute_units[caller];
         let ComputeUnit::DensityFunction {
@@ -280,6 +315,16 @@ impl<'m> Planner<'m> {
             .filter_map(|&r| Some((r, self.program.density_inputs.try_get(r)?)))
             .find(|(_, i)| i.density_function == callee)
             .expect("sole user has no input pointing at the callee");
+
+        // A mapped read moves cells around, so calling the callee in place would read the
+        // caller's own cell instead.
+        if !input.mapping.is_identity_on(input.dimensions) {
+            for f in std::iter::once(*caller_fn).chain(helper_functions.iter().copied()) {
+                if count_density_uses(&self.program.functions[f].body, input_ref).0 > 0 {
+                    return Err(InlineRejection::MappedRead { function: f });
+                }
+            }
+        }
 
         // 3. same output shape: what the caller reads must be the grid the caller itself is
         //    consumed on.

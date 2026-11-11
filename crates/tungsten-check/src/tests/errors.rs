@@ -301,36 +301,71 @@ fn errors_display_one_per_line() {
     );
 }
 
-/// Temporary (`specs/combined-rollout.md` phase 1): the interpreter doesn't implement these yet,
-/// so lowering refuses them, including the `Expand` of a `(1,1,1)` input that backends accept.
+/// `specs/density-mappings.md` §4.1: every shape error, on unread inputs (no reader rule).
 #[test]
-fn mappings_and_refinements_are_refused_for_now() {
-    use tungsten_ir::{AxisFactor, DensityMapping, Refinement};
-
-    let mut p = empty();
-    let leaf = p.functions.insert(function("leaf", &[], &[], VariableType::F64, |_| vec![]));
-    let src = p.compute_units.insert(unit(leaf));
-    let input = |name: &str, mapping, previous| DensityInput {
-        name: Name::Named(name.into()),
-        density_function: src,
-        scaled_origin: (1.0, 1.0, 1.0),
-        scaled_position: (1.0, 1.0, 1.0),
-        dimensions: (1, 1, 1),
-        mapping,
-        previous,
-    };
-    p.density_inputs.insert(input("plain", DensityMapping::Identity, false));
-    p.density_inputs.insert(input("repeat", DensityMapping::Expand([AxisFactor::Repeat; 3]), false));
-    p.density_inputs.insert(input("lerp", DensityMapping::Lerp([AxisFactor::Factor(4); 3]), false));
-    p.density_inputs.insert(input("prev", DensityMapping::Identity, true));
-    p.refinements.push(Refinement { name: "step".into(), entry: 0, march: (0, 0, 0), reruns: vec![] });
+fn mapping_shape() {
     assert_eq!(
-        errs(&p, &registry()),
+        reg_errs(
+            "fn ileaf() -> i32 { return 1; }
+            unit iu { main ileaf; }
+            input z = leaf_u @dims(2, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(0, *, 1);
+            input w = leaf_u @dims(2, 3, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(4, *, *);
+            input n = iu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(*, *, *);",
+            "return p;",
+        ),
         [
-            "input `repeat`: density mappings are not supported yet",
-            "input `lerp`: density mappings are not supported yet",
-            "input `prev`: `@previous` inputs are not supported yet",
-            "program: refinement `step` is not supported yet",
+            "input `z`: mapping factor 0 on axis x is below 1",
+            "input `w`: mapping repeats axis y, but the input is 3 wide on it",
+            "input `w`: mapping repeats axis z, but the input is 2 wide on it",
+            "input `n`: `@lerp` needs an `f32` or `f64` input, but its unit returns `i32`",
         ]
     );
+}
+
+/// `specs/density-mappings.md` §4.2: the reader rule, once per (input, reader dims).
+#[test]
+fn mapping_readers() {
+    let prog = |input: &str, mapping: &str, reader: &str| {
+        format!(
+            "program {{
+                fn leaf() -> f64 {{ return 1.0; }}
+                unit leaf_u {{ main leaf; }}
+                input d = leaf_u @dims({input}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) {mapping};
+                fn top() -> f64 {{ return (density(d) + density(d)); }}
+                unit t {{ main top; inputs [d]; }}
+                entry e = t @dims({reader}) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+                entry f = t @dims({reader}) @origin_scale(2, 2, 2) @position_scale(1, 1, 1);
+            }}"
+        )
+    };
+    let lower = |src: &str| match crate::lower(&load(src), &registry()) {
+        Ok(_) => vec![],
+        Err(e) => e.0.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+    };
+    let e = |input, mapping, reader| lower(&prog(input, mapping, reader));
+    assert_eq!(
+        e("1, 1, 1", "", "2, 1, 1"),
+        ["input `d`: unit `top` reads it un-indexed at 2 on axis x, but it is 1 on that axis"]
+    );
+    // Expand: (r - 1) / n < s.
+    assert!(e("4, 1, 4", "@expand(4, *, 4)", "16, 3, 16").is_empty());
+    assert_eq!(
+        e("4, 1, 4", "@expand(4, *, 4)", "16, 3, 17"),
+        ["input `d`: unit `top` reads it at 17 on axis z (march 0), past the input's 4 cells on that axis"]
+    );
+    // Lerp: the high corner counts even at weight 0, so 5 wide with factor 4 fits 16, not 17.
+    assert!(e("5, 49, 5", "@lerp(4, 8, 4)", "16, 384, 16").is_empty());
+    assert_eq!(
+        e("5, 1, 5", "@lerp(4, *, 4)", "17, 1, 16"),
+        ["input `d`: unit `top` reads it at 17 on axis x (march 0), past the input's 5 cells on that axis"]
+    );
+    // Lerp with factor 1: r - 1 < s. A smaller reader is legal.
+    assert!(e("3, 1, 1", "@lerp(1, *, *)", "2, 1, 1").is_empty());
+    assert_eq!(
+        e("3, 1, 1", "@lerp(1, *, *)", "4, 1, 1"),
+        ["input `d`: unit `top` reads it at 4 on axis x (march 0), past the input's 3 cells on that axis"]
+    );
+    // An explicit index has no reader rule.
+    let indexed = prog("1, 1, 1", "", "2, 1, 1").replace("(density(d) + density(d))", "density(d, 0)");
+    assert!(lower(&indexed).is_empty());
 }

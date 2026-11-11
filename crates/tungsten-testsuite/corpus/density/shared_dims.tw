@@ -1,5 +1,5 @@
-// Shared inputs read by units with different dims: a (1,1,1) input through a shared helper, a
-// (4,1,1) input decoded in each reader's own grid, and an explicit-index read.
+// Shared inputs read by units with different dims: a (1,1,1) input through a shared helper, and a
+// (4,1,1) input read un-indexed at its own dims and through explicit indices from other grids.
 program {
     fn base_main() -> i32 {
         return (ambient(pos3).x * 10);
@@ -16,7 +16,7 @@ program {
     }
 
     input b = base @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
-    input one = one_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input one = one_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
 
     fn read_one() -> i32 {
         return density(one);
@@ -32,7 +32,7 @@ program {
     }
 
     fn square_main() -> i32 {
-        return (read_one() + density(b));
+        return (read_one() + density(b, (ambient(pos3).x + (ambient(pos3).y * 2))));
     }
     unit square {
         main square_main;

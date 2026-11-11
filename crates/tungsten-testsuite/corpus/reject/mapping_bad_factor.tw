@@ -1,0 +1,10 @@
+// A mapping factor below 1.
+program {
+    fn leaf() -> i32 { return 1; }
+    unit leaf_u { main leaf; }
+    input d = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(0, *, *);
+    fn top() -> i32 { return density(d); }
+    unit t { main top; inputs [d]; }
+    entry t @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@expect reject(MappingBadFactor)

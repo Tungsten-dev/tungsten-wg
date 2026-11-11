@@ -1,0 +1,41 @@
+// One lerp shape (dims, factors, element type) read by two units, over different sources.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn la() -> f64 {
+        return ((ambient(pos3).x * 4) as f64);
+    }
+    unit la_u {
+        main la;
+    }
+    fn lb() -> f64 {
+        return (10.0 + ((ambient(pos3).x * 20) as f64));
+    }
+    unit lb_u {
+        main lb;
+    }
+
+    input a = la_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, *);
+    input b = lb_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, *);
+
+    fn ta() -> f64 {
+        return density(a);
+    }
+    unit ua {
+        main ta;
+        inputs [a];
+    }
+    fn tb() -> f64 {
+        return density(b);
+    }
+    unit ub {
+        main tb;
+        inputs [b];
+    }
+    entry ua @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry ub @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" ua = [0.0, 2.0]
+@expect "c" ub = [10.0, 20.0]

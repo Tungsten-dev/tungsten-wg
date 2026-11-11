@@ -1,0 +1,24 @@
+// `@previous`: an accumulator over several calls. The first value comes from the normal unit.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn seed_main() -> i32 { return (ambient(pos3).x * 10); }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    
+    fn acc_main() -> i32 { return (density(prev) + 1); }
+    unit acc { main acc_main; inputs [prev]; }
+    entry seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@refine "c" step offset(0, 0, 0)
+@expect "c" seed = [0, 10]
+@expect "c" after(1) seed = [1, 11]
+@expect "c" after(2) seed = [2, 12]
+@expect "c" after(3) seed = [3, 13]

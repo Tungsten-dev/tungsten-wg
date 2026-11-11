@@ -1,0 +1,19 @@
+// Schedule: a failing frozen buffer fails orchestrate, even though no entry reads it there.
+@knownfail(rust, "pending: combined-rollout phase 2B")
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn f_main() -> i32 { return (1 / 0); }
+    unit fu { main f_main; }
+    input f = fu @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn seed_main() -> i32 { return 0; }
+    unit seed { main seed_main; }
+    fn w_main() -> i32 { return density(f); }
+    unit w { main w_main; inputs [f]; }
+    entry seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with w;
+    }
+}
+@case "c" origin(0, 0, 0)
+@expect "c" error(DivByZero)

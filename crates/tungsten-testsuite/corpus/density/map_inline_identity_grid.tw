@@ -1,0 +1,25 @@
+// Inlining: factor 1 and `*` on size-1 axes are identity on the grid, so the read is inlined.
+@knownfail(rust, "pending: combined-rollout phase 2B", stage=original)
+@knownfail(java, "pending: combined-rollout phase 3", stage=original)
+@knownfail(cuda, "pending: combined-rollout phase 4", stage=original)
+program {
+    fn leaf() -> f64 {
+        return ((ambient(pos3).x * 10) as f64);
+    }
+    unit leaf_u {
+        main leaf;
+    }
+
+    input d = leaf_u @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(1, *, *);
+
+    fn top() -> f64 {
+        return (density(d) + 1.0);
+    }
+    unit t {
+        main top;
+        inputs [d];
+    }
+    entry t @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" t = [1.0, 11.0, 21.0]

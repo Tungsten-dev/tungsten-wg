@@ -507,9 +507,20 @@ pub enum DirectiveKind {
         hosts: Vec<(Label, AstValue)>,
     },
     ExpectReject(Option<String>),
+    /// `@refine "case" name offset(x, y, z) host(…)*`
+    Refine {
+        case: String,
+        case_span: Span,
+        refinement: Label,
+        offset: [i64; 3],
+        offset_span: Span,
+        hosts: Vec<(Label, AstValue)>,
+    },
     Expect {
         case: String,
         case_span: Span,
+        /// `after(n)`: checked after the case's `n`th `@refine`, from 1.
+        after: Option<(u64, Span)>,
         expectation: Expectation,
     },
 }

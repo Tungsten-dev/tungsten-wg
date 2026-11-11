@@ -104,6 +104,22 @@ pub fn print_test_file(t: &TestFile) -> String {
         }
         out.push('\n');
     }
+    for c in &t.cases {
+        for r in &c.refines {
+            let [x, y, z] = r.offset;
+            out.push_str(&format!(
+                "@refine {} {} offset({x}, {y}, {z})",
+                quote_string(&c.name),
+                quote_name(&t.program.refinements[r.refinement].name),
+            ));
+            if !r.hosts.is_empty() {
+                let hs: Vec<String> =
+                    r.hosts.iter().map(|(h, v)| format!("{} = {}", labels.host(*h), value(v))).collect();
+                out.push_str(&format!(" host({})", hs.join(", ")));
+            }
+            out.push('\n');
+        }
+    }
     if let Some(r) = &t.reject {
         match r {
             Some(k) => out.push_str(&format!("@expect reject({})\n", quote_name(k))),
@@ -125,7 +141,8 @@ pub fn print_test_file(t: &TestFile) -> String {
                 vs.iter().map(value).collect::<Vec<_>>().join(", ")
             ),
         };
-        out.push_str(&format!("@expect {case} {line}\n"));
+        let after = e.after.map_or(String::new(), |n| format!("after({n}) "));
+        out.push_str(&format!("@expect {case} {after}{line}\n"));
     }
     out
 }
