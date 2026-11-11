@@ -7,9 +7,14 @@
 //!   code is generated against and the `Orchestration` type that runs kernels in wave order.
 //!
 //! Every density and helper function starts with the same parameters (see [`uniform_parameters`]):
-//! `p: Pos3, config: &Config, buffers: &mut InternalBuffers, auto_constants: &AutoConsts,
-//! host_consts: &HostConsts`. Helper-specific parameters follow them. All names come from the
-//! shared [`Interface`], so caller and callee always agree.
+//! `p: PositionIterator, config: &Config, buffers: &InternalBuffers, auto_constants: &AutoConsts,
+//! host_consts: &HostConsts`. Then one `usize` offset per input the function reads, directly or
+//! through helpers (`Interface::input_params`), then the helper's own parameters. All names come
+//! from the shared [`Interface`], so caller and callee always agree.
+//!
+//! `InternalBuffers` holds one `Box<[T]>` per element type (a pool, see [`pools`]). Each worker
+//! sizes the pools for its own entry and passes the offsets of its instances to the kernels
+//! (`specs/workers.md`).
 //!
 //! Modules:
 //! - `types`: type and operator conversion, type derivation.
@@ -19,8 +24,10 @@
 //! - `orchestration`: structs, `AutoConsts` initializers, the `Orchestration` impl, module assembly.
 //!
 //! Assumed runtime (not generated): `Pos3`, `Vec3`, `Config { origin, origin_scale, position_scale,
-//! dimensions }`, `iter_3d(&Config)` yielding items with a `pos` field, `index(..)` accepting both the
-//! loop item and a `Pos3`, `make_boxed::<T>()`, the autoconst initializer functions and the handle types they return.
+//! dimensions }`, `iter_3d(&Config)` yielding items with a `pos` field, `index(..)` returning the
+//! loop item's flat `usize` index, the autoconst initializer functions and the handle types they
+//! return. Runtime contract: handle types are `Send + Sync`, and record types used as a unit output
+//! or host are `Copy + Default`.
 
 use std::collections::HashSet;
 
@@ -30,6 +37,7 @@ use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref}
 use crate::interned::Interned;
 use crate::model as rcl;
 use crate::model::codegen::RustCodeGenerator;
+use crate::pools::Pools;
 
 pub mod backend;
 pub mod converter;
@@ -38,6 +46,7 @@ pub mod function;
 pub mod interned;
 pub mod model;
 pub mod orchestration;
+pub mod pools;
 pub mod statement;
 pub mod transformer;
 pub mod types;
@@ -48,6 +57,20 @@ pub const AUTO_CONSTS_STRUCT_NAME: &str = "AutoConsts";
 pub const CONFIG_STRUCT_NAME: &str = "Config";
 pub const INTERNAL_BUFFERS_STRUCT_NAME: &str = "InternalBuffers";
 pub const ORCHESTRATION_STRUCT_NAME: &str = "Orchestration";
+
+/// The checked read of `BufferBounds::PerBuffer`, generated into the density module. Reserved by
+/// the Rust naming rules.
+pub const READ_HELPER: &str = tungsten_interface::naming::RUST_READ_HELPER;
+
+/// Checks the index against the input's own length, so a bad index panics with the message of an
+/// out-of-bounds index into a separate array, which the test driver maps to `OutOfBounds`.
+const READ_HELPER_SOURCE: &str = "#[inline(always)]
+fn rd<T: Copy>(pool: &[T], offset: usize, len: usize, i: usize) -> T {
+    if i >= len {
+        panic!(\"index out of bounds: the len is {} but the index is {}\", len, i);
+    }
+    pool[offset + i]
+}";
 
 /// Uniform parameter names shared by every generated density and helper function, in order.
 pub const PARAM_POS: &str = "p";
@@ -120,6 +143,7 @@ pub struct RCLCodegen<'a, 'm> {
     source: &'a OptimizedProgram,
     /// Names and schedule shared with the orchestration side.
     naming: &'a Interface,
+    pools: &'a Pools,
     model: rcl::RCL<'m>,
     arena: &'m bumpalo::Bump,
     done_units: HashSet<Ref<ComputeUnit>>,
@@ -129,16 +153,21 @@ pub struct RCLCodegen<'a, 'm> {
 } // TODO add config parameters (if necessary)
 
 impl<'a, 'm> RCLCodegen<'a, 'm> {
-    /// `interface` must be the one built for `source`; nothing is generated until asked.
+    /// `interface` must be the one built for `source`, and `pools` built from both; nothing is
+    /// generated until asked.
     pub fn new(
         source: &'a OptimizedProgram,
         arena: &'m bumpalo::Bump,
         interface: &'a Interface,
+        pools: &'a Pools,
     ) -> Self {
+        let mut model = rcl::RCL::new();
+        model.raw_items.push(READ_HELPER_SOURCE.to_string());
         Self {
             source,
             naming: interface,
-            model: rcl::RCL::new(),
+            pools,
+            model,
             arena,
             done_units: HashSet::new(),
             done_functions: HashSet::new(),
@@ -172,7 +201,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
             if !self.done_functions.insert(f) {
                 continue;
             }
-            let converted = function::convert_helper(self.source, &self.naming, f);
+            let converted = function::convert_helper(self.source, self.naming, self.pools, f);
             let func = self.intern(converted.function);
             self.model.functions.push(func);
             pending.extend(converted.called);
@@ -200,7 +229,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
         if !self.done_kernels.insert(inst) {
             return;
         }
-        let kernel = function::build_kernel(self.source, &self.naming, &inst);
+        let kernel = function::build_kernel(self.source, self.naming, self.pools, &inst);
         let kernel = self.intern(kernel);
         self.model.main_functions.push(kernel);
     }
@@ -220,7 +249,7 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
         } = &source.compute_units[cu];
 
         for dimensions in self.naming.dimensions_of(cu) {
-            let converted = function::convert_density(source, &self.naming, cu, dimensions);
+            let converted = function::convert_density(source, self.naming, self.pools, cu, dimensions);
             let func = self.intern(converted.function);
             self.model.functions.push(func);
             for h in converted.called {
@@ -268,6 +297,7 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
 pub struct TransformRclOrchestration<'m> {
     device_codegen: Box<dyn DeviceCodegen + 'm>,
     arena: &'m bumpalo::Bump,
+    pools: Pools,
     model: rcl::RCL<'m>,
     density_module_name: String,
     orchestration_module_name: String,

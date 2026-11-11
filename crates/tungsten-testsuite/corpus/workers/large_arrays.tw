@@ -1,0 +1,28 @@
+// A unit output and a host of type [f64; 33], past the 32 elements Rust implements `Default` for
+// (specs/workers.md §8): the generated zero values must compile.
+program {
+    host big: [f64; 33];
+
+    fn arr_main() -> [f64; 33] @hosts(big) {
+        return host(big);
+    }
+    unit arr {
+        main arr_main;
+        hosts [big];
+    }
+    input arr_in = arr @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn top_main() -> f64 {
+        return (density(arr_in)[32] + density(arr_in, 1)[ambient(pos3).x]);
+    }
+    unit top {
+        main top_main;
+        inputs [arr_in];
+    }
+
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry arr @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) host(big = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0])
+@expect "c" top = [32.0, 33.0]
+@expect "c" arr[0, 0, 0] = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0, 31.0, 32.0]

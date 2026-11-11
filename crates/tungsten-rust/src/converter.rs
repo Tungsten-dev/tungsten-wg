@@ -9,12 +9,13 @@ use std::rc::Rc;
 use tungsten_interface::Interface;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
-    AmbientKind, ComputeUnit, Constant, Expression, Function, Name, OptimizedProgram,
+    AmbientKind, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
     Ref, Var, VariableType,
 };
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
 use super::uniform_parameters;
 use crate::model as rcl;
+use crate::pools::Pools;
 
 /// The five parameters every density and helper function starts with.
 pub struct UniformVars {
@@ -54,8 +55,12 @@ impl UniformVars {
 pub struct FunctionConverter<'a> {
     pub program: &'a OptimizedProgram,
     pub naming: &'a Interface,
+    pub pools: &'a Pools,
     pub function: &'a Function,
     pub uniform: UniformVars,
+    /// One `usize` parameter per input the function reads, directly or through helpers, in
+    /// `Interface::input_params` order. They follow the uniform parameters.
+    pub offsets: Vec<(Ref<DensityInput>, Rc<rcl::Variable>)>,
     /// Helper functions referenced by the converted code, still to be generated.
     pub called: Vec<Ref<Function>>,
     /// Constants referenced by the converted code, still to be generated.
@@ -65,21 +70,38 @@ pub struct FunctionConverter<'a> {
 }
 
 impl<'a> FunctionConverter<'a> {
+    /// `f` is the function being converted, which must be `program.functions[f]`.
     pub fn new(
         program: &'a OptimizedProgram,
         naming: &'a Interface,
-        function: &'a Function,
+        pools: &'a Pools,
+        f: Ref<Function>,
     ) -> Self {
         let uniform = UniformVars::new();
-        let used_names = [&uniform.it, &uniform.config, &uniform.buffers, &uniform.auto_consts, &uniform.host_consts]
+        let offsets: Vec<_> = naming
+            .input_params(f)
             .iter()
+            .map(|&d| {
+                let v = rcl::Variable {
+                    name: Some(naming.offset_param(d).to_string()),
+                    t: rcl::Type::Usize,
+                    mutable: false,
+                };
+                (d, Rc::new(v))
+            })
+            .collect();
+        let used_names = [&uniform.it, &uniform.config, &uniform.buffers, &uniform.auto_consts, &uniform.host_consts]
+            .into_iter()
+            .chain(offsets.iter().map(|(_, v)| v))
             .map(|v| v.name.clone().unwrap())
             .collect();
         Self {
             program,
             naming,
-            function,
+            pools,
+            function: &program.functions[f],
             uniform,
+            offsets,
             called: Vec::new(),
             used_constants: Vec::new(),
             vars: HashMap::new(),
@@ -117,6 +139,15 @@ impl<'a> FunctionConverter<'a> {
         let rcl_var = Rc::new(rcl::Variable { name: Some(name), t: convert_type(&var.t), mutable: true });
         self.vars.insert(r, rcl_var.clone());
         rcl_var
+    }
+
+    /// This function's offset parameter of input `d`.
+    pub fn offset(&self, d: Ref<DensityInput>) -> Rc<rcl::Variable> {
+        self.offsets
+            .iter()
+            .find(|(x, _)| *x == d)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| panic!("input {d:?} is read but is not an offset parameter of the function"))
     }
 
     /// Return type of the unit's main function, i.e. the element type of its buffer.

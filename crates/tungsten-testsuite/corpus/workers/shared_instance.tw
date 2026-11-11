@@ -1,0 +1,51 @@
+// Two entries share the instance `mid`, with different closures (specs/workers.md §8). The first
+// worker also computes `extra`, so `mid` and `leaf` sit at other offsets than in the second
+// worker, and both run the one kernel of `mid`.
+program {
+    fn leaf_main() -> i32 {
+        return (ambient(pos3).x * 10);
+    }
+    unit leaf {
+        main leaf_main;
+    }
+    input leaf_in = leaf @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn mid_main() -> i32 {
+        return (density(leaf_in) + 1);
+    }
+    unit mid {
+        main mid_main;
+        inputs [leaf_in];
+    }
+    input mid_in = mid @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn extra_main() -> i32 {
+        return (ambient(pos3).x + 100);
+    }
+    unit extra {
+        main extra_main;
+    }
+    input extra_in = extra @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn first_main() -> i32 {
+        return (density(extra_in) + density(mid_in));
+    }
+    unit first {
+        main first_main;
+        inputs [extra_in, mid_in];
+    }
+
+    fn second_main() -> i32 {
+        return (density(mid_in) * 2);
+    }
+    unit second {
+        main second_main;
+        inputs [mid_in];
+    }
+
+    entry first @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry second @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" first = [101, 112, 123, 134]
+@expect "c" second = [2, 22, 42, 62]

@@ -1,0 +1,51 @@
+// A helper reading an input, called from units of two entries (specs/workers.md §8). `b` sits
+// after `pad` in the first worker and right after the entry in the second, so the callers pass
+// different offsets through, `left` through a second helper.
+program {
+    fn base_main() -> f64 {
+        return (ambient(pos3).x as f64);
+    }
+    unit base {
+        main base_main;
+    }
+    input b = base @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn pad_main() -> f64 {
+        return 0.5;
+    }
+    unit pad {
+        main pad_main;
+    }
+    input pad_in = pad @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn read_b() -> f64 {
+        return (density(b) * 2.0);
+    }
+    fn twice() -> f64 {
+        return (read_b() + read_b());
+    }
+
+    fn left_main() -> f64 {
+        return (density(pad_in) + twice());
+    }
+    unit left {
+        main left_main;
+        helpers [twice, read_b];
+        inputs [pad_in, b];
+    }
+
+    fn right_main() -> f64 {
+        return read_b();
+    }
+    unit right {
+        main right_main;
+        helpers [read_b];
+        inputs [b];
+    }
+
+    entry left @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry right @dims(4, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" left = [0.5, 4.5, 8.5, 12.5]
+@expect "c" right = [0.0, 2.0, 4.0, 6.0]

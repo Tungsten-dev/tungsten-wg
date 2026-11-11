@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use tungsten_ir::model::{AutoConst, AutoParam,
-    ComputeUnit, Constant, DensityInput, EntryPoint, Function, HostInput, OptimizedProgram,
+    ComputeUnit, Constant, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram,
     Ref,
 };
 
@@ -149,6 +149,21 @@ pub trait Backend {
     }
 }
 
+/// How generated code checks reads of density inputs (`specs/workers.md` §5.1). Plain data: each
+/// backend maps it to its own checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BufferBounds {
+    /// Each read is checked against its input's own length, so a bad index fails exactly where a
+    /// separate array per input would.
+    PerBuffer,
+    /// Reads are checked against the end of the worker's pool only. A bad index may read a
+    /// neighbouring input's data.
+    Slab,
+    /// No checks. A bad index is undefined behaviour where the language allows it (Rust).
+    Unchecked,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BackendError {
@@ -172,6 +187,7 @@ pub struct Interface {
     auto_consts: HashMap<Ref<AutoConst>, String>,
     auto_params: HashMap<Ref<AutoParam>, String>,
     host_fields: HashMap<Ref<HostInput>, String>,
+    offset_params: HashMap<Ref<DensityInput>, String>,
     workers: workers::Workers,
 }
 
@@ -254,6 +270,18 @@ impl Interface {
             }
         }
 
+        // One namespace: a function can take the offsets of several inputs. The `off_` prefix keeps
+        // them apart from the uniform parameters; backends keep body locals apart.
+        let mut offset_params = HashMap::new();
+        let mut used_offsets = rules.used_set();
+        for (r, d) in program.density_inputs.iter() {
+            let base = match &d.name {
+                Name::Named(n) | Name::Prefixed(n) => format!("off_{n}"),
+                Name::Anonymous => "off_input".to_string(),
+            };
+            offset_params.insert(r, unique(&mut used_offsets, (rules.sanitize)(&base)));
+        }
+
         let mut interface = Self {
             instances,
             dependencies,
@@ -266,6 +294,7 @@ impl Interface {
             auto_consts,
             auto_params,
             host_fields,
+            offset_params,
             workers: workers::Workers::default(),
         };
         interface.workers = workers::Workers::build(program, &interface);
@@ -321,6 +350,12 @@ impl Interface {
     /// deduplicated.
     pub fn input_params(&self, f: Ref<Function>) -> &[Ref<DensityInput>] {
         &self.workers.input_params[&f]
+    }
+
+    /// Name of the offset parameter of input `d`, the same in every function that takes it
+    /// (`specs/workers.md` §4.3). Starts with `off_`.
+    pub fn offset_param(&self, d: Ref<DensityInput>) -> &str {
+        &self.offset_params[&d]
     }
 
     /// Static hosts read by any unit in entry `entry`'s worker schedule, in arena order.

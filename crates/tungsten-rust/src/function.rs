@@ -10,10 +10,14 @@ use super::expression::{const_refs, constant_variable, convert_const_expr};
 use super::types::convert_type;
 use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
-use tungsten_interface::{Instance, Interface};
+use crate::pools::Pools;
+use tungsten_interface::{BufferBounds, Instance, Interface};
 use tungsten_ir::model::{
     ComputeUnit, Constant, Function, OptimizedProgram, Ref,
 };
+
+/// Name of a kernel's own slot offset.
+pub const KERNEL_OUT_OFFSET: &str = "out_off";
 
 /// A converted function plus the items it still needs generated.
 pub struct Converted<'m> {
@@ -24,26 +28,32 @@ pub struct Converted<'m> {
     pub constants: Vec<Ref<Constant>>,
 }
 
-/// Adds the uniform leading parameters shared by every density and helper function.
-fn add_uniform_parameters(f: &mut rcl::Function<'_>) {
+/// Adds the uniform leading parameters shared by every density and helper function, then one
+/// offset per input the function reads.
+fn add_uniform_parameters(f: &mut rcl::Function<'_>, conv: &FunctionConverter<'_>) {
     for p in uniform_parameters() {
         f.add_parameter(p.name, p.t);
     }
+    for (_, v) in &conv.offsets {
+        f.add_parameter(v.name.clone().unwrap(), v.t.clone());
+    }
 }
 
-/// Converts a helper function: uniform parameters, then its own parameters, then the body.
+/// Converts a helper function: uniform parameters and offsets, then its own parameters, then the
+/// body.
 pub fn convert_helper<'a, 'm>(
     program: &'a OptimizedProgram,
     naming: &'a Interface,
+    pools: &'a Pools,
     f: Ref<Function>,
 ) -> Converted<'m> {
     let func = &program.functions[f];
-    let mut conv = FunctionConverter::new(program, naming, func);
+    let mut conv = FunctionConverter::new(program, naming, pools, f);
     let mut out = rcl::Function::new(
         Some(naming.helper(f).to_string()),
         Some(convert_type(&func.return_type)),
     );
-    add_uniform_parameters(&mut out);
+    add_uniform_parameters(&mut out, &conv);
 
     // Helper-specific parameters follow the uniform ones.
     for p in &func.parameters {
@@ -73,6 +83,7 @@ pub fn convert_helper<'a, 'm>(
 pub fn convert_density<'a, 'm>(
     program: &'a OptimizedProgram,
     naming: &'a Interface,
+    pools: &'a Pools,
     cu: Ref<ComputeUnit>,
     dimensions: (i32, i32, i32),
 ) -> Converted<'m> {
@@ -81,12 +92,12 @@ pub fn convert_density<'a, 'm>(
         ..
     } = &program.compute_units[cu];
     let func = &program.functions[*function];
-    let mut conv = FunctionConverter::new(program, naming, func);
+    let mut conv = FunctionConverter::new(program, naming, pools, *function);
     let mut out = rcl::Function::new(
         Some(naming.density_fn(cu, dimensions).to_string()),
         Some(convert_type(&func.return_type)),
     );
-    add_uniform_parameters(&mut out);
+    add_uniform_parameters(&mut out, &conv);
 
     for (r, _) in func.variables.iter() {
         let v = conv.declare_var(r);
@@ -120,11 +131,13 @@ pub fn convert_constant<'m>(
     )
 }
 
-/// `pub fn <kernel>(origin, buffers, auto_constants, host_consts)`: builds the `Config`,
-/// loops over every position and stores the density function's result in the instance's buffer.
+/// `pub fn <kernel>(origin, buffers, out_off, off_.., auto_constants, host_consts)`: builds the
+/// `Config`, loops over every position and stores the density function's result at
+/// `out_off + index(p)` of the unit's pool. The offsets are those of the unit's main function.
 pub fn build_kernel<'m>(
     program: &OptimizedProgram,
     naming: &Interface,
+    pools: &Pools,
     inst: &Instance,
 ) -> rcl::Function<'m> {
     use rcl::Expression as E;
@@ -151,9 +164,16 @@ pub fn build_kernel<'m>(
     let it = var("p", rcl::Type::Struct("PositionIterator".to_string()));
     let result = var("r", return_type.clone());
 
+    let out_off = var(KERNEL_OUT_OFFSET, rcl::Type::Usize);
+    let offsets: Vec<_> = naming
+        .input_params(*function)
+        .iter()
+        .map(|&d| var(naming.offset_param(d), rcl::Type::Usize))
+        .collect();
+
     let mut kernel = rcl::Function::new(Some(naming.kernel(inst).to_string()), None);
     kernel.add_parameter("origin".to_string(), vec3());
-    for v in [&buffers, &auto_consts, &host_consts] {
+    for v in [&buffers, &out_off].into_iter().chain(&offsets).chain([&auto_consts, &host_consts]) {
         kernel.add_parameter(v.name.clone().unwrap(), v.t.clone());
     }
 
@@ -192,30 +212,42 @@ pub fn build_kernel<'m>(
         function_name: naming.density_fn(inst.cu, inst.dimensions).to_string(),
         argument_types: uniform.iter().map(|p| p.t.clone()).collect(),
         return_type: return_type.clone(),
-        arguments: vec![
+        arguments: [
             E::Variable(it.clone()),
             E::Ref(Box::new(E::Variable(config.clone()))),
-            E::Variable(buffers.clone()),
+            E::Ref(Box::new(E::Deref(Box::new(E::Variable(buffers.clone()))))),
             E::Variable(auto_consts.clone()),
             E::Variable(host_consts.clone()),
-        ],
+        ]
+        .into_iter()
+        .chain(offsets.iter().map(|v| E::Variable(v.clone())))
+        .collect(),
     };
     let index = E::LateBoundCall {
         function_name: "index".to_string(),
         argument_types: vec![it.t.clone()],
-        return_type: rcl::Type::I32,
+        return_type: rcl::Type::Usize,
         arguments: vec![E::Variable(it.clone())],
     };
-    let store = S::AssignPlace {
-        target: E::Index {
-            base: Box::new(E::Field {
-                base: Box::new(E::Variable(buffers.clone())),
-                field: naming.buffer_field(inst).to_string(),
-            }),
-            index: Box::new(index),
-        },
-        value: E::Variable(result.clone()),
+    // In range by construction, so never the `PerBuffer` form.
+    let pool = E::Field {
+        base: Box::new(E::Variable(buffers.clone())),
+        field: pools.field(&program.functions[*function].return_type).to_string(),
     };
+    let at = E::BinaryOp {
+        op: rcl::BinaryOperator::Add,
+        left: Box::new(E::Variable(out_off.clone())),
+        right: Box::new(index),
+    };
+    let target = match pools.bounds {
+        BufferBounds::Unchecked => E::Deref(Box::new(E::Unsafe(Box::new(E::MethodCall {
+            receiver: Box::new(pool),
+            method: "get_unchecked_mut".into(),
+            arguments: vec![at],
+        })))),
+        _ => E::Index { base: Box::new(pool), index: Box::new(at) },
+    };
+    let store = S::AssignPlace { target, value: E::Variable(result.clone()) };
     kernel.add_statement(S::ForIn {
         variable: it.clone(),
         iterable: E::LateBoundCall {

@@ -1,7 +1,10 @@
 /*
-Orchestration codegen for RCL: owns the structs the device code is generated against
-(`HostConsts`, `AutoConsts`, `InternalBuffers`), the `Orchestration` type that runs kernels
-in wave order, and the module assembly.
+Orchestration codegen for RCL (`specs/workers.md` §3.1, §5.2): the structs the device code is
+generated against (`HostConsts`, `AutoConsts`, `InternalBuffers`), the shared `Orchestration`,
+one worker and one `<Base>HostConsts` per entry, and the module assembly.
+
+`Orchestration` holds the autoconsts behind an `Arc` and only creates workers. A worker runs its
+entry's waves on its own pools, passing each kernel the offsets of its slots.
 */
 
 use std::collections::HashSet;
@@ -9,17 +12,66 @@ use std::rc::Rc;
 
 use super::types::{auto_const_type, convert_type};
 use super::{
-    AUTO_CONSTS_STRUCT_NAME, HOST_CONSTS_STRUCT_NAME, INTERNAL_BUFFERS_STRUCT_NAME,
-    ORCHESTRATION_STRUCT_NAME, TransformRclOrchestration,
+    AUTO_CONSTS_STRUCT_NAME, CONFIG_STRUCT_NAME, HOST_CONSTS_STRUCT_NAME,
+    INTERNAL_BUFFERS_STRUCT_NAME, ORCHESTRATION_STRUCT_NAME, TransformRclOrchestration,
 };
 use crate::interned::Interned;
 use crate::model as rcl;
 use crate::model::codegen::RustCodeGenerator;
-use tungsten_interface::naming::{NamingRules, entry_method_names};
+use crate::pools::{Pools, cells, unit_return_type, zero};
+use tungsten_interface::naming::{FactoryStyle, NamingRules, WorkerNames, sanitize_name, worker_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{
-    AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, Ref, VariableType,
+    AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, VariableType,
 };
+
+/// The private struct behind `Orchestration`'s `Arc`.
+pub const SHARED_STRUCT_NAME: &str = "Shared";
+
+/// Visibility of the implementation types: the density module (a sibling) uses them, the
+/// frontend doesn't.
+const INTERNAL: &str = "pub(super) ";
+
+/// Names of every entry's worker types and factory, in entry order. Shared with frontends and
+/// test drivers so they agree with the generated code.
+pub fn rust_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec<WorkerNames> {
+    let mut types: HashSet<String> = [
+        ORCHESTRATION_STRUCT_NAME,
+        SHARED_STRUCT_NAME,
+        HOST_CONSTS_STRUCT_NAME,
+        AUTO_CONSTS_STRUCT_NAME,
+        INTERNAL_BUFFERS_STRUCT_NAME,
+        CONFIG_STRUCT_NAME,
+        "Vec3",
+        "Pos3",
+        "PositionIterator",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    // Record and handle types the generated code names.
+    let mut add = |t: &VariableType| {
+        let mut t = t;
+        while let VariableType::Array(e, _) = t {
+            t = e;
+        }
+        if let VariableType::Extern(n) | VariableType::Handle(n) = t {
+            types.insert(sanitize_name(n));
+        }
+    };
+    for (_, f) in program.functions.iter() {
+        add(&f.return_type);
+        f.variables.iter().for_each(|(_, v)| add(&v.t));
+    }
+    program.host_inputs.iter().for_each(|(_, h)| {
+        if let HostInput::Static { t, .. } = h {
+            add(t)
+        }
+    });
+    program.auto_consts.iter().for_each(|(_, a)| add(&a.t));
+    let members = HashSet::from(["new".to_string(), "clone".to_string()]);
+    worker_names(program, rules, FactoryStyle::Snake, types, members)
+}
 
 /// One field of `AutoConsts` and how to initialize it.
 struct AutoConstSpec {
@@ -64,76 +116,6 @@ fn auto_const_specs(program: &OptimizedProgram, interface: &Interface) -> Vec<Au
         .collect()
 }
 
-/// Element type of an instance's buffer is its unit's return type.
-fn unit_return_type(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> &VariableType {
-    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
-    &program.functions[*function].return_type
-}
-
-/// Number of elements in the instance's buffer.
-fn flat_len(inst: &Instance) -> usize {
-    let (x, y, z) = inst.dimensions;
-    (x * y * z) as usize
-}
-
-/// `#[repr(C)]` struct of all static host inputs, passed to every function as `host_consts`.
-fn host_consts_struct(program: &OptimizedProgram, interface: &Interface) -> rcl::Struct {
-    let mut s = rcl::Struct::new(HOST_CONSTS_STRUCT_NAME.to_string());
-    for (r, input) in program.host_inputs.iter() {
-        if let HostInput::Static { t, .. } = input {
-            s.add_field(interface.host_field(r).to_string(), convert_type(t));
-        }
-    }
-    s.set_repr_c(true);
-    s
-}
-
-/// `#[repr(C)]` struct with one field per spec, passed to every function as `auto_constants`.
-fn auto_consts_struct(specs: &[AutoConstSpec]) -> rcl::Struct {
-    let mut s = rcl::Struct::new(AUTO_CONSTS_STRUCT_NAME.to_string());
-    for spec in specs {
-        s.add_field(spec.field.clone(), spec.t.clone());
-    }
-    s.set_repr_c(true);
-    s.derivations.push("Clone".to_string());
-    s
-}
-
-/// `#[repr(C)]` struct holding every instance's output buffer; zero-initialized via `make_boxed`.
-fn internal_buffers_struct(program: &OptimizedProgram, interface: &Interface) -> rcl::Struct {
-    let mut s = rcl::Struct::new(INTERNAL_BUFFERS_STRUCT_NAME.to_string());
-    for inst in interface.instances() {
-        let element = convert_type(unit_return_type(program, inst.cu));
-        s.add_field(
-            interface.buffer_field(inst).to_string(),
-            rcl::Type::Array(Box::new(element), flat_len(inst)),
-        );
-    }
-    s.derivations.push("Clone".to_string());
-    s.derivations.push("Copy".to_string());
-    s.set_repr_c(true);
-    s
-}
-
-/// The `Orchestration` type: owns the buffers and auto constants across runs.
-fn orchestration_struct() -> rcl::Struct {
-    let mut s = rcl::Struct::new(ORCHESTRATION_STRUCT_NAME.to_string());
-    s.add_field(
-        "buffers".to_string(),
-        rcl::Type::Box(Box::new(rcl::Type::Struct(
-            INTERNAL_BUFFERS_STRUCT_NAME.to_string(),
-        ))),
-    );
-    s.add_field(
-        "auto_constants".to_string(),
-        rcl::Type::Box(Box::new(rcl::Type::Struct(
-            AUTO_CONSTS_STRUCT_NAME.to_string(),
-        ))),
-    );
-    s.derivations.push("Clone".to_string());
-    s
-}
-
 fn var(name: &str, t: rcl::Type) -> Rc<rcl::Variable> {
     Rc::new(rcl::Variable {
         name: Some(name.to_string()),
@@ -142,200 +124,336 @@ fn var(name: &str, t: rcl::Type) -> Rc<rcl::Variable> {
     })
 }
 
-/// `fn make_auto_consts(<params>, &mut AutoConsts)`: assigns every field from its initializer.
-fn make_auto_consts_fn<'m>(
+fn struct_type(name: &str) -> rcl::Type {
+    rcl::Type::Struct(name.to_string())
+}
+
+fn field<'m>(base: rcl::Expression<'m>, name: &str) -> rcl::Expression<'m> {
+    rcl::Expression::Field { base: Box::new(base), field: name.to_string() }
+}
+
+/// `self.a.b..`
+fn self_path<'m>(path: &[&str]) -> rcl::Expression<'m> {
+    let this = rcl::Expression::Variable(var("self", struct_type("Self")));
+    path.iter().fold(this, |e, f| field(e, f))
+}
+
+/// `(name, type)` of every static host, in arena order.
+fn static_hosts<'p>(
+    program: &'p OptimizedProgram,
+    interface: &Interface,
+    only: Option<&[tungsten_ir::model::Ref<HostInput>]>,
+) -> Vec<(String, &'p VariableType)> {
+    program
+        .host_inputs
+        .iter()
+        .filter(|(r, _)| only.is_none_or(|o| o.contains(r)))
+        .filter_map(|(r, h)| match h {
+            HostInput::Static { t, .. } => Some((interface.host_field(r).to_string(), t)),
+            HostInput::Dynamic => None,
+        })
+        .collect()
+}
+
+/// A struct of host fields, and its generated `Default` impl from the zero values (`[T; N]` has
+/// no `Default` past 32 elements).
+fn host_struct<'m>(
+    name: &str,
+    hosts: &[(String, &VariableType)],
+    visibility: &'static str,
+) -> (rcl::Struct, rcl::Function<'m>) {
+    let mut s = rcl::Struct::new(name.to_string());
+    for (f, t) in hosts {
+        s.add_field(f.clone(), convert_type(t));
+    }
+    s.visibility = visibility;
+    s.set_repr_c(true);
+    s.derivations.extend(["Clone".to_string(), "Copy".to_string()]);
+    let mut default = rcl::Function::new(Some("default".into()), Some(struct_type("Self")));
+    default.add_statement(rcl::Statement::Return(Some(rcl::Expression::StructInit {
+        struct_name: "Self".into(),
+        fields: hosts.iter().map(|(f, t)| (f.clone(), zero(t))).collect(),
+    })));
+    (s, default)
+}
+
+/// `#[repr(C)]` struct with one field per spec, built once by `Orchestration::new`.
+fn auto_consts_struct(specs: &[AutoConstSpec]) -> rcl::Struct {
+    let mut s = rcl::Struct::new(AUTO_CONSTS_STRUCT_NAME.to_string());
+    for spec in specs {
+        s.add_field(spec.field.clone(), spec.t.clone());
+    }
+    s.visibility = INTERNAL;
+    s.set_repr_c(true);
+    s.derivations.push("Clone".to_string());
+    s
+}
+
+/// One `Box<[T]>` per pool, program-wide so the density code is shared.
+fn internal_buffers_struct(pools: &Pools) -> rcl::Struct {
+    let mut s = rcl::Struct::new(INTERNAL_BUFFERS_STRUCT_NAME.to_string());
+    for (t, name) in &pools.fields {
+        s.add_field(name.clone(), rcl::Type::Box(Box::new(rcl::Type::Slice(Box::new(convert_type(t))))));
+    }
+    s.visibility = INTERNAL;
+    s
+}
+
+fn shared_struct() -> rcl::Struct {
+    let mut s = rcl::Struct::new(SHARED_STRUCT_NAME.to_string());
+    s.add_field("auto_constants".into(), struct_type(AUTO_CONSTS_STRUCT_NAME));
+    s.visibility = "";
+    s
+}
+
+const ARC_SHARED: &str = "std::sync::Arc<Shared>";
+
+/// `#[derive(Clone)] pub struct Orchestration { shared: Arc<Shared> }`: cloning is an `Arc` bump.
+fn orchestration_struct() -> rcl::Struct {
+    let mut s = rcl::Struct::new(ORCHESTRATION_STRUCT_NAME.to_string());
+    s.add_field("shared".into(), struct_type(ARC_SHARED));
+    s.public_fields = false;
+    s.derivations.push("Clone".to_string());
+    s
+}
+
+fn worker_struct(names: &WorkerNames) -> rcl::Struct {
+    let mut s = rcl::Struct::new(names.worker.clone());
+    s.add_field("orch".into(), struct_type(ORCHESTRATION_STRUCT_NAME));
+    s.add_field("buffers".into(), struct_type(INTERNAL_BUFFERS_STRUCT_NAME));
+    s.add_field("hosts".into(), struct_type(HOST_CONSTS_STRUCT_NAME));
+    s.public_fields = false;
+    s
+}
+
+/// `Orchestration::new(<params>)`: builds the autoconsts as one struct literal, each initializer
+/// called in arena order.
+fn new_fn<'m>(
     program: &OptimizedProgram,
     interface: &Interface,
     specs: &[AutoConstSpec],
 ) -> rcl::Function<'m> {
     use rcl::Expression as E;
-    let mut f = rcl::Function::new(Some("make_auto_consts".to_string()), None);
-    let target_type = rcl::Type::MutRef(Box::new(rcl::Type::Struct(
-        AUTO_CONSTS_STRUCT_NAME.to_string(),
-    )));
+    let mut f = rcl::Function::new(Some("new".to_string()), Some(struct_type("Self")));
     let params = auto_params(program, interface);
     for (name, t) in &params {
         f.add_parameter(name.clone(), t.clone());
     }
-    f.add_parameter("auto_consts".to_string(), target_type.clone());
     let param_vars: std::collections::HashMap<_, _> = program
         .auto_params
         .iter()
         .zip(&params)
         .map(|((r, _), (name, t))| (r, var(name, t.clone())))
         .collect();
-    let auto_consts = var("auto_consts", target_type);
-
-    for spec in specs {
-        let arguments = spec
-            .args
-            .iter()
-            .map(|(a, _)| match a {
-                AutoConstArg::Param(p) => E::Variable(param_vars[p].clone()),
-                AutoConstArg::I64(v) => E::I64Literal(*v),
-                AutoConstArg::F64(v) => E::F64Literal(*v),
-                AutoConstArg::Bool(v) => E::BoolLiteral(*v),
-                AutoConstArg::Str(v) => E::StrLiteral(v.clone()),
-            })
-            .collect::<Vec<_>>();
-        f.add_statement(rcl::Statement::AssignPlace {
-            target: E::Field {
-                base: Box::new(E::Variable(auto_consts.clone())),
-                field: spec.field.clone(),
-            },
-            value: E::LateBoundCall {
+    let fields = specs
+        .iter()
+        .map(|spec| {
+            let arguments = spec
+                .args
+                .iter()
+                .map(|(a, _)| match a {
+                    AutoConstArg::Param(p) => E::Variable(param_vars[p].clone()),
+                    AutoConstArg::I64(v) => E::I64Literal(*v),
+                    AutoConstArg::F64(v) => E::F64Literal(*v),
+                    AutoConstArg::Bool(v) => E::BoolLiteral(*v),
+                    AutoConstArg::Str(v) => E::StrLiteral(v.clone()),
+                })
+                .collect();
+            let value = E::LateBoundCall {
                 function_name: spec.initializer.clone(),
                 argument_types: spec.args.iter().map(|(_, t)| t.clone()).collect(),
                 return_type: spec.t.clone(),
                 arguments,
+            };
+            (spec.field.clone(), value)
+        })
+        .collect();
+    let shared = E::StructInit {
+        struct_name: SHARED_STRUCT_NAME.into(),
+        fields: vec![(
+            "auto_constants".into(),
+            E::StructInit { struct_name: AUTO_CONSTS_STRUCT_NAME.into(), fields },
+        )],
+    };
+    f.add_statement(rcl::Statement::Return(Some(E::StructInit {
+        struct_name: "Self".to_string(),
+        fields: vec![(
+            "shared".into(),
+            E::LateBoundCall {
+                function_name: "std::sync::Arc::new".into(),
+                argument_types: vec![struct_type(SHARED_STRUCT_NAME)],
+                return_type: struct_type(ARC_SHARED),
+                arguments: vec![shared],
             },
-        });
-    }
+        )],
+    })));
     f
 }
 
-fn boxed_struct(name: &str) -> rcl::Type {
-    rcl::Type::Box(Box::new(rcl::Type::Struct(name.to_string())))
-}
-
-/// `Orchestration::new(<params>)`: allocates the boxed buffers and auto constants and initializes the latter.
-fn new_fn<'m>(program: &OptimizedProgram, interface: &Interface) -> rcl::Function<'m> {
+/// `<factory>(&self) -> <Base>Worker`: one allocation per pool, sized for this entry. Pools the
+/// worker doesn't use are empty.
+fn factory_fn<'m>(
+    interface: &Interface,
+    pools: &Pools,
+    entry: usize,
+    names: &WorkerNames,
+) -> rcl::Function<'m> {
     use rcl::Expression as E;
-    use rcl::Statement as S;
-    let mut f = rcl::Function::new(
-        Some("new".to_string()),
-        Some(rcl::Type::Struct("Self".to_string())),
-    );
-    let params = auto_params(program, interface);
-    for (name, t) in &params {
-        f.add_parameter(name.clone(), t.clone());
-    }
-    let buffers = var("buffers", boxed_struct(INTERNAL_BUFFERS_STRUCT_NAME));
-    let auto_constants = var("auto_constants", boxed_struct(AUTO_CONSTS_STRUCT_NAME));
-    let init = var("_init", rcl::Type::Void);
-
-    let make_boxed = |name: &str| E::LateBoundCall {
-        function_name: format!("make_boxed::<{}>", name),
+    let layout = interface.worker(entry);
+    let mut f = rcl::Function::new(Some(names.factory.clone()), Some(struct_type(&names.worker)));
+    f.receiver = Some(rcl::Receiver::Ref);
+    let buffers = pools
+        .fields
+        .iter()
+        .map(|(t, name)| {
+            let len = layout.pools.iter().find(|p| p.element == *t).map_or(0, |p| p.len);
+            let value = E::MethodCall {
+                receiver: Box::new(E::VecRepeat {
+                    element: Box::new(zero(t)),
+                    count: Box::new(E::UsizeLiteral(len)),
+                }),
+                method: "into_boxed_slice".into(),
+                arguments: vec![],
+            };
+            (name.clone(), value)
+        })
+        .collect();
+    let default_hosts = E::LateBoundCall {
+        function_name: format!("<{HOST_CONSTS_STRUCT_NAME} as Default>::default"),
         argument_types: vec![],
-        return_type: boxed_struct(name),
+        return_type: struct_type(HOST_CONSTS_STRUCT_NAME),
         arguments: vec![],
     };
-    f.add_statement(S::Declare {
-        variable: buffers.clone(),
-        init: Some(make_boxed(INTERNAL_BUFFERS_STRUCT_NAME)),
-        mutable: true,
-    });
-    f.add_statement(S::Declare {
-        variable: auto_constants.clone(),
-        init: Some(make_boxed(AUTO_CONSTS_STRUCT_NAME)),
-        mutable: true,
-    });
-    f.add_statement(S::Declare {
-        variable: init,
-        init: Some(E::LateBoundCall {
-            function_name: "make_auto_consts".to_string(),
-            argument_types: params.iter().map(|(_, t)| t.clone()).collect(),
-            return_type: rcl::Type::Void,
-            arguments: params
-                .iter()
-                .map(|(name, t)| E::Variable(var(name, t.clone())))
-                .chain([E::MutRef(Box::new(E::Variable(auto_constants.clone())))])
-                .collect(),
-        }),
-        mutable: false,
-    });
-    f.add_statement(S::Return(Some(E::StructInit {
-        struct_name: "Self".to_string(),
+    let this = E::Variable(var("self", struct_type("Self")));
+    f.add_statement(rcl::Statement::Return(Some(E::StructInit {
+        struct_name: names.worker.clone(),
         fields: vec![
-            ("buffers".to_string(), E::Variable(buffers)),
-            ("auto_constants".to_string(), E::Variable(auto_constants)),
+            (
+                "orch".into(),
+                E::MethodCall { receiver: Box::new(this), method: "clone".into(), arguments: vec![] },
+            ),
+            (
+                "buffers".into(),
+                E::StructInit { struct_name: INTERNAL_BUFFERS_STRUCT_NAME.into(), fields: buffers },
+            ),
+            ("hosts".into(), default_hosts),
         ],
     })));
     f
 }
 
+/// `run(&mut self, origin, host_consts: &<Base>HostConsts)`: copies the entry's hosts into the
+/// private `HostConsts`, runs the worker's waves and returns a view of the entry's slot, which is
+/// at offset 0 of pool 0. A single-cell entry returns the value.
+///
 /// Calls are `let _kernel_call_<wave>_<i>: () = ..` because RCL has no expression statements.
-/// `orchestrate_<entry>(&mut self, origin, host_consts)`: runs the entry's pruned waves and returns its buffer.
-fn entry_method<'m>(
+fn run_fn<'m>(
     program: &OptimizedProgram,
     interface: &Interface,
-    name: String,
-    entry: &Instance,
+    pools: &Pools,
+    entry: usize,
+    names: &WorkerNames,
 ) -> rcl::Function<'m> {
     use rcl::Expression as E;
     use rcl::Statement as S;
-    let vec3 = rcl::Type::Struct("Vec3".to_string());
-    let host_consts_t = rcl::Type::Ref(Box::new(rcl::Type::Struct(
-        HOST_CONSTS_STRUCT_NAME.to_string(),
-    )));
-    let element = convert_type(unit_return_type(program, entry.cu));
+    let target = Instance::from_entry(&program.entry_points[entry]);
+    let element_ir = unit_return_type(program, target.cu);
+    let element = convert_type(element_ir);
+    let len = cells(target.dimensions);
+    let pool = pools.field(element_ir);
 
-    let single = flat_len(entry) == 1;
+    let vec3 = struct_type("Vec3");
+    let hosts_t = rcl::Type::Ref(Box::new(struct_type(&names.host_consts)));
+    let single = len == 1;
     let return_type = if single {
         element.clone()
     } else {
-        rcl::Type::ArrayRef(Box::new(element.clone()), flat_len(entry))
+        rcl::Type::ArrayRef(Box::new(element.clone()), len)
     };
-    let mut f = rcl::Function::new(Some(name), Some(return_type));
+    let mut f = rcl::Function::new(Some("run".into()), Some(return_type.clone()));
     f.receiver = Some(rcl::Receiver::MutRef);
     f.add_parameter("origin".to_string(), vec3.clone());
-    f.add_parameter("host_consts".to_string(), host_consts_t.clone());
-
-    let this = var("self", rcl::Type::Struct("Self".to_string()));
+    f.add_parameter("host_consts".to_string(), hosts_t.clone());
     let origin = var("origin", vec3);
-    let host_consts = var("host_consts", host_consts_t);
-    let self_field = |field: &str| E::Field {
-        base: Box::new(E::Variable(this.clone())),
-        field: field.to_string(),
-    };
+    let host_consts = var("host_consts", hosts_t);
 
-    for (w, wave) in interface.waves_for(entry).iter().enumerate() {
+    for (name, _) in static_hosts(program, interface, Some(interface.entry_hosts(entry))) {
+        f.add_statement(S::AssignPlace {
+            target: self_path(&["hosts", name.as_str()]),
+            value: field(E::Variable(host_consts.clone()), &name),
+        });
+    }
+
+    let slot = |inst: &Instance| {
+        interface
+            .slot(entry, inst)
+            .unwrap_or_else(|| panic!("entry {entry}'s worker has no slot for {inst:?}"))
+    };
+    for (w, wave) in interface.worker_schedule(entry).iter().enumerate() {
         for (i, inst) in wave.iter().enumerate() {
+            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
+            let offsets = interface.input_params(*function).iter().map(|&d| {
+                let input = Instance::from_input(&program.density_inputs[d]);
+                E::UsizeLiteral(slot(&input).offset)
+            });
+            let arguments = [
+                E::Variable(origin.clone()),
+                E::MutRef(Box::new(self_path(&["buffers"]))),
+                E::UsizeLiteral(slot(inst).offset),
+            ]
+            .into_iter()
+            .chain(offsets)
+            .chain([
+                E::Ref(Box::new(self_path(&["orch", "shared", "auto_constants"]))),
+                E::Ref(Box::new(self_path(&["hosts"]))),
+            ])
+            .collect();
             f.add_statement(S::Declare {
                 variable: var(&format!("_kernel_call_{}_{}", w, i), rcl::Type::Void),
                 init: Some(E::LateBoundCall {
                     function_name: interface.kernel(inst).to_string(),
                     argument_types: vec![],
                     return_type: rcl::Type::Void,
-                    arguments: vec![
-                        E::Variable(origin.clone()),
-                        E::MutRef(Box::new(E::Deref(Box::new(self_field("buffers"))))),
-                        E::Ref(Box::new(E::Deref(Box::new(self_field("auto_constants"))))),
-                        E::Variable(host_consts.clone()),
-                    ],
+                    arguments,
                 }),
                 mutable: false,
             });
         }
     }
 
-    let buffer = E::Field {
-        base: Box::new(self_field("buffers")),
-        field: interface.buffer_field(entry).to_string(),
-    };
+    debug_assert_eq!(slot(&target).offset, 0);
+    let buffer = self_path(&["buffers", pool]);
     f.add_statement(S::Return(Some(if single {
-        E::Index {
-            base: Box::new(buffer),
-            index: Box::new(E::I32Literal(0)),
-        }
+        E::Index { base: Box::new(buffer), index: Box::new(E::UsizeLiteral(0)) }
     } else {
-        E::Ref(Box::new(buffer))
+        E::InlineRust(format!("<{return_type}>::try_from(&self.buffers.{pool}[0..{len}]).unwrap()"))
     })));
     f
 }
 
+/// `const _: () = ..`: a runtime handle or record that isn't `Send + Sync` fails here, at a line
+/// naming `Orchestration`, instead of at a distant `thread::spawn`.
+fn static_assertion(names: &[WorkerNames]) -> String {
+    let workers: String = names.iter().map(|n| format!(" w::<{}>();", n.worker)).collect();
+    format!(
+        "const _: () = {{ fn s<T: Send + Sync>() {{}} fn w<T: Send>() {{}} fn a() {{ s::<{ORCHESTRATION_STRUCT_NAME}>();{workers} }} }};"
+    )
+}
+
 impl<'m> TransformRclOrchestration<'m> {
     /// `density_module_name` and `orchestration_module_name` name the two generated modules,
-    /// which import each other.
+    /// which import each other. `pools` must be the ones the device codegen was built with.
     pub fn new(
         device_codegen: Box<dyn DeviceCodegen + 'm>,
         arena: &'m bumpalo::Bump,
+        pools: Pools,
         density_module_name: &str,
         orchestration_module_name: &str,
     ) -> Self {
         Self {
             device_codegen,
             arena,
+            pools,
             model: rcl::RCL::new(),
             density_module_name: density_module_name.to_string(),
             orchestration_module_name: orchestration_module_name.to_string(),
@@ -363,14 +481,20 @@ impl<'m> TransformRclOrchestration<'m> {
         RustCodeGenerator::new()
             .generate_inline_module(&self.model, &self.orchestration_module_name)
     }
+
+    fn default_impl(&self, type_name: &str, default: rcl::Function<'m>) -> rcl::Impl<'m> {
+        let mut imp = rcl::Impl::new(type_name);
+        imp.trait_name = Some("Default".into());
+        imp.methods.push(self.intern(default));
+        imp
+    }
 }
 
 impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
-    /// Generates the kernels on the device side, then the structs and `Orchestration` impl.
-    /// Calling it again replaces the orchestration model. `interface` must be the one the
+    /// Generates the kernels on the device side, then the structs, `Orchestration` and the
+    /// workers. Calling it again replaces the orchestration model. `interface` must be the one the
     /// device codegen was built with.
     fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
-        let naming = NamingRules::rust();
         // Device code first: one kernel per scheduled instance (repeats are no-ops).
         for wave in interface.waves() {
             for inst in wave {
@@ -382,31 +506,59 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         self.model
             .add_import(format!("super::{}::*", self.density_module_name));
 
+        let names = rust_worker_names(program, &NamingRules::rust());
         let specs = auto_const_specs(program, interface);
-        for s in [
-            host_consts_struct(program, interface),
+        let (hosts, hosts_default) =
+            host_struct(HOST_CONSTS_STRUCT_NAME, &static_hosts(program, interface, None), INTERNAL);
+        let mut structs = vec![
+            hosts,
             auto_consts_struct(&specs),
-            internal_buffers_struct(program, interface),
+            internal_buffers_struct(&self.pools),
+            shared_struct(),
             orchestration_struct(),
-        ] {
+        ];
+        let mut impls = vec![self.default_impl(HOST_CONSTS_STRUCT_NAME, hosts_default)];
+        for (e, n) in names.iter().enumerate() {
+            let own = static_hosts(program, interface, Some(interface.entry_hosts(e)));
+            let (s, default) = host_struct(&n.host_consts, &own, "pub ");
+            structs.push(s);
+            impls.push(self.default_impl(&n.host_consts, default));
+            structs.push(worker_struct(n));
+        }
+        for s in structs {
             let s = self.struct_ref(s);
             self.model.structs.push(s);
         }
 
-        let init = self.intern(make_auto_consts_fn(program, interface, &specs));
-        self.model.functions.push(init);
-
-        let names = entry_method_names(program, &naming, HashSet::from(["new".to_string()]));
-        let mut methods = vec![self.intern(new_fn(program, interface))];
-        for (entry, name) in program.entry_points.iter().zip(names) {
-            let entry = Instance::from_entry(entry);
-            let method = entry_method(program, interface, name, &entry);
-            methods.push(self.intern(method));
+        let mut orch = rcl::Impl::new(ORCHESTRATION_STRUCT_NAME);
+        orch.methods.push(self.intern(new_fn(program, interface, &specs)));
+        for (e, n) in names.iter().enumerate() {
+            orch.methods.push(self.intern(factory_fn(interface, &self.pools, e, n)));
         }
-        self.model.impls.push(rcl::Impl {
-            type_name: ORCHESTRATION_STRUCT_NAME.to_string(),
-            methods,
-        });
+        self.model.impls.push(orch);
+        for (e, n) in names.iter().enumerate() {
+            let target = &program.entry_points[e];
+            let (x, y, z) = target.dimensions;
+            let mut worker = rcl::Impl::new(n.worker.clone());
+            worker.consts.push((
+                "LEN".into(),
+                rcl::Type::Usize,
+                rcl::Expression::UsizeLiteral(cells(target.dimensions)),
+            ));
+            worker.consts.push((
+                "DIMS".into(),
+                rcl::Type::Tuple(vec![rcl::Type::I32; 3]),
+                rcl::Expression::TupleInit(vec![
+                    rcl::Expression::I32Literal(x),
+                    rcl::Expression::I32Literal(y),
+                    rcl::Expression::I32Literal(z),
+                ]),
+            ));
+            worker.methods.push(self.intern(run_fn(program, interface, &self.pools, e, n)));
+            self.model.impls.push(worker);
+        }
+        self.model.impls.extend(impls);
+        self.model.raw_items.push(static_assertion(&names));
     }
 
     /// Density module followed by the orchestration module.

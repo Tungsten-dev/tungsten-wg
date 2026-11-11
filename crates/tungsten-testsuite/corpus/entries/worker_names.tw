@@ -1,0 +1,29 @@
+// Entry names that collide after UpperCamel-casing (`a_b`, `aB`) get distinct worker types, and an
+// entry named `orchestration` doesn't clash with the `Orchestration` type (specs/workers.md §8).
+program {
+    fn a_b() -> f64 {
+        return 1.0;
+    }
+    unit first {
+        main a_b;
+    }
+    fn aB() -> f64 {
+        return 2.0;
+    }
+    unit second {
+        main aB;
+    }
+    fn orchestration() -> f64 {
+        return 3.0;
+    }
+    unit third {
+        main orchestration;
+    }
+    entry first @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry second @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry third @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" first[0, 0, 0] = 1.0
+@expect "c" second[0, 0, 0] = 2.0
+@expect "c" third[0, 0, 0] = 3.0

@@ -10,10 +10,42 @@ use super::converter::FunctionConverter;
 use super::types::{convert_binary_op, convert_type, convert_unary_op, derive_const_type};
 use crate::model as rcl;
 use tungsten_interface::naming::sanitize_name;
-use tungsten_interface::{Instance, Interface};
+use tungsten_interface::{BufferBounds, Interface};
 use tungsten_ir::model::{
     AmbientKind, BinaryOperator, ConstExpr, Constant, Expression, OptimizedProgram, Ref, VariableType,
 };
+
+/// A read of element `index` of the input at `offset` in `pool`, whose length is `len`
+/// (`specs/workers.md` §5.1). `index` is a `usize`; a negative IR index has wrapped to a huge one.
+pub fn read_pool<'m>(
+    bounds: BufferBounds,
+    pool: rcl::Expression<'m>,
+    offset: rcl::Expression<'m>,
+    len: usize,
+    index: rcl::Expression<'m>,
+) -> rcl::Expression<'m> {
+    use rcl::Expression as R;
+    let at = || R::BinaryOp {
+        op: rcl::BinaryOperator::Add,
+        left: Box::new(offset.clone()),
+        right: Box::new(index.clone()),
+    };
+    match bounds {
+        BufferBounds::Slab => R::Index { base: Box::new(pool), index: Box::new(at()) },
+        BufferBounds::Unchecked => R::Unsafe(Box::new(R::Deref(Box::new(R::MethodCall {
+            receiver: Box::new(pool),
+            method: "get_unchecked".into(),
+            arguments: vec![at()],
+        })))),
+        // `PerBuffer`, and any mode added later: the safest.
+        _ => R::LateBoundCall {
+            function_name: super::READ_HELPER.into(),
+            argument_types: vec![],
+            return_type: rcl::Type::Void,
+            arguments: vec![R::Ref(Box::new(pool)), offset, R::UsizeLiteral(len), index],
+        },
+    }
+}
 
 /// `base.name`
 fn field<'m>(base: &Rc<rcl::Variable>, name: &str) -> rcl::Expression<'m> {
@@ -163,12 +195,17 @@ impl<'a> FunctionConverter<'a> {
             } => {
                 self.called.push(*function);
                 let callee = &self.program.functions[*function];
-                // Uniform arguments first, then the helper's own parameters.
+                // Uniform arguments first, then the callee's offsets (the caller's own offset
+                // parameters, since `input_params` is transitive), then its own parameters.
                 let mut arguments = self.uniform.as_args();
                 let mut argument_types: Vec<rcl::Type> = super::uniform_parameters()
                     .into_iter()
                     .map(|p| p.t)
                     .collect();
+                for &d in self.naming.input_params(*function) {
+                    arguments.push(R::Variable(self.offset(d)));
+                    argument_types.push(rcl::Type::Usize);
+                }
                 for p in &callee.parameters {
                     argument_types.push(convert_type(&callee.variables[*p].t));
                 }
@@ -204,21 +241,23 @@ impl<'a> FunctionConverter<'a> {
             Expression::DensityVariable(input, index) => {
                 let program: &'a OptimizedProgram = self.program;
                 let di = &program.density_inputs[*input];
-                let buffer = self.naming.buffer_field(&Instance::from_input(di));
                 let index = match index {
-                    Some(i) => self.convert_expression(i),
-                    None if di.dimensions == (1, 1, 1) => R::I32Literal(0),
+                    Some(i) => R::Cast {
+                        expr: Box::new(self.convert_expression(i)),
+                        to_type: rcl::Type::Usize,
+                    },
+                    None if di.dimensions == (1, 1, 1) => R::UsizeLiteral(0),
                     None => R::LateBoundCall {
                         function_name: "index".to_string(),
                         argument_types: vec![rcl::Type::Struct("PositionIterator".to_string())],
-                        return_type: rcl::Type::I32,
+                        return_type: rcl::Type::Usize,
                         arguments: vec![R::Variable(self.uniform.it.clone())],
                     },
                 };
-                R::Index {
-                    base: Box::new(field(&self.uniform.buffers, buffer)),
-                    index: Box::new(index),
-                }
+                let element = self.unit_return_type(di.density_function);
+                let pool = field(&self.uniform.buffers, self.pools.field(element));
+                let offset = R::Variable(self.offset(*input));
+                read_pool(self.pools.bounds, pool, offset, crate::pools::cells(di.dimensions), index)
             }
             Expression::AutoConst(r) => {
                 let name = self.naming.auto_const_field(*r);

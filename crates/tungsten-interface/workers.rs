@@ -497,6 +497,22 @@ mod tests {
         })
     }
 
+    /// One name per input, program-wide: `off_<name>`, unique, and legal for anonymous inputs.
+    #[test]
+    fn offset_params_are_prefixed_and_unique() {
+        let mut p = empty();
+        let f = function(&mut p, VariableType::F64, ret(Expression::Double(1.0)));
+        let leaf = unit(&mut p, f, vec![]);
+        let [a, b, anon, anon2] = [0, 1, 2, 3].map(|_| input(&mut p, leaf, (1, 1, 1)));
+        p.density_inputs[a].name = Name::Named("x:y".into());
+        p.density_inputs[b].name = Name::Prefixed("x_y".into());
+        let i = build(&p);
+        assert_eq!(i.offset_param(a), "off_x_y");
+        assert_eq!(i.offset_param(b), "off_x_y_1");
+        assert_eq!(i.offset_param(anon), "off_input");
+        assert_eq!(i.offset_param(anon2), "off_input_1");
+    }
+
     /// Record types share a pool exactly when their names are equal.
     #[test]
     fn pools_are_keyed_by_ir_type() {

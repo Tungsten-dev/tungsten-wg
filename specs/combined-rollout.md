@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1 and 2A done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1 and 2A and step 6.1 of 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -182,12 +182,12 @@ Three separate steps, each green before the next.
 
 ### 6.1 Workers (M2, plus Rust's part of M5)
 
-- [ ] `BufferBounds` in `tungsten-interface` (§5.5), `.buffer_bounds(..)` on the Rust extension trait
-- [ ] Generated API (§3.1), pools and offsets (§4.2, §4.3), per-entry hosts (§4.4), reads and writes (§5.1, §5.2)
-- [ ] Remove the Rust items in §7
-- [ ] Test runtime records derive `Default`, and its handles are `Send + Sync`
-- [ ] Rust harness moves, compiling with `PerBuffer`
-- [ ] §8 rows for Rust: shared instances, shared helper reads, pools, host consts, concurrency, bounds modes, static
+- [x] `BufferBounds` in `tungsten-interface` (§5.5), `.buffer_bounds(..)` on the Rust extension trait
+- [x] Generated API (§3.1), pools and offsets (§4.2, §4.3), per-entry hosts (§4.4), reads and writes (§5.1, §5.2)
+- [x] Remove the Rust items in §7
+- [x] Test runtime records derive `Default`, and its handles are `Send + Sync`
+- [x] Rust harness moves, compiling with `PerBuffer`
+- [x] §8 rows for Rust: shared instances, shared helper reads, pools, host consts, concurrency, bounds modes, static
       assertion, records, large arrays, naming
 
 ### 6.2 Mappings (M3)
@@ -293,3 +293,32 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   keyword. The corpus uses other labels.
 - **Left for 2B.** The rule that a case with `OutOfFuel` at any refine step isn't sent to a backend (§8.3) only
   checks orchestrate today. The guard makes every refinement program a `GenFailed`, so it can't matter yet.
+
+**Phase 2B, step 6.1 (Rust workers).**
+
+- **Visibility.** `HostConsts`, `AutoConsts` and `InternalBuffers` are `pub(super)`, not private: the density module
+  is a sibling of the orchestration module and names them in its signatures. `Shared` is private, and the fields of
+  `Orchestration` and the workers are private.
+- **Offset names** come from `Interface::offset_param`, one name per input across the whole program (`off_<input>`,
+  or `off_input` for an anonymous one), so callers and callees agree without per-function maps. Body locals are
+  renamed around them.
+- **`rd`** is generated into the density module and reserved in `NamingRules::rust()`
+  (`naming::RUST_READ_HELPER`). Its panic message is `index out of bounds: ..`, which the test driver already
+  maps to `OutOfBounds`. Pool fields are named after the IR type (`f64s`, `pairs`, `f64x33s`) by
+  `tungsten_rust::pools`.
+- **Record zero** is `<R as Default>::default()` rather than `R::default()`, so a record without `Default` fails
+  with "the trait bound `R: Default` is not satisfied". Records with a `Vec3` or `Pos3` field need those to be
+  `Default` too, so the test runtime's `Vec3` and `Pos3` derive it. A `tungsten-mc` port needs the same
+  (`specs/workers.md` §11).
+- **Worker names** are reserved against the runtime and generated type names, plus every record and handle type
+  the program names. Factories are reserved against `new` and `clone`. Frontends and drivers get them from
+  `tungsten_rust::orchestration::rust_worker_names`.
+- **A unit reading an input it doesn't list** has no slot in its worker. On the low-level path, which skips
+  the checker, that is now a `BackendError::Codegen` before anything is generated.
+- **Pools of dead code.** `InternalBuffers` also gets a field for the element type of every density input in
+  the arena, so a dead helper that reads one still compiles.
+- **Tests.** The corpus rows are `corpus/workers/` and `corpus/entries/worker_names.tw`. They also pass on the old
+  Java and CUDA APIs, with no new `@knownfail`. Concurrency, bounds modes, the static assertion and the record
+  contract are in `tungsten-testsuite/tests/rust_workers.rs`. They build generated code with hand-written
+  drivers, and are skipped without `rustc` unless `TW_REQUIRE` lists `rust`. Under `Slab`, the out-of-range
+  read there returns the neighbouring input's value, which shows that `PerBuffer` really checks each input.

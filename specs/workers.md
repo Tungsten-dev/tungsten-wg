@@ -425,7 +425,10 @@ Not designed here. These fix what the later spec can rely on, so it doesn't need
 - `main.rs`'s per-thread `orchestrator_cloned` becomes one `Orchestration` plus `for_each_init(|| orch.<entry>_worker())`.
 - `PreliminarySurfaceCache` keeps its `RwLock<HashMap>`, but replaces `Mutex<Orchestration>` with a worker per calling
   thread (thread-local), which removes the lock contention. A triggered stage would later replace the hand-written cache.
-- Its runtime's handle types must be `Send + Sync`, and its records must be `Copy + Default`.
+- Its runtime's handle types must be `Send + Sync`, and its records must be `Copy + Default`. A record with a
+  `Vec3` or `Pos3` field can only derive `Default` if those implement it, so the runtime's `Vec3` and `Pos3`
+  need `Default` too (the test runtime derives it). The generated zero of a record is
+  `<R as Default>::default()`.
 - Java/JNI: `new Orchestration(AutoConsts.create(seed))` becomes `Orchestration.create(seed)` plus a worker per thread,
   and callers index `[0, <BASE>_LEN)` of the returned array.
 

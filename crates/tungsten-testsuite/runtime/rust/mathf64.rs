@@ -7,10 +7,11 @@
 //! Left out: everything Minecraft-specific (Perlin, Xoroshiro, `corner*`, structure weights,
 //! `preliminary_surface_*`) and `pow/floor/ceil`, which the registry externs replace with
 //! Java-semantics versions (see `api.rs`).
-//! Added here (not upstream): `Neg for Vec3`, and the re-exports at the bottom.
+//! Added here (not upstream): `Neg for Vec3`, `Default` on `Vec3` and `Pos3` (so records can
+//! derive it), and the re-exports at the bottom.
 #![allow(dead_code)]
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct Vec3 {
     pub x: f64,
     pub y: f64,
@@ -86,7 +87,7 @@ impl std::ops::Div for Vec3 {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct Pos3 {
     pub x: i32,
     pub y: i32,

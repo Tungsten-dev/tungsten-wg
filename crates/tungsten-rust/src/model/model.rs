@@ -23,13 +23,26 @@ pub struct RCL<'m> {
     pub import_statements: Vec<String>,
     pub constants: Vec<Constant<'m>>,
     pub impls: Vec<Impl<'m>>,
+    /// Items printed verbatim after everything else, e.g. a `const _: () = ..;` assertion.
+    pub raw_items: Vec<String>,
 }
 
-/// An `impl` block; all methods are emitted as `pub`.
+/// An `impl` block. Methods of an inherent impl are emitted as `pub`, those of a trait impl
+/// without a visibility.
 #[derive(Debug, Clone)]
 pub struct Impl<'m> {
     pub type_name: String,
+    /// `impl <trait> for <type_name>` when set.
+    pub trait_name: Option<String>,
+    /// `pub const <name>: <type> = <value>;`, before the methods.
+    pub consts: Vec<(String, Type, Expression<'m>)>,
     pub methods: Vec<FunctionRef<'m>>,
+}
+
+impl<'m> Impl<'m> {
+    pub fn new(type_name: impl Into<String>) -> Self {
+        Impl { type_name: type_name.into(), trait_name: None, consts: vec![], methods: vec![] }
+    }
 }
 
 /// How a method receives `self`.
@@ -67,6 +80,10 @@ pub struct Struct {
     pub fields: Vec<(String, Type)>,
     pub is_repr_c: bool,
     pub derivations: Vec<String>,
+    /// Printed before `struct`, e.g. `"pub "`, `"pub(super) "` or `""`.
+    pub visibility: &'static str,
+    /// Whether fields are printed `pub`.
+    pub public_fields: bool,
 }
 
 /// Variable with type information
@@ -99,6 +116,7 @@ pub enum Type {
     F64,
     Bool,
     Void,
+    Usize,
 
     // Composite types
     Pointer(Box<Type>),
@@ -107,6 +125,8 @@ pub enum Type {
     Box(Box<Type>),
     Struct(String),
     Array(Box<Type>, usize),
+    /// `[T]`, behind a `Box` or reference.
+    Slice(Box<Type>),
     ArrayRef(Box<Type>, usize),
     MutArrayRef(Box<Type>, usize),
     Tuple(Vec<Type>),
@@ -148,6 +168,8 @@ impl std::fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::StaticStr => write!(f, "&'static str"),
             Type::Void => write!(f, "()"),
+            Type::Usize => write!(f, "usize"),
+            Type::Slice(t) => write!(f, "[{}]", t),
             Type::Pointer(t) => write!(f, "*{}", t),
             Type::Ref(t) => write!(f, "&{}", t),
             Type::MutRef(t) => write!(f, "&mut {}", t),
@@ -250,6 +272,7 @@ pub enum Expression<'m> {
     I8Literal(i8),
     I32Literal(i32),
     I64Literal(i64),
+    UsizeLiteral(usize),
     F32Literal(f32),
     F64Literal(f64),
     BoolLiteral(bool),
@@ -283,6 +306,22 @@ pub enum Expression<'m> {
         return_type: Type,
         arguments: Vec<Expression<'m>>,
     },
+
+    /// `receiver.method(arguments)`
+    MethodCall {
+        receiver: Box<Expression<'m>>,
+        method: String,
+        arguments: Vec<Expression<'m>>,
+    },
+
+    /// `vec![element; count]`
+    VecRepeat {
+        element: Box<Expression<'m>>,
+        count: Box<Expression<'m>>,
+    },
+
+    /// `unsafe { inner }`
+    Unsafe(Box<Expression<'m>>),
 
     // Field/member access
     Field {
@@ -425,6 +464,8 @@ impl Struct {
             fields: Vec::new(),
             is_repr_c: false,
             derivations: Vec::new(),
+            visibility: "pub ",
+            public_fields: true,
         }
     }
 
@@ -452,6 +493,7 @@ impl<'m> RCL<'m> {
             import_statements: Vec::new(),
             constants: Vec::new(),
             impls: Vec::new(),
+            raw_items: Vec::new(),
         }
     }
 

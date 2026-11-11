@@ -4,15 +4,15 @@
 //! module `t_<hash>` per test (the backend output plus a generated `driver`), and a `main.rs`
 //! that dispatches on the test id given as the first argument.
 
-use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tungsten_interface::naming::{entry_method_names, sanitize_name};
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::naming::{WorkerNames, sanitize_name};
+use tungsten_interface::{Backend, BufferBounds, Interface};
 use tungsten_ir::model::{HostInput, OptimizedProgram};
 use tungsten_ir::VariableType;
 use tungsten_rust::backend::{RustBackend, RustConfig};
+use tungsten_rust::orchestration::rust_worker_names;
 
 use super::protocol::TestIo;
 use crate::env::TestEnv;
@@ -62,12 +62,13 @@ fn rust_type(t: &VariableType) -> String {
     }
 }
 
-/// `records.rs`: one `#[repr(C)]` `Copy` struct per record of the registry.
+/// `records.rs`: one `#[repr(C)]` `Copy + Default` struct per record of the registry (the runtime
+/// contract of the Rust backend).
 pub fn records_source(spec: &RegistrySpec) -> String {
     let mut s = String::from("#![allow(dead_code)]\nuse crate::mathf64::{Pos3, Vec3};\n\n");
     for r in &spec.records {
         let name = sanitize_name(&r.name);
-        writeln!(s, "#[repr(C)]\n#[derive(Clone, Copy, Debug)]\npub struct {name} {{").unwrap();
+        writeln!(s, "#[repr(C)]\n#[derive(Clone, Copy, Debug, Default)]\npub struct {name} {{").unwrap();
         for (f, t) in &r.fields {
             writeln!(s, "    pub {f}: {},", rust_type(t)).unwrap();
         }
@@ -141,11 +142,12 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, depth: usize, sp
     }
 }
 
-/// The `driver` module of one test.
+/// The `driver` module of one test: one `Orchestration` per case, and one worker per entry, each
+/// given only its own entry's hosts.
 pub fn driver_source(
     program: &OptimizedProgram,
     interface: &Interface,
-    method_names: &[String],
+    workers: &[WorkerNames],
     io: &TestIo,
     env: &TestEnv,
 ) -> Result<String, String> {
@@ -158,18 +160,29 @@ pub fn driver_source(
     for (i, (_, t)) in io.params.iter().enumerate() {
         writeln!(s, "        let ap{i} = {};", decode_expr(t, spec)).unwrap();
     }
-    s.push_str("        let host_consts = HostConsts {\n");
+    // Hosts arrive in arena order; decode all of them, then bind each entry's own.
+    let mut statics = vec![];
     for (r, h) in program.host_inputs.iter() {
         if let HostInput::Static { t, .. } = h {
-            writeln!(s, "            {}: {},", interface.host_field(r), decode_expr(t, spec)).unwrap();
+            writeln!(s, "        let h{} = {};", statics.len(), decode_expr(t, spec)).unwrap();
+            statics.push(r);
         }
     }
-    s.push_str("        };\n");
     let creation_args: Vec<String> = (0..io.params.len()).map(|i| format!("ap{i}")).collect();
-    writeln!(s, "        let mut orch = Orchestration::new({});", creation_args.join(", ")).unwrap();
+    writeln!(s, "        let orch = Orchestration::new({});", creation_args.join(", ")).unwrap();
     s.push_str("        let mut w = crate::proto::Writer::new();\n");
-    for (e, name) in io.entries.iter().zip(method_names) {
-        writeln!(s, "        {{ let res = orch.{name}(origin, &host_consts);").unwrap();
+    for (i, (e, names)) in io.entries.iter().zip(workers).enumerate() {
+        let fields: Vec<String> = interface
+            .entry_hosts(i)
+            .iter()
+            .map(|h| {
+                let k = statics.iter().position(|x| x == h).expect("entry host is static");
+                format!("{}: h{k}", interface.host_field(*h))
+            })
+            .collect();
+        writeln!(s, "        {{ let hc = {} {{ {} }};", names.host_consts, fields.join(", ")).unwrap();
+        writeln!(s, "        let mut wk = orch.{}();", names.factory).unwrap();
+        s.push_str("        let res = wk.run(origin, &hc);\n");
         if e.cells() == 1 {
             encode_stmts(&mut s, "res", &e.ty, 0, spec);
         } else {
@@ -184,16 +197,26 @@ pub fn driver_source(
 }
 
 /// Module source of one test: runtime imports, both backend modules and the driver. Panics in
-/// the backend (it panics on types it can't derive) become an `Err`.
+/// the backend (it panics on types it can't derive) become an `Err`. Corpus tests compile with
+/// `BufferBounds::PerBuffer`, so bad indices fail where the interpreter's do.
 pub fn generate_test(program: &OptimizedProgram, env: &TestEnv) -> Result<String, String> {
+    generate_test_with(program, env, BufferBounds::PerBuffer)
+}
+
+/// [`generate_test`] with another bounds mode.
+pub fn generate_test_with(
+    program: &OptimizedProgram,
+    env: &TestEnv,
+    bounds: BufferBounds,
+) -> Result<String, String> {
     let io = TestIo::from_program(program)?;
     io.check_encodable()?;
     catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
-        let backend = RustBackend::new(RustConfig::default());
+        let backend = RustBackend::new(RustConfig { buffer_bounds: bounds, ..RustConfig::default() });
         let rules = backend.naming_rules();
         let interface = Interface::build(program, &rules);
         let out = backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
-        let names = entry_method_names(program, &rules, HashSet::from(["new".to_string()]));
+        let names = rust_worker_names(program, &rules);
         let driver = driver_source(program, &interface, &names, &io, env)?;
         Ok(format!(
             "use crate::mathf64::*;\nuse crate::utilsf64::*;\n\n{}\n\n{}",

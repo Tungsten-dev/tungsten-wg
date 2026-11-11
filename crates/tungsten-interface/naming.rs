@@ -158,10 +158,13 @@ pub const CUDA_RESERVED: &[&str] = &[
     "p", "ctx", "local", "origin", "buffers", "auto_constants", "host_consts", "r", "config",
 ];
 
+/// The checked buffer read the Rust backend generates next to the density functions.
+pub const RUST_READ_HELPER: &str = "rd";
+
 impl NamingRules {
     pub fn rust() -> Self {
         Self {
-            reserved: RUST_KEYWORDS.iter().map(|s| s.to_string()).collect(),
+            reserved: RUST_KEYWORDS.iter().chain([&RUST_READ_HELPER]).map(|s| s.to_string()).collect(),
             sanitize: sanitize_name,
         }
     }

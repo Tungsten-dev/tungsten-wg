@@ -1,0 +1,668 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                0,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                1,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                2,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                3,
+            ),
+            inputs: [
+                InputId(
+                    0,
+                ),
+                InputId(
+                    1,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                4,
+            ),
+            inputs: [
+                InputId(
+                    2,
+                ),
+                InputId(
+                    3,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                5,
+            ),
+            inputs: [
+                InputId(
+                    0,
+                ),
+                InputId(
+                    1,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [],
+            ret: F64,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Cast {
+                            to: F64,
+                            operand: Field {
+                                base: Ambient(
+                                    Pos3,
+                                ),
+                                sel: Pos3(
+                                    X,
+                                ),
+                                ty: I32,
+                            },
+                        },
+                        right: Lit(
+                            F64(
+                                4598175219545276416,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: I32,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Field {
+                            base: Ambient(
+                                Pos3,
+                            ),
+                            sel: Pos3(
+                                X,
+                            ),
+                            ty: I32,
+                        },
+                        right: Lit(
+                            I32(
+                                7,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Bool,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Equal,
+                        left: Field {
+                            base: Ambient(
+                                Pos3,
+                            ),
+                            sel: Pos3(
+                                X,
+                            ),
+                            ty: I32,
+                        },
+                        right: Lit(
+                            I32(
+                                1,
+                            ),
+                        ),
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Record(
+                RecordId(
+                    0,
+                ),
+            ),
+            hosts: [],
+            body: [
+                Return(
+                    MakeRecord {
+                        record: RecordId(
+                            0,
+                        ),
+                        fields: [
+                            FieldInit {
+                                field: 0,
+                                value: Density {
+                                    input: InputId(
+                                        0,
+                                    ),
+                                    index: None,
+                                },
+                            },
+                            FieldInit {
+                                field: 1,
+                                value: Density {
+                                    input: InputId(
+                                        1,
+                                    ),
+                                    index: None,
+                                },
+                            },
+                        ],
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Record(
+                RecordId(
+                    0,
+                ),
+            ),
+            hosts: [],
+            body: [
+                If {
+                    cond: Density {
+                        input: InputId(
+                            2,
+                        ),
+                        index: None,
+                    },
+                    then_branch: [
+                        Return(
+                            MakeRecord {
+                                record: RecordId(
+                                    0,
+                                ),
+                                fields: [
+                                    FieldInit {
+                                        field: 0,
+                                        value: Field {
+                                            base: Density {
+                                                input: InputId(
+                                                    3,
+                                                ),
+                                                index: None,
+                                            },
+                                            sel: Record(
+                                                RecordId(
+                                                    0,
+                                                ),
+                                                0,
+                                            ),
+                                            ty: F64,
+                                        },
+                                    },
+                                    FieldInit {
+                                        field: 1,
+                                        value: Binary {
+                                            op: Add,
+                                            left: Field {
+                                                base: Density {
+                                                    input: InputId(
+                                                        3,
+                                                    ),
+                                                    index: None,
+                                                },
+                                                sel: Record(
+                                                    RecordId(
+                                                        0,
+                                                    ),
+                                                    1,
+                                                ),
+                                                ty: I32,
+                                            },
+                                            right: Lit(
+                                                I32(
+                                                    100,
+                                                ),
+                                            ),
+                                        },
+                                    },
+                                ],
+                            },
+                        ),
+                    ],
+                    else_branch: [],
+                },
+                Return(
+                    Density {
+                        input: InputId(
+                            3,
+                        ),
+                        index: None,
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: F64,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Density {
+                            input: InputId(
+                                0,
+                            ),
+                            index: None,
+                        },
+                        right: Cast {
+                            to: F64,
+                            operand: Density {
+                                input: InputId(
+                                    1,
+                                ),
+                                index: None,
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [],
+    tables: [],
+    inputs: [
+        InputDecl {
+            source: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+        InputDecl {
+            source: UnitId(
+                1,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+        InputDecl {
+            source: UnitId(
+                2,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+        InputDecl {
+            source: UnitId(
+                3,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    entries: [
+        Entry {
+            unit: UnitId(
+                4,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+        Entry {
+            unit: UnitId(
+                5,
+            ),
+            dims: Dims {
+                x: 2,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        0,
+                    ),
+                ),
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        1,
+                    ),
+                ),
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

@@ -142,15 +142,19 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   at a time. A reported failure ends the process, since device errors are sticky.
 - **Vendored runtime.** `runtime/rust/mathf64.rs` is vendored from `tungsten-frontends/tungsten-mc` (commit
   88b88ae of that repo; adds `Neg for Vec3`), except `min`/`max`/`floor`/`ceil`/`pow`, whose registry versions
-  have Java semantics. Upstream's `make_boxed` returns uninitialised memory, ours is zero-initialised. The Java
+  have Java semantics, and `Vec3` and `Pos3` also derive `Default`. Generated code no longer calls `make_boxed`, so the
+  runtime has none. The Java
   `Vec3`, `Pos3`, `Config` and `PositionIterator` come from `tungsten-diff-harness/java_wrapper/runtime`; its
   `Helpers` and samplers are real Minecraft noise, so the suite has its own. The CUDA vector operators, `Array`,
   `Config`, `PositionIterator` and saturating casts follow `../cuda-density/src/tw/`; `tw::f2i8` clamps.
   The pure toy-table functions in `utilsf64.rs` are named `perm_lookup` and `sample_state`, so glob imports of
   generated code can't see two `perm_get`/`sampler_sample`.
-- **Naming outside the crate.** The drivers call `orchestrate_<entry>`, whose names come from
-  `tungsten_interface::naming::{entry_method_names, entry_base_names}`, shared with the backends. Generated
-  output of all three backends was diffed before and after the extraction and is unchanged.
+- **Naming outside the crate.** The Java and CUDA drivers call `orchestrate_<entry>` and `enqueue_<base>`, whose
+  names come from `tungsten_interface::naming::{entry_method_names, entry_base_names}`, shared with the backends.
+  The Rust driver creates one `Orchestration` per case and one worker per entry, with the names from
+  `tungsten_rust::orchestration::rust_worker_names`, and binds only that entry's hosts (`specs/workers.md`).
+  `tests/rust_workers.rs` covers what the corpus can't: threads, the bounds modes, the `Send + Sync`
+  assertion and records without `Default`.
 - **What is not covered yet.** The random program generator and decision traces (see below).
 
 ## Rules and contracts

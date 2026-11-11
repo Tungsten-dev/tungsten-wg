@@ -155,6 +155,13 @@ impl RustCodeGenerator {
             p.line("");
         }
 
+        for item in &icl.raw_items {
+            for line in item.lines() {
+                p.line(line);
+            }
+            p.line("");
+        }
+
         p.dedent();
         p.line("}");
 
@@ -170,13 +177,16 @@ impl RustCodeGenerator {
             p.line(&format!("#[derive({})]", struct_def.derivations.join(", ")));
         }
 
-        p.push("pub struct ");
+        p.push(struct_def.visibility);
+        p.push("struct ");
         p.push(&struct_def.name);
         p.line(" {");
 
         p.indent();
         for (field_name, field_type) in &struct_def.fields {
-            p.push("pub ");
+            if struct_def.public_fields {
+                p.push("pub ");
+            }
             p.push(field_name);
             p.push(": ");
             p.push(&self.type_to_rust_string(field_type));
@@ -190,14 +200,28 @@ impl RustCodeGenerator {
     /// Generate Rust code for an impl block
     fn generate_impl(&self, p: &mut Printer, imp: &icl::Impl<'_>) {
         p.push("impl ");
+        if let Some(t) = &imp.trait_name {
+            p.push(t);
+            p.push(" for ");
+        }
         p.push(&imp.type_name);
         p.line(" {");
         p.indent();
+        for (name, t, value) in &imp.consts {
+            p.push("pub const ");
+            p.push(name);
+            p.push(": ");
+            p.push(&self.type_to_rust_string(t));
+            p.push(" = ");
+            let value = self.expression_to_string_with_printer(p, value);
+            p.push(&value);
+            p.line(";");
+        }
         for (i, method) in imp.methods.iter().enumerate() {
-            if i > 0 {
+            if i > 0 || !imp.consts.is_empty() {
                 p.line("");
             }
-            self.generate_function(p, method, true);
+            self.generate_function(p, method, imp.trait_name.is_none());
         }
         p.dedent();
         p.line("}");
@@ -488,6 +512,23 @@ impl RustCodeGenerator {
             icl::Expression::I8Literal(val) => format!("{}_i8", val),
             icl::Expression::I32Literal(val) => format!("{}_i32", val),
             icl::Expression::I64Literal(val) => format!("{}_i64", val),
+            icl::Expression::UsizeLiteral(val) => format!("{}_usize", val),
+            icl::Expression::MethodCall { receiver, method, arguments } => {
+                let receiver = self.expression_to_string_with_printer(p, receiver);
+                let args: Vec<String> = arguments
+                    .iter()
+                    .map(|a| self.expression_to_string_with_printer(p, a))
+                    .collect();
+                format!("{}.{}({})", receiver, method, args.join(", "))
+            }
+            icl::Expression::VecRepeat { element, count } => format!(
+                "vec![{}; {}]",
+                self.expression_to_string_with_printer(p, element),
+                self.expression_to_string_with_printer(p, count)
+            ),
+            icl::Expression::Unsafe(inner) => {
+                format!("unsafe {{ {} }}", self.expression_to_string_with_printer(p, inner))
+            }
             icl::Expression::F32Literal(val) => self.format_f32_literal(*val),
             icl::Expression::F64Literal(val) => self.format_f64_literal(*val),
             icl::Expression::BoolLiteral(val) => format!("{}", val),
@@ -685,6 +726,8 @@ impl RustCodeGenerator {
             icl::Type::Bool => "bool".to_string(),
             icl::Type::StaticStr => "&'static str".to_string(),
             icl::Type::Void => "()".to_string(),
+            icl::Type::Usize => "usize".to_string(),
+            icl::Type::Slice(inner) => format!("[{}]", self.type_to_rust_string(inner)),
             icl::Type::Ref(inner) => format!("&{}", self.type_to_rust_string(inner)),
             icl::Type::MutRef(inner) => format!("&mut {}", self.type_to_rust_string(inner)),
             icl::Type::Box(inner) => format!("Box<{}>", self.type_to_rust_string(inner)),

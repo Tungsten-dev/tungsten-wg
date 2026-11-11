@@ -1,7 +1,8 @@
 //! What generated code calls by plain name: the registry externs (`registry.toml`), the toy
-//! tables (crate README, "Rules and contracts, Toy tables") and `make_boxed`. Re-exported through `mathf64`, so the two hardcoded glob
+//! tables (crate README, "Rules and contracts, Toy tables"). Re-exported through `mathf64`, so the two hardcoded glob
 //! imports of the generated code are enough. Thin wrappers over `externs.rs` and `utilsf64.rs`,
-//! which the interpreter shares.
+//! which the interpreter shares. Handle types are plain data, so `Send + Sync` (the Rust
+//! backend's runtime contract).
 #![allow(dead_code)]
 
 use crate::externs as x;
@@ -63,23 +64,6 @@ pub fn make_i32(v: i64) -> i32 {
 
 pub fn make_f32(v: f64) -> f32 {
     v as f32
-}
-
-/// Zero-initialised, so buffers are deterministic. Unlike the upstream runtime, which hands out
-/// uninitialised memory. Never builds `T` on the stack.
-pub fn make_boxed<T>() -> Box<T> {
-    use std::alloc::{Layout, alloc_zeroed, handle_alloc_error};
-    let layout = Layout::new::<T>();
-    unsafe {
-        if layout.size() == 0 {
-            return Box::new(std::mem::zeroed());
-        }
-        let p = alloc_zeroed(layout) as *mut T;
-        if p.is_null() {
-            handle_alloc_error(layout);
-        }
-        Box::from_raw(p)
-    }
 }
 
 pub fn perm_get(t: &PerlinNoiseSampler, i: i32) -> i32 {

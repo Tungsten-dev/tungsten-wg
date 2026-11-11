@@ -1,0 +1,61 @@
+// One worker with four pools: f64, i32, bool and a record (specs/workers.md §8). `top` is a
+// record-typed entry, and `sum` reads two of the same inputs from a worker with two pools.
+program {
+    fn f_main() -> f64 {
+        return ((ambient(pos3).x as f64) + 0.25);
+    }
+    unit fu {
+        main f_main;
+    }
+    input f_in = fu @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn i_main() -> i32 {
+        return (ambient(pos3).x + 7);
+    }
+    unit iu {
+        main i_main;
+    }
+    input i_in = iu @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn b_main() -> bool {
+        return (ambient(pos3).x == 1);
+    }
+    unit bu {
+        main b_main;
+    }
+    input b_in = bu @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn p_main() -> extern Pair {
+        return new Pair { a: density(f_in), b: density(i_in) };
+    }
+    unit pu {
+        main p_main;
+        inputs [f_in, i_in];
+    }
+    input p_in = pu @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+
+    fn top_main() -> extern Pair {
+        if density(b_in) {
+            return new Pair { a: density(p_in).a, b: (density(p_in).b + 100) };
+        }
+        return density(p_in);
+    }
+    unit top {
+        main top_main;
+        inputs [b_in, p_in];
+    }
+
+    fn sum_main() -> f64 {
+        return (density(f_in) + (density(i_in) as f64));
+    }
+    unit sum {
+        main sum_main;
+        inputs [f_in, i_in];
+    }
+
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry sum @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" top = [new Pair { a: 0.25, b: 7 }, new Pair { a: 1.25, b: 108 }]
+@expect "c" sum = [7.25, 9.25]
