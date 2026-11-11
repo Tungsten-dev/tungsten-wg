@@ -1,5 +1,4 @@
 // Expand: `*` on y repeats the input's only layer for every reader layer.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> i32 {
         let c: pos3 = ambient(pos3);

@@ -4,16 +4,16 @@ Host inputs, permutation tables and density buffers are read through the uniform
 arithmetic wraps and shifts are masked (Java semantics), and float -> int casts saturate.
 */
 
-use tungsten_interface::Instance;
 use tungsten_interface::naming::cuda_sanitize;
-use tungsten_ir::model::{AmbientKind, BinaryOperator, ConstExpr, Expression, UnaryOperator, VariableType};
+use tungsten_ir::model::{AmbientKind, AxisFactor, BinaryOperator, ConstExpr, DensityMapping, Expression, UnaryOperator, VariableType};
 
 use super::converter::FunctionConverter;
 use super::types::{
     IntWidth, OperandKind, convert_binary_op, device_type, is_float, is_integer,
     is_pointer, is_scalar, is_vector, operand_kind, unit_return_type,
 };
-use super::{BUFFER_LAYOUT, PARAM_CTX, PARAM_POS, uniform_arguments};
+use super::mapping::{cells, expand_index, read_pointer};
+use super::{PARAM_CTX, PARAM_POS, uniform_arguments};
 use crate::model as cuda;
 
 use cuda::Expression as C;
@@ -138,8 +138,12 @@ impl<'a> FunctionConverter<'a> {
                 self.called.push(*function);
                 let program = self.program;
                 let callee = &program.functions[*function];
-                // Uniform arguments first, then the helper's own parameters.
+                // Uniform arguments first, then the callee's offsets (the caller's own offset
+                // parameters, since `input_params` is transitive), then its own parameters.
                 let mut args = uniform_arguments();
+                for &d in self.naming.input_params(*function) {
+                    args.push(C::name(self.offset(d)));
+                }
                 for (p, arg) in callee.parameters.iter().zip(parameters) {
                     args.push(self.convert_to_type(arg, &callee.variables[*p].t));
                 }
@@ -157,15 +161,33 @@ impl<'a> FunctionConverter<'a> {
                 let program = self.program;
                 let di = &program.density_inputs[*input];
                 let element = device_type(unit_return_type(program, di.density_function));
-                let buffer = self.naming.buffer_field(&Instance::from_input(di)).to_string();
-                let (dx, dy, dz) = di.dimensions;
-                let index = match index {
-                    Some(i) => self.convert_to_type(i, &VariableType::I32),
-                    None if di.dimensions == (1, 1, 1) => C::IntLit(0),
-                    None => C::call("tw::index", vec![C::name(PARAM_POS)]),
+                let pointer = buffer_pointer(
+                    element,
+                    C::field(C::name(PARAM_CTX), "buffers"),
+                    C::name(self.offset(*input)),
+                );
+                let pos = C::field(C::name(PARAM_POS), "pos");
+                let index = match (index, di.mapping) {
+                    (Some(i), _) => self.convert_to_type(i, &VariableType::I32),
+                    // A lerp reads several cells, so a helper does all of it (§5.2).
+                    (None, DensityMapping::Lerp(_)) => {
+                        let name = self.naming.lerp_helper(di);
+                        let helper = self.naming.lerp_helpers().iter().find(|h| h.name == name);
+                        self.used_lerps.push(helper.expect("lerp_helper found it").clone());
+                        return C::call(name, vec![pointer, pos]);
+                    }
+                    (None, DensityMapping::Expand(factors)) => {
+                        if factors.iter().all(|f| *f == AxisFactor::Repeat) {
+                            C::IntLit(0)
+                        } else {
+                            expand_index(di, factors, &pos)
+                        }
+                    }
+                    (None, DensityMapping::Identity) if di.dimensions == (1, 1, 1) => C::IntLit(0),
+                    (None, DensityMapping::Identity) => C::call("tw::index", vec![C::name(PARAM_POS)]),
                 };
-                let index = self.checked_index(index, (dx * dy * dz) as usize);
-                C::index(buffer_pointer(element, C::field(C::name(PARAM_CTX), "buffers"), &buffer), index)
+                let location = self.function_name.clone();
+                read_pointer(self.config.effective_bounds(), pointer, cells(di.dimensions), index, &location)
             }
             Expression::AutoConst(r) => match &self.program.auto_consts[*r].t {
                 VariableType::Handle(_) => C::address_of(C::arrow(
@@ -310,7 +332,11 @@ impl<'a> FunctionConverter<'a> {
     /// Whether `e` converts to a C++ lvalue whose address may be taken.
     fn is_lvalue(&self, e: &Expression) -> bool {
         match e {
-            Expression::Variable(_) | Expression::DensityVariable(..) => true,
+            Expression::Variable(_) => true,
+            // A lerp read computes its value, so there's no cell to point at.
+            Expression::DensityVariable(input, index) => {
+                index.is_some() || !matches!(self.program.density_inputs[*input].mapping, DensityMapping::Lerp(_))
+            }
             Expression::Field { base, .. } => {
                 self.is_lvalue(base) || self.derive_type(base).as_ref().is_some_and(is_pointer)
             }
@@ -368,10 +394,6 @@ impl<'a> FunctionConverter<'a> {
 }
 
 /// `tw::buffer<T>(base, BufferLayout::field)`: pointer to an instance's buffer in the slab.
-pub fn buffer_pointer(element: cuda::Type, base: cuda::Expression, field: &str) -> cuda::Expression {
-    C::template_call(
-        "tw::buffer",
-        vec![element],
-        vec![base, C::Name(format!("{}::{}", BUFFER_LAYOUT, field))],
-    )
+pub fn buffer_pointer(element: cuda::Type, base: cuda::Expression, offset: cuda::Expression) -> cuda::Expression {
+    C::template_call("tw::buffer", vec![element], vec![base, offset])
 }

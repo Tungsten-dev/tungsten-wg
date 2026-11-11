@@ -1,6 +1,5 @@
 // March: computing a volume one slice at a time, top-down, gives the same bits as the full 3D entry.
 // `tests/marched_slices.rs` compares every slice with `full`, by bits; the expectations here are spot checks.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn coarse_main() -> f64 {
         let y: i32 = ambient(pos3).y;

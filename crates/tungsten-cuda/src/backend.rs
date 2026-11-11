@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use tungsten_interface::naming::{NamingRules, cuda_sanitize};
-use tungsten_interface::{Backend, BackendError, Compiler, Interface, OrchestrationCodegen};
+use tungsten_interface::{Backend, BackendError, BufferBounds, Compiler, Interface, OrchestrationCodegen};
 use tungsten_ir::model::OptimizedProgram;
 
 use crate::{CudaCodegen, TransformCudaOrchestration};
@@ -92,6 +92,10 @@ pub struct CudaConfig {
     /// Emit bounds and division checks (`TW_CHECK_INDEX` / `TW_CHECK_DIV`).
     pub debug_checks: bool,
     pub inline_policy: InlinePolicy,
+    /// How reads of density inputs are checked (`specs/workers.md` §5.1). `None` follows
+    /// `debug_checks`: `PerBuffer` when it is on, `Unchecked` when it is off. `Slab` has no slab
+    /// length to check against in code shared by workers, so it generates the same code as `Unchecked`.
+    pub buffer_bounds: Option<BufferBounds>,
 }
 
 impl Default for CudaConfig {
@@ -109,11 +113,18 @@ impl Default for CudaConfig {
             host_consts_ring: 2,
             debug_checks: false,
             inline_policy: InlinePolicy::Auto,
+            buffer_bounds: None,
         }
     }
 }
 
 impl CudaConfig {
+    /// The bounds mode in effect: the explicit one, else `PerBuffer` with `debug_checks` and
+    /// `Unchecked` without.
+    pub fn effective_bounds(&self) -> BufferBounds {
+        self.buffer_bounds.unwrap_or(if self.debug_checks { BufferBounds::PerBuffer } else { BufferBounds::Unchecked })
+    }
+
     pub fn to_backend(self) -> CudaBackend {
         CudaBackend::new(self)
     }
@@ -227,7 +238,6 @@ impl Backend for CudaBackend {
     }
 
     fn generate(&self, program: &OptimizedProgram, interface: &Interface) -> Result<CudaOutput, BackendError> {
-        tungsten_interface::check_implemented(program, &[])?;
         let naming_rules = self.naming_rules();
         let device = CudaCodegen::new(program, interface, &naming_rules, &self.config);
         let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &naming_rules);
@@ -274,6 +284,8 @@ pub trait CudaCompile: Sized {
     /// The emitted qualifier, not the IR inliner.
     fn inline_policy(self, p: InlinePolicy) -> Self;
     fn namespace(self, ns: impl Into<String>) -> Self;
+    /// Explicit bounds mode; without it, `debug_checks` decides (see [`CudaConfig::buffer_bounds`]).
+    fn buffer_bounds(self, b: BufferBounds) -> Self;
 }
 
 impl CudaCompile for Compiler<CudaBackend> {
@@ -304,6 +316,11 @@ impl CudaCompile for Compiler<CudaBackend> {
 
     fn namespace(mut self, ns: impl Into<String>) -> Self {
         self.backend_mut().config_mut().namespace = ns.into();
+        self
+    }
+
+    fn buffer_bounds(mut self, b: BufferBounds) -> Self {
+        self.backend_mut().config_mut().buffer_bounds = Some(b);
         self
     }
 }

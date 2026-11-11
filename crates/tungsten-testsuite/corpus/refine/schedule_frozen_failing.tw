@@ -1,5 +1,4 @@
 // Schedule: a failing frozen buffer fails orchestrate, even though no entry reads it there.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn f_main() -> i32 { return (1 / 0); }
     unit fu { main f_main; }

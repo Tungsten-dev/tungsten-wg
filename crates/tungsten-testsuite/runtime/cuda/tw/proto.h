@@ -22,6 +22,7 @@ struct Reader {
     bool b() { return take<unsigned char>() != 0; }
     signed char i8() { return take<signed char>(); }
     int i32() { return take<int>(); }
+    unsigned u32() { return take<unsigned>(); }
     long long i64() { return take<long long>(); }
     unsigned long long u64() { return take<unsigned long long>(); }
     float f32() { return take<float>(); }
@@ -49,14 +50,20 @@ inline bool write_all(const unsigned char* d, size_t n) {
     return std::fwrite(d, 1, n, stdout) == n && std::fflush(stdout) == 0;
 }
 
-/// Reads requests of `request_len` bytes from stdin until EOF and answers each on stdout. `run`
+/// Reads requests from stdin until EOF and answers each on stdout. A request is `request_len`
+/// bytes, which end with the `steps` count, followed by that many steps of `step_len` bytes. `run`
 /// returns false with a message on a CUDA error. Such an error is sticky, so the process answers
 /// with a failure and exits; the harness resumes in a new process (crate README, "Processes").
-inline int serve(size_t request_len, bool (*run)(Reader&, Writer&, std::string&)) {
+inline int serve(size_t request_len, size_t step_len, bool (*run)(Reader&, Writer&, std::string&)) {
     std::vector<unsigned char> req(request_len ? request_len : 1);
     for (;;) {
         size_t got = request_len ? std::fread(req.data(), 1, request_len, stdin) : 0;
         if (got != request_len) return 0;
+        unsigned steps = 0;
+        if (request_len >= 4) std::memcpy(&steps, req.data() + request_len - 4, 4);
+        const size_t tail = (size_t)steps * step_len;
+        req.resize(request_len + tail + 1);
+        if (tail && std::fread(req.data() + request_len, 1, tail, stdin) != tail) return 0;
         Reader r{req.data()};
         Writer w;
         std::string err;
@@ -71,6 +78,7 @@ inline int serve(size_t request_len, bool (*run)(Reader&, Writer&, std::string&)
             write_all(f.data(), f.size());
             _exit(3);
         }
+        req.resize(request_len ? request_len : 1);
     }
 }
 

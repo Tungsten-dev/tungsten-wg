@@ -20,6 +20,7 @@
 //! - `converter`: per-function state (variables, type derivation, warnings).
 //! - `expression` / `statement`: body conversion.
 //! - `function`: density functions, helpers, constants and kernels.
+//! - `mapping`: buffer reads, `Expand` indices and lerp helpers.
 //! - `launch`: block and grid shape per instance.
 //! - `orchestration`: `interface.cuh`, `orchestration.h`, `orchestration.cu`.
 //!
@@ -29,7 +30,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::naming::NamingRules;
-use tungsten_interface::{DeviceCodegen, Instance, Interface};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
 
 use crate::model as cuda;
@@ -40,6 +41,7 @@ pub mod converter;
 pub mod expression;
 pub mod function;
 pub mod launch;
+pub mod mapping;
 pub mod model;
 pub mod orchestration;
 pub mod statement;
@@ -56,7 +58,6 @@ pub const POSITION_ITERATOR_TYPE: &str = "tw::PositionIterator";
 pub const CTX_STRUCT: &str = "Ctx";
 pub const AUTO_CONSTS_STRUCT: &str = "AutoConsts";
 pub const DEVICE_HOST_CONSTS_STRUCT: &str = "DeviceHostConsts";
-pub const BUFFER_LAYOUT: &str = "BufferLayout";
 /// Namespace of the device code inside the configured namespace.
 pub const DEVICE_NAMESPACE: &str = "dev";
 
@@ -98,6 +99,17 @@ fn namespace_names(source: &OptimizedProgram, naming: &Interface, rules: &Naming
         names.insert(kernel_body_name(naming, inst));
         names.insert(kernel_symbol(config, naming, inst));
     }
+    for h in naming.lerp_helpers() {
+        names.insert(h.name.clone());
+    }
+    for r in 0..source.refinements.len() {
+        for run in naming.refine_waves(r).iter().flatten() {
+            let k = function::Kernel::of_run(naming, run);
+            names.insert(k.base.clone());
+            names.insert(k.body_name());
+            names.insert(k.symbol(config));
+        }
+    }
     let main_functions: HashSet<_> = source
         .compute_units
         .iter()
@@ -131,6 +143,8 @@ pub struct CudaCodegen<'a> {
     namespace_names: HashSet<String>,
     /// Density and helper functions, in generation order.
     functions: Vec<cuda::Function>,
+    /// Lerp helpers, which every function that reads one needs declared first.
+    lerp_helpers: Vec<cuda::Function>,
     kernel_bodies: Vec<cuda::Function>,
     kernel_wrappers: Vec<cuda::Function>,
     /// Converted constants; emitted in dependency order.
@@ -139,6 +153,8 @@ pub struct CudaCodegen<'a> {
     done_units: HashSet<Ref<ComputeUnit>>,
     done_functions: HashSet<Ref<Function>>,
     done_kernels: HashSet<Instance>,
+    done_refine_kernels: HashSet<RefineRun>,
+    done_lerps: HashSet<String>,
 }
 
 impl<'a> CudaCodegen<'a> {
@@ -153,6 +169,7 @@ impl<'a> CudaCodegen<'a> {
             config,
             namespace_names,
             functions: Vec::new(),
+            lerp_helpers: Vec::new(),
             kernel_bodies: Vec::new(),
             kernel_wrappers: Vec::new(),
             constants: HashMap::new(),
@@ -160,6 +177,8 @@ impl<'a> CudaCodegen<'a> {
             done_units: HashSet::new(),
             done_functions: HashSet::new(),
             done_kernels: HashSet::new(),
+            done_refine_kernels: HashSet::new(),
+            done_lerps: HashSet::new(),
         }
     }
 
@@ -169,6 +188,15 @@ impl<'a> CudaCodegen<'a> {
 
     pub fn rules(&self) -> &'a NamingRules {
         self.rules
+    }
+
+    /// Generates a lerp helper once.
+    fn generate_lerps(&mut self, lerps: Vec<LerpHelper>) {
+        for h in lerps {
+            if self.done_lerps.insert(h.name.clone()) {
+                self.lerp_helpers.push(mapping::lerp_helper(&h, self.config.effective_bounds()));
+            }
+        }
     }
 
     /// Generates `f`, the helpers it calls, and the constants those use.
@@ -181,6 +209,7 @@ impl<'a> CudaCodegen<'a> {
             let converted = function::convert_helper(self.source, self.naming, self.config, &self.namespace_names, f);
             self.functions.push(converted.function);
             self.warnings.extend(converted.warnings);
+            self.generate_lerps(converted.lerps);
             pending.extend(converted.called);
             for c in converted.constants {
                 self.generate_constant(c);
@@ -215,8 +244,9 @@ impl<'a> CudaCodegen<'a> {
                 shape.threads_per_block()
             ));
         }
-        self.kernel_bodies.push(function::build_kernel_body(self.source, self.naming, self.config, &inst));
-        self.kernel_wrappers.push(function::build_kernel_wrapper(self.naming, self.config, &inst, true));
+        let kernel = function::Kernel::of_instance(self.naming, &inst);
+        self.kernel_bodies.push(function::build_kernel_body(self.source, self.naming, self.config, &kernel));
+        self.kernel_wrappers.push(function::build_kernel_wrapper(self.source, self.naming, self.config, &kernel, true));
     }
 
     /// Panics if a kernel body name collides with a generated function or constant (the `_body`
@@ -251,7 +281,7 @@ impl<'a> CudaCodegen<'a> {
             items.extend(self.functions.iter().map(|f| cuda::Item::Function(f.declaration())));
             items.push(cuda::Item::Blank);
         }
-        for f in self.functions.iter().chain(&self.kernel_bodies).chain(&self.kernel_wrappers) {
+        for f in self.lerp_helpers.iter().chain(&self.functions).chain(&self.kernel_bodies).chain(&self.kernel_wrappers) {
             items.push(cuda::Item::Function(f.clone()));
             items.push(cuda::Item::Blank);
         }
@@ -264,6 +294,18 @@ impl<'a> CudaCodegen<'a> {
 }
 
 impl DeviceCodegen for CudaCodegen<'_> {
+    /// The refined unit at the target's dims, and the kernel running it. Repeats are no-ops.
+    fn generate_refine_kernel(&mut self, run: &RefineRun) {
+        self.generate_compute_unit(run.unit);
+        self.generate_compute_unit(run.target.cu);
+        if !self.done_refine_kernels.insert(*run) {
+            return;
+        }
+        let kernel = function::Kernel::of_run(self.naming, run);
+        self.kernel_bodies.push(function::build_kernel_body(self.source, self.naming, self.config, &kernel));
+        self.kernel_wrappers.push(function::build_kernel_wrapper(self.source, self.naming, self.config, &kernel, true));
+    }
+
     /// Generates one density function per dimension the unit is scheduled at, plus its helpers and constants.
     fn generate_compute_unit(&mut self, cu: Ref<ComputeUnit>) {
         if !self.done_units.insert(cu) {
@@ -277,6 +319,7 @@ impl DeviceCodegen for CudaCodegen<'_> {
                 function::convert_density(source, self.naming, self.config, &self.namespace_names, cu, dimensions);
             self.functions.push(converted.function);
             self.warnings.extend(converted.warnings);
+            self.generate_lerps(converted.lerps);
             for h in converted.called {
                 self.generate_helper(h);
             }

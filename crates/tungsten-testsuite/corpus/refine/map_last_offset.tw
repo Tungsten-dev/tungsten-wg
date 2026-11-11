@@ -1,5 +1,4 @@
 // Mappings: the last valid offset reads the input's last cell on the marched axis.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn g_main() -> i32 { return ((ambient(pos3).y * 3) + 1); }
     unit gu { main g_main; }

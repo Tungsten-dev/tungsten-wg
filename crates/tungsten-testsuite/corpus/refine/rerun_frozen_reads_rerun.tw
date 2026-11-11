@@ -1,5 +1,4 @@
 // Rerun: a frozen instance that reads a rerun one keeps the value it computed from the old one.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn r_main() -> i32 @hosts(k) { return host(k); }

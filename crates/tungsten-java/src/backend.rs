@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use tungsten_interface::naming::{NamingRules, java_sanitize};
 use tungsten_interface::{
-    Backend, BackendError, BufferBounds, Compiler, Feature, Interface, OrchestrationCodegen,
+    Backend, BackendError, BufferBounds, Compiler, Interface, OrchestrationCodegen,
 };
 use tungsten_ir::model::OptimizedProgram;
 
@@ -80,7 +80,6 @@ impl Backend for JavaBackend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<JavaOutput, BackendError> {
-        tungsten_interface::check_implemented(program, &[Feature::Mappings, Feature::Refinement])?;
         tungsten_rust::mapping::check_emittable(program, interface)?;
         tungsten_rust::backend::check_slots(program, interface)?;
         let class_name = java_sanitize(&self.config.class_name);

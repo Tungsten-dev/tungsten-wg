@@ -1,5 +1,4 @@
 // `@previous`: two reads in one cell give the same value, since the cell is written after the function returns.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return 3; }
     unit seed { main seed_main; }

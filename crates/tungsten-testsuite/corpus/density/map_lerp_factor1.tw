@@ -1,5 +1,4 @@
 // Lerp: factor 1 doesn't interpolate, so x reads the reader's own column.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {
         let c: pos3 = ambient(pos3);

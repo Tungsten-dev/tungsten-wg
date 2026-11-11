@@ -1,5 +1,4 @@
 // `@previous`: a record element carries more state than one value.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> extern Pair { return new Pair { a: 1.0, b: ambient(pos3).x }; }
     unit seed { main seed_main; }

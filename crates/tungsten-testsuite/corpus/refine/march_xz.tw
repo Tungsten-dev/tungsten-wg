@@ -1,5 +1,4 @@
 // March: along x and z.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn pos_main() -> i32 { return (ambient(pos3).x + (100 * ambient(pos3).z)); }
     unit pos { main pos_main; }

@@ -1,6 +1,5 @@
 // Inlining: a frozen input of a rerun unit isn't inlined (`Refinement`). Inlined, it would see the new host and
 // give 22.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn f_main() -> i32 @hosts(k) { return (host(k) * 10); }

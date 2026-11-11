@@ -1,5 +1,4 @@
 // Two inputs over one buffer (same unit, dims and scales) with different mappings.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {
         return (1.0 + (2.0 * (ambient(pos3).x as f64)));

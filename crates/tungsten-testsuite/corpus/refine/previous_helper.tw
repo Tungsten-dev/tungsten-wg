@@ -1,5 +1,4 @@
 // `@previous`: read in a helper of the refined unit.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return 1; }
     unit seed { main seed_main; }

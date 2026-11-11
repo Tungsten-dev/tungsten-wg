@@ -1,5 +1,4 @@
 // A mapped read inside a helper of the reading unit.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> i32 {
         return (ambient(pos3).x * 10);

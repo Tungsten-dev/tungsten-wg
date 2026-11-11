@@ -1,5 +1,4 @@
 // Inlining: deeper in a frozen closure inlining still happens (`g` into `f`) and doesn't change frozen values.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn g_main() -> i32 @hosts(k) { return (host(k) * 10); }

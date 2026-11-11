@@ -1,7 +1,6 @@
 // The vanilla noise shape at full size: a (5,49,5) grid interpolated to (16,384,16). With memo off,
 // each of the 27 corner reads per cell rebuilds the grid, so the interpreter takes minutes here.
 @tier(large)
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn grid_leaf() -> f64 {
         let c: pos3 = ambient(pos3);

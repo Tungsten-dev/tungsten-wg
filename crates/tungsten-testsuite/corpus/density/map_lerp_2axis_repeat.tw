@@ -1,5 +1,4 @@
 // Lerp: x and z interpolated, `*` on y. Corner values aren't linear.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {
         let c: pos3 = ambient(pos3);

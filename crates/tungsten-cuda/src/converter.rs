@@ -5,10 +5,10 @@ warnings. Shared by expression.rs, statement.rs and function.rs.
 
 use std::collections::{HashMap, HashSet};
 
-use tungsten_interface::Interface;
+use tungsten_interface::{Interface, LerpHelper};
 use tungsten_interface::naming::cuda_sanitize;
 use tungsten_ir::model::{
-    BinaryOperator, Constant, Expression, Function, Name, OptimizedProgram, Ref, Var,
+    BinaryOperator, Constant, DensityInput, Expression, Function, Name, OptimizedProgram, Ref, Var,
     VariableType,
 };
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
@@ -30,6 +30,11 @@ pub struct FunctionConverter<'a> {
     pub called: Vec<Ref<Function>>,
     /// Constants referenced by the converted code, still to be generated.
     pub used_constants: Vec<Ref<Constant>>,
+    /// Lerp helpers referenced by the converted code, still to be generated.
+    pub used_lerps: Vec<LerpHelper>,
+    /// The inputs the function reads, directly or through helpers (`Interface::input_params`): one
+    /// `unsigned long long` byte offset parameter each, after the uniform parameters.
+    pub offsets: Vec<Ref<DensityInput>>,
     pub warnings: Vec<String>,
     vars: HashMap<Ref<Var>, String>,
     used_names: HashSet<String>,
@@ -54,10 +59,28 @@ impl<'a> FunctionConverter<'a> {
             function_name: function_name.to_string(),
             called: Vec::new(),
             used_constants: Vec::new(),
+            used_lerps: Vec::new(),
+            offsets: Vec::new(),
             warnings: Vec::new(),
             vars: HashMap::new(),
             used_names,
         }
+    }
+
+    /// Makes `f`'s offset parameters known, and keeps locals off their names.
+    pub fn with_offsets(mut self, f: Ref<Function>) -> Self {
+        self.offsets = self.naming.input_params(f).to_vec();
+        for &d in &self.offsets {
+            self.used_names.insert(self.naming.offset_param(d).to_string());
+        }
+        self
+    }
+
+    /// The name of this function's offset parameter of input `d`.
+    pub fn offset(&self, d: Ref<DensityInput>) -> &'a str {
+        assert!(self.offsets.contains(&d), "input {d:?} is read but is not an offset parameter of the function");
+        let naming: &'a Interface = self.naming;
+        naming.offset_param(d)
     }
 
     /// `base`, or `base_N` for the first free N; keeps names unique within the function.

@@ -1,5 +1,4 @@
 // One lerp shape (dims, factors, element type) read by two units, over different sources.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn la() -> f64 {
         return ((ambient(pos3).x * 4) as f64);

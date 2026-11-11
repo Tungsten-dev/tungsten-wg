@@ -1,21 +1,23 @@
 /*
-Orchestration codegen for CUDA: `interface.cuh` (the structs and kernel
-declarations the device code is generated against), the CUDA-free public header
-`orchestration.h`, the host source `orchestration.cu`, and assembly of all four files.
+Orchestration codegen for CUDA: `interface.cuh` (the structs, the per-worker layouts and the
+kernel declarations the device code is generated against), the CUDA-free public header
+`orchestration.h` (`Orchestration` and one worker class per entry), the host source
+`orchestration.cu`, and assembly of all four files (`specs/workers.md` §3.3).
 
 The host source is mostly fixed text with per-program loops, so it is written as raw lines.
 */
 
-use tungsten_interface::naming::{NamingRules, entry_base_names};
-use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
-use tungsten_ir::model::{AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, VariableType};
+use std::collections::HashSet;
 
-use super::function::build_kernel_wrapper;
+use tungsten_interface::naming::{FactoryStyle, NamingRules, WorkerNames, worker_names};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen, RefineRun};
+use tungsten_ir::model::{AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, Ref, VariableType};
+
+use super::function::{Kernel, build_kernel_wrapper};
 use super::launch::launch_shape;
 use super::types::{auto_const_type, device_type, public_type, unit_return_type};
 use super::{
-    AUTO_CONSTS_STRUCT, BUFFER_LAYOUT, CONFIG_TYPE, CTX_STRUCT, DEVICE_HOST_CONSTS_STRUCT,
-    DEVICE_NAMESPACE, kernel_symbol,
+    AUTO_CONSTS_STRUCT, CONFIG_TYPE, CTX_STRUCT, DEVICE_HOST_CONSTS_STRUCT, DEVICE_NAMESPACE,
 };
 use crate::backend::CudaConfig;
 use crate::model as cuda;
@@ -36,17 +38,35 @@ fn flat_len(inst: &Instance) -> usize {
     (x as usize) * (y as usize) * (z as usize)
 }
 
-/// One entry point as seen by the host class.
+/// Type and member names the generated host code uses next to the entries' own.
+const RESERVED_TYPES: [&str; 5] = ["Orchestration", "OrchestrationShared", "Status", "Vec3", "Pos3"];
+const RESERVED_MEMBERS: [&str; 5] = ["create", "profile", "required_flags", "shared_", "impl_"];
+
+/// Names of every entry's worker, in entry order: `<Base>Worker`, `<Base>HostConsts`,
+/// `<Base>Layout` and `create_<base>_worker`. Frontends and drivers get them from here.
+pub fn cuda_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec<WorkerNames> {
+    worker_names(
+        program,
+        rules,
+        FactoryStyle::CreateSnake,
+        RESERVED_TYPES.iter().map(|s| s.to_string()).collect(),
+        RESERVED_MEMBERS.iter().map(|s| s.to_string()).collect(),
+    )
+}
+
+/// One entry point as seen by the host: its worker class.
 struct Entry {
-    /// Unique base of `enqueue_<base>`, `result_<base>`, `<base>_len`, ...
-    base: String,
+    index: usize,
+    names: WorkerNames,
     inst: Instance,
     element: VariableType,
-    /// Public element type, as spelled in the class (arrays go through `<base>_element`).
+    /// Public element type, as spelled in the worker class (arrays go through `element`).
     public_element: String,
-    /// `using <base>_element = T[N];` for array elements.
+    /// `using element = T[N];` for array elements.
     alias: Option<String>,
     canonical_name: String,
+    /// The refinements of this entry, as indices into `program.refinements`.
+    refinements: Vec<usize>,
 }
 
 impl Entry {
@@ -57,32 +77,40 @@ impl Entry {
     fn single(&self) -> bool {
         self.len() == 1
     }
+
+    /// The element type as named outside the worker class.
+    fn qualified_element(&self) -> String {
+        match &self.alias {
+            Some(_) => format!("{}::{}", self.names.worker, self.public_element),
+            None => self.public_element.clone(),
+        }
+    }
 }
 
 fn entries(program: &OptimizedProgram, rules: &NamingRules) -> Vec<Entry> {
-    let mut used = rules.used_set();
-    used.extend(["create", "sync", "query", "profile", "required_flags", "impl_"].map(String::from));
-    let bases = entry_base_names(program, rules, used);
+    let names = cuda_worker_names(program, rules);
     program
         .entry_points
         .iter()
-        .zip(bases)
-        .map(|(e, base)| {
+        .zip(names)
+        .enumerate()
+        .map(|(index, (e, names))| {
             let inst = Instance::from_entry(e);
             let element = unit_return_type(program, inst.cu).clone();
             let public = public_type(&element).unwrap_or_else(|| {
-                panic!("entry point `{}` returns {:?}, which has no public mirror type", base, element)
+                panic!("entry point `{}` returns {:?}, which has no public mirror type", names.base, element)
             });
             let (public_element, alias) = match &public {
                 cuda::Type::CArray(..) => {
-                    let alias = format!("{}_element", base);
-                    let using = format!("using {} = {};", alias, array_type_string(&public));
-                    (alias, Some(using))
+                    let using = format!("using element = {};", array_type_string(&public));
+                    ("element".to_string(), Some(using))
                 }
                 t => (type_string(t), None),
             };
             let canonical_name = canonical_name(program, &inst);
-            Entry { base, inst, element, public_element, alias, canonical_name }
+            let refinements =
+                program.refinements.iter().enumerate().filter(|(_, r)| r.entry == index).map(|(r, _)| r).collect();
+            Entry { index, names, inst, element, public_element, alias, canonical_name, refinements }
         })
         .collect()
 }
@@ -110,6 +138,22 @@ fn static_host_inputs<'p>(program: &'p OptimizedProgram, interface: &Interface) 
         .collect()
 }
 
+/// The static hosts entry `entry`'s worker reads (`Interface::entry_hosts`), with their field names.
+fn entry_host_inputs<'p>(
+    program: &'p OptimizedProgram,
+    interface: &Interface,
+    entry: usize,
+) -> Vec<(String, &'p VariableType)> {
+    interface
+        .entry_hosts(entry)
+        .iter()
+        .map(|&r: &Ref<HostInput>| match &program.host_inputs[r] {
+            HostInput::Static { t, .. } => (interface.host_field(r).to_string(), t),
+            HostInput::Dynamic => panic!("dynamic host inputs are not supported by the CUDA backend"),
+        })
+        .collect()
+}
+
 fn generated_comment(what: &str) -> cuda::Item {
     cuda::Item::Comment(format!(
         "Generated by tungsten-wg {}. Do not edit.\n{}",
@@ -118,12 +162,33 @@ fn generated_comment(what: &str) -> cuda::Item {
     ))
 }
 
-/// `interface.cuh`: `DeviceHostConsts`, `AutoConsts`, `BufferLayout`, `Ctx` and the kernel
-/// declarations, in `<namespace>::dev`.
-fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig) -> cuda::File {
+/// Every kernel that gets generated, in generation order: those of the scheduled units' instances,
+/// then one per distinct refine run.
+fn kernels(program: &OptimizedProgram, interface: &Interface) -> Vec<Kernel> {
+    let mut out = Vec::new();
+    let mut units = HashSet::new();
+    for inst in interface.waves().iter().flatten() {
+        if units.insert(inst.cu) {
+            out.extend(interface.instances_of(inst.cu).iter().map(|i| Kernel::of_instance(interface, i)));
+        }
+    }
+    let mut runs: HashSet<RefineRun> = HashSet::new();
+    for r in 0..program.refinements.len() {
+        for run in interface.refine_waves(r).iter().flatten() {
+            if runs.insert(*run) {
+                out.push(Kernel::of_run(interface, run));
+            }
+        }
+    }
+    out
+}
+
+/// `interface.cuh`: `DeviceHostConsts`, `AutoConsts`, one `<Base>Layout` per worker, `Ctx` and the
+/// kernel declarations, in `<namespace>::dev`.
+fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
     let host_consts = cuda::Struct {
         doc: Some(format!(
-            "Static host inputs, device layout of `{}::HostConsts` (checked in orchestration.cu).",
+            "Static host inputs of every entry, the device side of each `<Base>HostConsts` of `{}` (checked in orchestration.cu).",
             config.namespace
         )),
         name: DEVICE_HOST_CONSTS_STRUCT.into(),
@@ -144,36 +209,43 @@ fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &
     };
 
     // Offsets are computed by the C++ compiler: element sizes of runtime types are only known there.
+    // Each worker has its own layout, the entry's output first (`specs/workers.md` §4.2).
     let offset = cuda::Type::UnsignedLongLong;
-    let mut layout = Vec::new();
-    let mut previous: Option<(String, usize, String)> = None;
     let end_of = |(name, len, t): &(String, usize, String)| {
         cuda::Expression::call(
             "tw::align_up",
             vec![cuda::Expression::raw(format!("{} + {}ull * sizeof({})", name, len, t)), cuda::Expression::raw("256ull")],
         )
     };
-    for inst in interface.instances() {
-        let name = interface.buffer_field(inst).to_string();
-        let element = type_string(&device_type(unit_return_type(program, inst.cu)));
-        let init = match &previous {
-            None => cuda::Expression::raw("0"),
-            Some(p) => end_of(p),
-        };
-        layout.push(cuda::Item::Variable { qualifiers: "static constexpr".into(), t: offset.clone(), name: name.clone(), init });
-        previous = Some((name, flat_len(inst), element));
+    let mut layouts = Vec::new();
+    for e in entries {
+        let slots = &interface.worker(e.index).slots;
+        let ordered = std::iter::once(&e.inst).chain(slots.iter().map(|(i, _)| i).filter(|i| **i != e.inst));
+        let mut members = Vec::new();
+        let mut previous: Option<(String, usize, String)> = None;
+        for inst in ordered {
+            let name = interface.buffer_field(inst).to_string();
+            let element = type_string(&device_type(unit_return_type(program, inst.cu)));
+            let init = match &previous {
+                None => cuda::Expression::raw("0"),
+                Some(p) => end_of(p),
+            };
+            members.push(cuda::Item::Variable { qualifiers: "static constexpr".into(), t: offset.clone(), name: name.clone(), init });
+            previous = Some((name, flat_len(inst), element));
+        }
+        members.push(cuda::Item::Variable {
+            qualifiers: "static constexpr".into(),
+            t: offset.clone(),
+            name: "total_bytes".into(),
+            init: previous.as_ref().map(end_of).unwrap_or_else(|| cuda::Expression::raw("0")),
+        });
+        layouts.push(cuda::Item::Struct(cuda::Struct {
+            doc: Some(format!("Byte offsets of every buffer in the slab of the `{}` (256-byte aligned).", e.names.worker)),
+            name: e.names.layout.clone(),
+            members,
+        }));
+        layouts.push(cuda::Item::Blank);
     }
-    layout.push(cuda::Item::Variable {
-        qualifiers: "static constexpr".into(),
-        t: offset,
-        name: "total_bytes".into(),
-        init: previous.as_ref().map(end_of).unwrap_or_else(|| cuda::Expression::raw("0")),
-    });
-    let buffer_layout = cuda::Struct {
-        doc: Some("Byte offsets of every instance buffer in the slab (256-byte aligned).".into()),
-        name: BUFFER_LAYOUT.into(),
-        members: layout,
-    };
 
     let restrict = |n: &str| cuda::Type::const_restrict_ptr(cuda::Type::named(n));
     let field = |t, n: &str| cuda::Item::Field { t, name: n.into() };
@@ -193,15 +265,15 @@ fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &
         cuda::Item::Blank,
         cuda::Item::Struct(auto_consts),
         cuda::Item::Blank,
-        cuda::Item::Struct(buffer_layout),
-        cuda::Item::Blank,
-        cuda::Item::Struct(ctx),
     ];
-    if !interface.instances().is_empty() {
+    items.extend(layouts);
+    items.push(cuda::Item::Struct(ctx));
+    let kernels = kernels(program, interface);
+    if !kernels.is_empty() {
         items.push(cuda::Item::Blank);
         items.push(cuda::Item::Comment("Kernels (extern \"C\": prefixed, unmangled symbols).".into()));
-        for inst in interface.instances() {
-            items.push(cuda::Item::Function(build_kernel_wrapper(interface, config, inst, false)));
+        for k in &kernels {
+            items.push(cuda::Item::Function(build_kernel_wrapper(program, interface, config, k, false)));
         }
     }
 
@@ -228,19 +300,6 @@ fn public_header(program: &OptimizedProgram, interface: &Interface, config: &Cud
         name: "Pos3".into(),
         members: ["x", "y", "z"].iter().map(|n| field(cuda::Type::Int, n)).collect(),
     };
-    let host_consts = cuda::Struct {
-        doc: Some("Static host inputs, filled by the caller and copied on every enqueue.".into()),
-        name: "HostConsts".into(),
-        members: static_host_inputs(program, interface)
-            .into_iter()
-            .map(|(name, t)| {
-                let t = public_type(t).unwrap_or_else(|| {
-                    panic!("host input `{}` has the type {:?}, which has no public mirror type", name, t)
-                });
-                cuda::Item::Field { t, name }
-            })
-            .collect(),
-    };
     let status = "\
 /// Result of a call: a cudaError_t value, 0 on success.
 struct Status {
@@ -250,82 +309,137 @@ struct Status {
     const char* message() const;
 };";
 
+    let mut items = vec![
+        cuda::Item::Struct(vec3),
+        cuda::Item::Struct(pos3),
+        cuda::Item::Blank,
+        cuda::Item::Raw(status.into()),
+        cuda::Item::Blank,
+        cuda::Item::Raw("class Orchestration;\nstruct OrchestrationShared;".into()),
+        cuda::Item::Blank,
+    ];
+
+    for e in entries {
+        let host_consts = cuda::Struct {
+            doc: Some("The static hosts this entry reads, filled by the caller and copied on every enqueue.".into()),
+            name: e.names.host_consts.clone(),
+            members: entry_host_inputs(program, interface, e.index)
+                .into_iter()
+                .map(|(name, t)| {
+                    let t = public_type(t).unwrap_or_else(|| {
+                        panic!("host input `{}` has the type {:?}, which has no public mirror type", name, t)
+                    });
+                    cuda::Item::Field { t, name }
+                })
+                .collect(),
+        };
+        items.push(cuda::Item::Struct(host_consts));
+        items.push(cuda::Item::Blank);
+
+        let (dx, dy, dz) = e.inst.dimensions;
+        let hc = &e.names.host_consts;
+        let mut class = vec![
+            format!("/// {} ({}x{}x{}).", e.canonical_name, dx, dy, dz),
+            "/// Runs on its own CUDA stream and owns its buffers. Not thread-safe: use one per host thread.".into(),
+            format!("class {} {{", e.names.worker),
+            "public:".into(),
+        ];
+        if let Some(alias) = &e.alias {
+            class.push(format!("    {}", alias));
+        }
+        class.push(format!("    static constexpr int len = {};", e.len()));
+        class.push(format!("    static constexpr int dims[3] = {{{}, {}, {}}};", dx, dy, dz));
+        class.push("    /// Queues the entry at `origin`; returns without waiting for the GPU.".into());
+        class.push(format!("    Status enqueue(Vec3 origin, const {hc}& host_consts);"));
+        for &r in &e.refinements {
+            class.push(format!(
+                "    /// Queues refinement `{}` at the origin of the last enqueue() plus `offset`. Call after enqueue().",
+                program.refinements[r].name
+            ));
+            class.push(format!("    Status enqueue_{}(Pos3 offset, const {hc}& host_consts);", interface.refine_method(r)));
+        }
+        class.push("    /// Valid after sync() (or query() returning success), until the next enqueue*().".into());
+        class.push(match (e.single(), e.alias.is_some()) {
+            (true, false) => format!("    {} result() const;", e.public_element),
+            (true, true) => format!("    const {}& result() const;", e.public_element),
+            (false, _) => format!("    const {}* result() const;", e.public_element),
+        });
+        class.extend(
+            [
+                "    /// Waits for all queued work.",
+                "    Status sync();",
+                "    /// Non-blocking: success, cudaErrorNotReady (as `code`), or an error.",
+                "    Status query();",
+            ]
+            .map(String::from),
+        );
+        class.push(format!("    ~{}();", e.names.worker));
+        class.push(format!("    {0}(const {0}&) = delete;", e.names.worker));
+        class.push(format!("    {0}& operator=(const {0}&) = delete;", e.names.worker));
+        class.extend(
+            [
+                "".to_string(),
+                "private:".into(),
+                "    friend class Orchestration;".into(),
+                "    struct Impl;".into(),
+                "    std::unique_ptr<Impl> impl_;".into(),
+                format!("    explicit {}(std::unique_ptr<Impl> impl);", e.names.worker),
+                "};".into(),
+            ],
+        );
+        items.push(cuda::Item::Raw(class.join("\n")));
+        items.push(cuda::Item::Blank);
+    }
+
     let profile = config.profile;
     let mut class = vec![
-        "/// Runs the generated kernels on its own CUDA stream. Not thread-safe: use one per host thread.".to_string(),
-        "class Orchestration {".into(),
+        "/// Immutable and thread-safe once created. Its job is to spawn workers.".to_string(),
+        "class Orchestration : public std::enable_shared_from_this<Orchestration> {".into(),
         "public:".into(),
         "    /// Numeric profile the device code was generated for.".into(),
         format!("    static constexpr const char* profile = \"{}\";", profile.name()),
         "    /// nvcc flags density.cu must be compiled with (empty: any).".into(),
         format!("    static constexpr const char* required_flags = \"{}\";", profile.required_flags()),
         String::new(),
-        "    /// Allocates everything on the current device and builds the autoconsts from the params.".into(),
+        "    /// Builds the autoconsts on the host and copies them to the current device once.".into(),
         "    /// On failure `out` is left null.".into(),
-        format!("    static Status create({}std::unique_ptr<Orchestration>& out);", create_params(program, interface)),
-        "    ~Orchestration();".into(),
-        "    Orchestration(const Orchestration&) = delete;".into(),
-        "    Orchestration& operator=(const Orchestration&) = delete;".into(),
+        format!("    static Status create({}std::shared_ptr<Orchestration>& out);", create_params(program, interface)),
     ];
     for e in entries {
-        let (dx, dy, dz) = e.inst.dimensions;
         class.push(String::new());
-        class.push(format!("    // {} ({}x{}x{})", e.canonical_name, dx, dy, dz));
-        if let Some(alias) = &e.alias {
-            class.push(format!("    {}", alias));
-        }
-        class.push(format!("    static constexpr int {}_len = {};", e.base, e.len()));
-        class.push(format!("    static constexpr int {}_dims[3] = {{{}, {}, {}}};", e.base, dx, dy, dz));
-        class.push("    /// Queues the entry at `origin`; returns without waiting for the GPU.".into());
-        class.push(format!("    Status enqueue_{}(Vec3 origin, const HostConsts& host_consts);", e.base));
+        class.push(format!("    /// Creates a worker on the current device, which must be the orchestration's: otherwise"));
+        class.push("    /// the status is cudaErrorInvalidDevice. Thread-safe.".into());
         class.push(format!(
-            "    /// Valid after sync() (or query() returning success), until the next enqueue_{}().",
-            e.base
+            "    Status {}(std::unique_ptr<{}>& out) const;",
+            e.names.factory, e.names.worker
         ));
-        class.push(match (e.single(), e.alias.is_some()) {
-            (true, false) => format!("    {} result_{}() const;", e.public_element, e.base),
-            (true, true) => format!("    const {}& result_{}() const;", e.public_element, e.base),
-            (false, _) => format!("    const {}* result_{}() const;", e.public_element, e.base),
-        });
     }
     class.extend(
         [
             "",
-            "    /// Waits for all queued work.",
-            "    Status sync();",
-            "    /// Non-blocking: success, cudaErrorNotReady (as `code`), or an error.",
-            "    Status query();",
+            "    ~Orchestration();",
+            "    Orchestration(const Orchestration&) = delete;",
+            "    Orchestration& operator=(const Orchestration&) = delete;",
             "",
             "private:",
-            "    struct Impl;",
-            "    std::unique_ptr<Impl> impl_;",
-            "    explicit Orchestration(std::unique_ptr<Impl> impl);",
+            "    std::shared_ptr<const OrchestrationShared> shared_;",
+            "    explicit Orchestration(std::shared_ptr<const OrchestrationShared> shared);",
             "};",
         ]
         .map(String::from),
     );
+    items.push(cuda::Item::Raw(class.join("\n")));
 
     cuda::File {
         items: vec![
             generated_comment(
                 "Public API of the generated orchestration. Needs no CUDA headers (C++17).\n\
-                 Threading: an Orchestration is NOT thread-safe; use one per host thread.",
+                 Threading: an Orchestration is thread-safe and shared; a worker is NOT: use one per host thread.\n\
+                 A CUDA sticky error is context-wide: after one, the Orchestration and all its workers are unusable.",
             ),
             cuda::Item::Raw("#pragma once\n\n#include <memory>".into()),
             cuda::Item::Blank,
-            cuda::Item::Namespace {
-                name: config.namespace.clone(),
-                items: vec![
-                    cuda::Item::Struct(vec3),
-                    cuda::Item::Struct(pos3),
-                    cuda::Item::Blank,
-                    cuda::Item::Struct(host_consts),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(status.into()),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(class.join("\n")),
-                ],
-            },
+            cuda::Item::Namespace { name: config.namespace.clone(), items },
         ],
     }
 }
@@ -395,12 +509,52 @@ fn indent(lines: &[String], depth: usize) -> String {
         .join("\n")
 }
 
-/// `orchestration.cu`: `Orchestration::Impl`, `create`, `enqueue_*`, `result_*`, `sync`, `query`
-/// and the layout checks between the public and device structs.
+/// The launches of one wave list: `kernel<<<..>>>(args)` and its error check. `origin` and
+/// `offset` are the host expressions of the kernel's leading arguments.
+fn launches(
+    program: &OptimizedProgram,
+    interface: &Interface,
+    config: &CudaConfig,
+    e: &Entry,
+    waves: &[Vec<Kernel>],
+) -> Vec<String> {
+    let layout = format!("dev::{}", e.names.layout);
+    let mut lines = Vec::new();
+    for (w, wave) in waves.iter().enumerate() {
+        lines.push(format!("    // wave {}", w));
+        for k in wave {
+            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[k.unit];
+            let shape = launch_shape(k.target.dimensions, config.block_size);
+            let mut args = vec!["o".to_string()];
+            if k.refine {
+                args.push("off".into());
+            }
+            args.push("s.slab".into());
+            args.push(format!("{}::{}", layout, interface.buffer_field(&k.target)));
+            for &d in interface.input_params(*function) {
+                let input = Instance::from_input(&program.density_inputs[d]);
+                args.push(format!("{}::{}", layout, interface.buffer_field(&input)));
+            }
+            args.push("s.shared->auto_constants".into());
+            args.push("s.host_consts".into());
+            lines.push(format!(
+                "    dev::{}<<<{}, {}, 0, s.stream>>>({});",
+                k.symbol(config),
+                shape.blocks,
+                shape.threads,
+                args.join(", ")
+            ));
+            lines.push("    TUNGSTEN_CUDA_CHECK(cudaGetLastError());".into());
+        }
+    }
+    lines
+}
+
+/// `orchestration.cu`: `OrchestrationShared`, one `Impl` and the methods of each worker, `create`,
+/// the worker factories and the layout checks between the public and device structs.
 fn orchestration_source(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
     let ns = &config.namespace;
     let host_inputs = static_host_inputs(program, interface);
-    let has_host_inputs = !host_inputs.is_empty();
 
     let includes = format!(
         "#include \"{}\"\n#include \"{}\"\n\n#include <cuda_runtime.h>\n\n#include <cstddef>\n#include <cstring>\n#include <memory>\n#include <type_traits>\n#include <utility>",
@@ -436,94 +590,48 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
         "static_assert(std::is_trivially_copyable<dev::{a}>::value, \"{a} is copied to the device as bytes\");",
         a = AUTO_CONSTS_STRUCT
     ));
-    asserts.push(format!(
-        "static_assert(sizeof(HostConsts) == sizeof(dev::{d}) && alignof(HostConsts) == alignof(dev::{d}), \"HostConsts must mirror dev::{d}\");",
-        d = DEVICE_HOST_CONSTS_STRUCT
-    ));
-    for (name, _) in &host_inputs {
-        asserts.push(format!(
-            "static_assert(offsetof(HostConsts, {n}) == offsetof(dev::{d}, {n}), \"HostConsts::{n}\");",
-            n = name,
-            d = DEVICE_HOST_CONSTS_STRUCT
-        ));
-    }
     for e in entries {
-        let public = match &e.alias {
-            Some(_) => format!("Orchestration::{}", e.public_element),
-            None => e.public_element.clone(),
-        };
+        // A worker copies each field of its own host struct into the matching device field as bytes.
+        for (name, _) in entry_host_inputs(program, interface, e.index) {
+            asserts.push(format!(
+                "static_assert(sizeof({h}::{n}) == sizeof(dev::{d}::{n}) && std::is_trivially_copyable<decltype({h}::{n})>::value, \"{h}::{n} must mirror dev::{d}::{n}\");",
+                h = e.names.host_consts,
+                n = name,
+                d = DEVICE_HOST_CONSTS_STRUCT
+            ));
+        }
         let device = type_string(&device_type(&e.element));
         asserts.push(format!(
             "static_assert(sizeof({p}) == sizeof({d}) && alignof({p}) == alignof({d}), \"result of {b}\");",
-            p = public,
+            p = e.qualified_element(),
             d = device,
-            b = e.base
+            b = e.names.base
         ));
     }
 
-    let mut impl_lines = vec![
-        "/// Device and pinned host resources of one Orchestration. Released in reverse order.".to_string(),
-        "struct Orchestration::Impl {".into(),
-        "    cudaStream_t stream = nullptr;".into(),
-        "    char* slab = nullptr;".into(),
+    let shared = [
+        "/// The device autoconsts and the device they live on. Immutable after `create`, shared by every worker.".to_string(),
+        "struct OrchestrationShared {".into(),
+        "    int device = 0;".into(),
         format!("    dev::{}* auto_constants = nullptr;", AUTO_CONSTS_STRUCT),
-        format!("    dev::{}* host_consts = nullptr;", DEVICE_HOST_CONSTS_STRUCT),
-        "    /// Pinned staging slots for HostConsts uploads, each guarded by an event.".into(),
-        "    HostConsts* staging[host_consts_ring] = {};".into(),
-        "    cudaEvent_t staging_events[host_consts_ring] = {};".into(),
-        "    unsigned next_slot = 0;".into(),
-    ];
-    for e in entries {
-        impl_lines.push(format!("    {}* result_{} = nullptr; // pinned", e.public_element, e.base));
-    }
-    impl_lines.push(String::new());
-    impl_lines.push("    ~Impl() {".into());
-    impl_lines.push("        // Errors are ignored: this is a destructor.".into());
-    impl_lines.push("        if (stream) cudaStreamSynchronize(stream);".into());
-    for e in entries.iter().rev() {
-        impl_lines.push(format!("        if (result_{b}) cudaFreeHost(result_{b});", b = e.base));
-    }
-    impl_lines.extend(
-        [
-            "        for (unsigned i = host_consts_ring; i-- > 0;) {",
-            "            if (staging_events[i]) cudaEventDestroy(staging_events[i]);",
-            "            if (staging[i]) cudaFreeHost(staging[i]);",
-            "        }",
-            "        if (host_consts) cudaFree(host_consts);",
-            "        if (auto_constants) cudaFree(auto_constants);",
-            "        if (slab) cudaFree(slab);",
-            "        if (stream) cudaStreamDestroy(stream);",
-            "    }",
-            "};",
-        ]
-        .map(String::from),
-    );
+        "    ~OrchestrationShared() {".into(),
+        "        // Errors are ignored: this is a destructor.".into(),
+        "        if (auto_constants) cudaFree(auto_constants);".into(),
+        "    }".into(),
+        "};".into(),
+    ]
+    .join("\n");
 
     let auto_consts = auto_const_assignments(program, interface);
     let mut create = vec![
-        format!("Status Orchestration::create({}std::unique_ptr<Orchestration>& out) {{", create_params(program, interface)),
+        format!("Status Orchestration::create({}std::shared_ptr<Orchestration>& out) {{", create_params(program, interface)),
         "    out.reset();".into(),
-        "    std::unique_ptr<Impl> impl(new Impl());".into(),
-        "    TUNGSTEN_CUDA_CHECK(cudaStreamCreateWithFlags(&impl->stream, cudaStreamNonBlocking));".into(),
-        String::new(),
-        "    // One slab for every instance buffer, zeroed.".into(),
-        format!("    if ({}::total_bytes > 0) {{", layout_name()),
-        format!(
-            "        TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&impl->slab), {}::total_bytes));",
-            layout_name()
-        ),
-        format!(
-            "        TUNGSTEN_CUDA_CHECK(cudaMemsetAsync(impl->slab, 0, {}::total_bytes, impl->stream));",
-            layout_name()
-        ),
-        "    }".into(),
+        "    std::shared_ptr<OrchestrationShared> shared(new OrchestrationShared());".into(),
+        "    TUNGSTEN_CUDA_CHECK(cudaGetDevice(&shared->device));".into(),
         String::new(),
         "    // Autoconsts are built on the host (on the heap: they can be large) and copied once.".into(),
         "    {".into(),
-        format!(
-            "        std::unique_ptr<dev::{a}> auto_constants(new dev::{a}());",
-            a = AUTO_CONSTS_STRUCT
-        ),
+        format!("        std::unique_ptr<dev::{a}> auto_constants(new dev::{a}());", a = AUTO_CONSTS_STRUCT),
     ];
     for (r, _) in program.auto_params.iter() {
         create.push(format!("        (void){};", interface.auto_param(r)));
@@ -531,130 +639,234 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
     create.push(indent(&auto_consts, 2));
     create.extend([
         format!(
-            "        TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&impl->auto_constants), sizeof(dev::{})));",
+            "        TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&shared->auto_constants), sizeof(dev::{})));",
             AUTO_CONSTS_STRUCT
         ),
         format!(
-            "        TUNGSTEN_CUDA_CHECK(cudaMemcpy(impl->auto_constants, auto_constants.get(), sizeof(dev::{}), cudaMemcpyHostToDevice));",
+            "        TUNGSTEN_CUDA_CHECK(cudaMemcpy(shared->auto_constants, auto_constants.get(), sizeof(dev::{}), cudaMemcpyHostToDevice));",
             AUTO_CONSTS_STRUCT
         ),
         "    }".into(),
+        "    out.reset(new Orchestration(std::move(shared)));".into(),
+        "    return Status{};".into(),
+        "}".into(),
         String::new(),
-        format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&impl->host_consts), sizeof(dev::{})));",
-            DEVICE_HOST_CONSTS_STRUCT
-        ),
-        "    for (unsigned i = 0; i < host_consts_ring; ++i) {".into(),
-        "        TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->staging[i]), sizeof(HostConsts), cudaHostAllocDefault));".into(),
-        "        TUNGSTEN_CUDA_CHECK(cudaEventCreateWithFlags(&impl->staging_events[i], cudaEventDisableTiming));".into(),
-        "    }".into(),
-    ]);
-    for e in entries {
-        create.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result_{b}), Orchestration::{b}_len * sizeof({t}), cudaHostAllocDefault));",
-            b = e.base,
-            t = e.public_element
-        ));
-    }
-    create.extend(
-        [
-            "",
-            "    TUNGSTEN_CUDA_CHECK(cudaStreamSynchronize(impl->stream));",
-            "    out.reset(new Orchestration(std::move(impl)));",
-            "    return Status{};",
-            "}",
-        ]
-        .map(String::from),
-    );
-
-    let mut methods = vec![
-        "Orchestration::Orchestration(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}".to_string(),
+        "Orchestration::Orchestration(std::shared_ptr<const OrchestrationShared> shared) : shared_(std::move(shared)) {}".into(),
         String::new(),
         "Orchestration::~Orchestration() = default;".into(),
-    ];
+    ]);
+
+    let mut workers = Vec::new();
     for e in entries {
-        methods.push(String::new());
-        methods.push(format!("Status Orchestration::enqueue_{}(Vec3 origin, const HostConsts& host_consts) {{", e.base));
-        methods.push("    Impl& s = *impl_;".into());
-        if has_host_inputs {
-            methods.extend(
-                [
-                    "    // Blocks only if the upload that last read this slot hasn't finished.",
-                    "    const unsigned slot = s.next_slot++ % host_consts_ring;",
-                    "    TUNGSTEN_CUDA_CHECK(cudaEventSynchronize(s.staging_events[slot]));",
-                    "    std::memcpy(s.staging[slot], &host_consts, sizeof(HostConsts));",
-                ]
-                .map(String::from),
-            );
-            methods.push(format!(
-                "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.host_consts, s.staging[slot], sizeof(dev::{}), cudaMemcpyHostToDevice, s.stream));",
+        let w = &e.names.worker;
+        let layout = format!("dev::{}", e.names.layout);
+        let hosts = entry_host_inputs(program, interface, e.index);
+        let has_hosts = !hosts.is_empty();
+        let refined = !e.refinements.is_empty();
+
+        // Impl
+        let mut impl_lines = vec![
+            format!("/// Device and pinned host resources of one `{}`. Released in reverse order.", w),
+            format!("struct {}::Impl {{", w),
+            "    std::shared_ptr<const OrchestrationShared> shared;".into(),
+            "    cudaStream_t stream = nullptr;".into(),
+            "    char* slab = nullptr;".into(),
+            format!("    dev::{}* host_consts = nullptr;", DEVICE_HOST_CONSTS_STRUCT),
+            "    /// Pinned staging slots for host const uploads, each guarded by an event.".into(),
+            format!("    dev::{}* staging[host_consts_ring] = {{}};", DEVICE_HOST_CONSTS_STRUCT),
+            "    cudaEvent_t staging_events[host_consts_ring] = {};".into(),
+            "    unsigned next_slot = 0;".into(),
+        ];
+        if refined {
+            impl_lines.push("    /// The origin of the last enqueue(), which the refine calls continue from.".into());
+            impl_lines.push("    double3 origin = {0.0, 0.0, 0.0};".into());
+        }
+        impl_lines.push(format!("    {}* result = nullptr; // pinned", e.qualified_element()));
+        impl_lines.extend(
+            [
+                "",
+                "    ~Impl() {",
+                "        // Errors are ignored: this is a destructor.",
+                "        if (stream) cudaStreamSynchronize(stream);",
+                "        if (result) cudaFreeHost(result);",
+                "        for (unsigned i = host_consts_ring; i-- > 0;) {",
+                "            if (staging_events[i]) cudaEventDestroy(staging_events[i]);",
+                "            if (staging[i]) cudaFreeHost(staging[i]);",
+                "        }",
+                "        if (host_consts) cudaFree(host_consts);",
+                "        if (slab) cudaFree(slab);",
+                "        if (stream) cudaStreamDestroy(stream);",
+                "    }",
+                "};",
+            ]
+            .map(String::from),
+        );
+        workers.push(impl_lines.join("\n"));
+
+        // Factory
+        let mut factory = vec![
+            format!("Status Orchestration::{}(std::unique_ptr<{}>& out) const {{", e.names.factory, w),
+            "    out.reset();".into(),
+            "    int device = 0;".into(),
+            "    TUNGSTEN_CUDA_CHECK(cudaGetDevice(&device));".into(),
+            "    if (device != shared_->device) return Status{(int)cudaErrorInvalidDevice};".into(),
+            format!("    std::unique_ptr<{}::Impl> impl(new {}::Impl());", w, w),
+            "    impl->shared = shared_;".into(),
+            "    TUNGSTEN_CUDA_CHECK(cudaStreamCreateWithFlags(&impl->stream, cudaStreamNonBlocking));".into(),
+            String::new(),
+            "    // One slab for every buffer of the worker, zeroed.".into(),
+            format!("    if ({}::total_bytes > 0) {{", layout),
+            format!("        TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&impl->slab), {}::total_bytes));", layout),
+            format!("        TUNGSTEN_CUDA_CHECK(cudaMemsetAsync(impl->slab, 0, {}::total_bytes, impl->stream));", layout),
+            "    }".into(),
+            format!(
+                "    TUNGSTEN_CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&impl->host_consts), sizeof(dev::{})));",
                 DEVICE_HOST_CONSTS_STRUCT
-            ));
-            methods.push("    TUNGSTEN_CUDA_CHECK(cudaEventRecord(s.staging_events[slot], s.stream));".into());
-        } else {
-            methods.push("    (void)host_consts; // no static host inputs".into());
+            ),
+            format!(
+                "    TUNGSTEN_CUDA_CHECK(cudaMemsetAsync(impl->host_consts, 0, sizeof(dev::{}), impl->stream));",
+                DEVICE_HOST_CONSTS_STRUCT
+            ),
+        ];
+        if has_hosts {
+            factory.extend([
+                "    for (unsigned i = 0; i < host_consts_ring; ++i) {".to_string(),
+                format!(
+                    "        TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->staging[i]), sizeof(dev::{}), cudaHostAllocDefault));",
+                    DEVICE_HOST_CONSTS_STRUCT
+                ),
+                format!("        std::memset(impl->staging[i], 0, sizeof(dev::{}));", DEVICE_HOST_CONSTS_STRUCT),
+                "        TUNGSTEN_CUDA_CHECK(cudaEventCreateWithFlags(&impl->staging_events[i], cudaEventDisableTiming));".into(),
+                "    }".into(),
+            ]);
         }
-        methods.push("    const double3 o = make_double3(origin.x, origin.y, origin.z);".into());
-        for (w, wave) in interface.waves_for(&e.inst).iter().enumerate() {
-            methods.push(format!("    // wave {}", w));
-            for inst in wave {
-                let shape = launch_shape(inst.dimensions, config.block_size);
-                methods.push(format!(
-                    "    dev::{}<<<{}, {}, 0, s.stream>>>(o, s.slab, s.auto_constants, s.host_consts);",
-                    kernel_symbol(config, interface, inst),
-                    shape.blocks,
-                    shape.threads
+        factory.extend([
+            format!(
+                "    TUNGSTEN_CUDA_CHECK(cudaHostAlloc(reinterpret_cast<void**>(&impl->result), {}::len * sizeof({}), cudaHostAllocDefault));",
+                w,
+                e.qualified_element()
+            ),
+            String::new(),
+            "    TUNGSTEN_CUDA_CHECK(cudaStreamSynchronize(impl->stream));".into(),
+            format!("    out.reset(new {}(std::move(impl)));", w),
+            "    return Status{};".into(),
+            "}".into(),
+        ]);
+        workers.push(factory.join("\n"));
+
+        // Methods
+        let mut methods = vec![
+            format!("{0}::{0}(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {{}}", w),
+            String::new(),
+            format!("{0}::~{0}() = default;", w),
+        ];
+        // The shared head of `enqueue` and the refine calls: copy this entry's hosts and upload.
+        let upload = |m: &mut Vec<String>| {
+            if has_hosts {
+                m.push("    // Blocks only if the upload that last read this slot hasn't finished.".into());
+                m.push("    const unsigned slot = s.next_slot++ % host_consts_ring;".into());
+                m.push("    TUNGSTEN_CUDA_CHECK(cudaEventSynchronize(s.staging_events[slot]));".into());
+                for (name, _) in &hosts {
+                    m.push(format!("    std::memcpy(&s.staging[slot]->{n}, &host_consts.{n}, sizeof(host_consts.{n}));", n = name));
+                }
+                m.push(format!(
+                    "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.host_consts, s.staging[slot], sizeof(dev::{}), cudaMemcpyHostToDevice, s.stream));",
+                    DEVICE_HOST_CONSTS_STRUCT
                 ));
-                methods.push("    TUNGSTEN_CUDA_CHECK(cudaGetLastError());".into());
+                m.push("    TUNGSTEN_CUDA_CHECK(cudaEventRecord(s.staging_events[slot], s.stream));".into());
+            } else {
+                m.push("    (void)host_consts; // no static host inputs".into());
             }
-        }
-        methods.push(format!(
-            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result_{b}, s.slab + {l}::{f}, Orchestration::{b}_len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
-            b = e.base,
-            l = layout_name(),
+        };
+        let copy_result = format!(
+            "    TUNGSTEN_CUDA_CHECK(cudaMemcpyAsync(s.result, s.slab + {l}::{f}, {w}::len * sizeof({t}), cudaMemcpyDeviceToHost, s.stream));",
+            l = layout,
             f = interface.buffer_field(&e.inst),
-            t = e.public_element
-        ));
+            w = w,
+            t = e.qualified_element()
+        );
+
+        methods.push(String::new());
+        methods.push(format!("Status {w}::enqueue(Vec3 origin, const {}& host_consts) {{", e.names.host_consts));
+        methods.push("    Impl& s = *impl_;".into());
+        upload(&mut methods);
+        methods.push("    const double3 o = make_double3(origin.x, origin.y, origin.z);".into());
+        if refined {
+            methods.push("    s.origin = o;".into());
+        }
+        let schedule: Vec<Vec<Kernel>> = interface
+            .worker_schedule(e.index)
+            .iter()
+            .map(|wave| wave.iter().map(|i| Kernel::of_instance(interface, i)).collect())
+            .collect();
+        methods.extend(launches(program, interface, config, e, &schedule));
+        methods.push(copy_result.clone());
         methods.push("    return Status{};".into());
         methods.push("}".into());
+
+        for &r in &e.refinements {
+            methods.push(String::new());
+            methods.push(format!(
+                "Status {w}::enqueue_{}(Pos3 offset, const {}& host_consts) {{",
+                interface.refine_method(r),
+                e.names.host_consts
+            ));
+            methods.push("    Impl& s = *impl_;".into());
+            upload(&mut methods);
+            methods.push("    const double3 o = s.origin;".into());
+            methods.push("    const int3 off = make_int3(offset.x, offset.y, offset.z);".into());
+            let waves: Vec<Vec<Kernel>> = interface
+                .refine_waves(r)
+                .iter()
+                .map(|wave| wave.iter().map(|run| Kernel::of_run(interface, run)).collect())
+                .collect();
+            methods.extend(launches(program, interface, config, e, &waves));
+            methods.push(copy_result.clone());
+            methods.push("    return Status{};".into());
+            methods.push("}".into());
+        }
+
         methods.push(String::new());
         methods.push(match (e.single(), e.alias.is_some()) {
-            (true, false) => format!(
-                "{t} Orchestration::result_{b}() const {{ return impl_->result_{b}[0]; }}",
-                t = e.public_element,
-                b = e.base
-            ),
-            (true, true) => format!(
-                "const Orchestration::{t}& Orchestration::result_{b}() const {{ return impl_->result_{b}[0]; }}",
-                t = e.public_element,
-                b = e.base
-            ),
-            (false, true) => format!(
-                "const Orchestration::{t}* Orchestration::result_{b}() const {{ return impl_->result_{b}; }}",
-                t = e.public_element,
-                b = e.base
-            ),
-            (false, false) => format!(
-                "const {t}* Orchestration::result_{b}() const {{ return impl_->result_{b}; }}",
-                t = e.public_element,
-                b = e.base
-            ),
+            (true, false) => format!("{t} {w}::result() const {{ return impl_->result[0]; }}", t = e.public_element),
+            (true, true) => format!("const {w}::{t}& {w}::result() const {{ return impl_->result[0]; }}", t = e.public_element),
+            (false, true) => format!("const {w}::{t}* {w}::result() const {{ return impl_->result; }}", t = e.public_element),
+            (false, false) => format!("const {t}* {w}::result() const {{ return impl_->result; }}", t = e.public_element),
         });
+        methods.extend(
+            [
+                String::new(),
+                format!("Status {w}::sync() {{"),
+                "    TUNGSTEN_CUDA_CHECK(cudaStreamSynchronize(impl_->stream));".into(),
+                "    return Status{};".into(),
+                "}".into(),
+                String::new(),
+                format!("Status {w}::query() {{"),
+                "    return Status{(int)cudaStreamQuery(impl_->stream)};".into(),
+                "}".into(),
+            ],
+        );
+        workers.push(methods.join("\n"));
     }
-    methods.extend(
-        [
-            "",
-            "Status Orchestration::sync() {",
-            "    TUNGSTEN_CUDA_CHECK(cudaStreamSynchronize(impl_->stream));",
-            "    return Status{};",
-            "}",
-            "",
-            "Status Orchestration::query() {",
-            "    return Status{(int)cudaStreamQuery(impl_->stream)};",
-            "}",
-        ]
-        .map(String::from),
-    );
+    let _ = host_inputs;
+
+    let mut items = vec![
+        cuda::Item::Raw(asserts.join("\n")),
+        cuda::Item::Blank,
+        cuda::Item::Raw(
+            "const char* Status::message() const { return cudaGetErrorString(static_cast<cudaError_t>(code)); }".into(),
+        ),
+        cuda::Item::Blank,
+        cuda::Item::Raw(format!("namespace {{\nconstexpr unsigned host_consts_ring = {};\n}} // namespace", config.host_consts_ring)),
+        cuda::Item::Blank,
+        cuda::Item::Raw(shared),
+        cuda::Item::Blank,
+        cuda::Item::Raw(create.join("\n")),
+    ];
+    for w in workers {
+        items.push(cuda::Item::Blank);
+        items.push(cuda::Item::Raw(w));
+    }
 
     cuda::File {
         items: vec![
@@ -663,33 +875,9 @@ fn orchestration_source(program: &OptimizedProgram, interface: &Interface, confi
             cuda::Item::Blank,
             cuda::Item::Raw(check_macro),
             cuda::Item::Blank,
-            cuda::Item::Namespace {
-                name: ns.clone(),
-                items: vec![
-                    cuda::Item::Raw(asserts.join("\n")),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(
-                        "const char* Status::message() const { return cudaGetErrorString(static_cast<cudaError_t>(code)); }".into(),
-                    ),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(format!(
-                        "namespace {{\nconstexpr unsigned host_consts_ring = {};\n}} // namespace",
-                        config.host_consts_ring
-                    )),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(impl_lines.join("\n")),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(create.join("\n")),
-                    cuda::Item::Blank,
-                    cuda::Item::Raw(methods.join("\n")),
-                ],
-            },
+            cuda::Item::Namespace { name: ns.clone(), items },
         ],
     }
-}
-
-fn layout_name() -> String {
-    format!("dev::{}", BUFFER_LAYOUT)
 }
 
 /// Orchestration-side generator: drives the device side and assembles the four files.
@@ -718,7 +906,7 @@ impl<'a> TransformCudaOrchestration<'a> {
 }
 
 impl<'a> OrchestrationCodegen<'a> for TransformCudaOrchestration<'a> {
-    /// Generates the kernels on the device side in wave order, then the headers and host source.
+    /// Generates the kernels on the device side in wave order, then the refine kernels, then the headers and host source.
     /// Calling it again replaces the files.
     fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
         for wave in interface.waves() {
@@ -726,12 +914,17 @@ impl<'a> OrchestrationCodegen<'a> for TransformCudaOrchestration<'a> {
                 self.device.generate_kernel_of(vec![inst.cu]);
             }
         }
+        for r in 0..program.refinements.len() {
+            for run in interface.refine_waves(r).iter().flatten() {
+                self.device.generate_refine_kernel(run);
+            }
+        }
         let entries = entries(program, self.rules);
         let print = |file: cuda::File| CudaCodeGenerator::new().generate(&file);
         let device_namespace = format!("{}::{}", self.config.namespace, DEVICE_NAMESPACE);
         self.files = Some(CudaFiles {
             public_header: print(public_header(program, interface, self.config, &entries)),
-            interface_header: print(interface_header(program, interface, self.config)),
+            interface_header: print(interface_header(program, interface, self.config, &entries)),
             density_source: self.device.render(&device_namespace, &[self.config.interface_header_name.clone()]),
             orchestration_source: print(orchestration_source(program, interface, self.config, &entries)),
         });

@@ -24,7 +24,7 @@ fn cstub(id: &str, body: &str, extra: &str) -> TestSource {
         "//@@FILE {id}.cu\n#define TUNGSTEN_PROFILE_EXACT 1\n#include \"tw/tungsten_runtime.cuh\"\n#include \"tw/profile_exact.cuh\"\n\
          #include \"tw/proto.h\"\n#include <string>\n{extra}\n\
          static bool run(tw::proto::Reader& r, tw::proto::Writer& w, std::string& err) {{ {body} }}\n\
-         int tw_serve_{id}() {{ cudaSetDevice(0); return tw::proto::serve(28, run); }}\n"
+         int tw_serve_{id}() {{ cudaSetDevice(0); return tw::proto::serve(28, 16, run); }}\n"
     );
     TestSource { name: id.to_string(), id: id.to_string(), source }
 }

@@ -1,5 +1,4 @@
 // Inlining: a callee with its own mapped input is inlined, and the caller lists that input from then on.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> i32 {
         return (ambient(pos3).x * 10);

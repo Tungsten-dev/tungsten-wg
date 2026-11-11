@@ -6,6 +6,9 @@
 // the same code the kernels run. Semantics follow `runtime/rust/`, not the vendored upstream.
 #pragma once
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <cuda_runtime.h>
 
 #define TW_HD __host__ __device__ constexpr
@@ -156,6 +159,20 @@ TW_HD PositionIterator make_position(const Config& c, int3 local) {
 }
 TW_HD int index(PositionIterator p) { return p.idx; }
 
+// ---- bounds checks (`BufferBounds::PerBuffer`, `debug_checks`) ------------------------------
+// An out-of-range index prints and traps, which the host sees as a sticky error.
+TW_HDI int check_index(int i, int n, const char* where) {
+    if (i < 0 || i >= n) {
+        std::printf("tw: index %d out of bounds for length %d in %s\n", i, n, where);
+#ifdef __CUDA_ARCH__
+        __trap();
+#else
+        std::abort();
+#endif
+    }
+    return i;
+}
+
 // ---- toy tables (crate README, "Rules and contracts, Toy tables") -----------------------------------------------------------------
 TW_HD unsigned long long splitmix64(unsigned long long x) {
     unsigned long long z = x + 0x9E3779B97F4A7C15ULL;
@@ -223,3 +240,6 @@ TW_HDI float make_f32(double v) { return (float)v; }
 }  // namespace tw
 
 #include "records.cuh"
+
+/// Evaluates each argument once and returns the index.
+#define TW_CHECK_INDEX(i, n, where) ::tw::check_index((i), (n), (where))

@@ -7,7 +7,7 @@ wrapper, so a future fused kernel can call several bodies unchanged.
 
 use std::collections::{HashMap, HashSet};
 
-use tungsten_interface::{Instance, Interface};
+use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref, VariableType};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
@@ -18,7 +18,7 @@ use super::launch::launch_shape;
 use super::types::{device_type, is_pointer, is_scalar, unit_return_type};
 use super::{
     AUTO_CONSTS_STRUCT, CONFIG_TYPE, CTX_STRUCT, DEVICE_HOST_CONSTS_STRUCT, PARAM_CTX, PARAM_POS,
-    POSITION_ITERATOR_TYPE, kernel_body_name, kernel_symbol, uniform_parameters,
+    POSITION_ITERATOR_TYPE, uniform_parameters,
 };
 use crate::backend::{CudaConfig, InlinePolicy};
 use crate::model as cuda;
@@ -33,7 +33,17 @@ pub struct Converted {
     pub called: Vec<Ref<Function>>,
     /// Namespace-level constants read by the body that the caller must still generate.
     pub constants: Vec<Ref<Constant>>,
+    /// Lerp helpers called by the body that the caller must still generate.
+    pub lerps: Vec<LerpHelper>,
     pub warnings: Vec<String>,
+}
+
+/// Name of a kernel's own slot offset.
+pub const KERNEL_OUT_OFFSET: &str = "out_off";
+
+/// The `unsigned long long` byte offset parameter of every input `f` reads, after the uniform parameters.
+fn offset_parameters(naming: &Interface, f: Ref<Function>) -> Vec<(cuda::Type, String)> {
+    naming.input_params(f).iter().map(|&d| (cuda::Type::UnsignedLongLong, naming.offset_param(d).to_string())).collect()
 }
 
 /// Qualifiers of density and helper functions.
@@ -61,7 +71,7 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<cuda
 }
 
 fn finish(conv: FunctionConverter<'_>, function: cuda::Function) -> Converted {
-    Converted { function, called: conv.called, constants: conv.used_constants, warnings: conv.warnings }
+    Converted { function, called: conv.called, constants: conv.used_constants, lerps: conv.used_lerps, warnings: conv.warnings }
 }
 
 /// Converts a helper function: uniform parameters, then its own parameters, then the body.
@@ -74,8 +84,9 @@ pub fn convert_helper<'a>(
 ) -> Converted {
     let func = &program.functions[f];
     let name = naming.helper(f).to_string();
-    let mut conv = FunctionConverter::new(program, naming, config, func, &name, used_names.clone());
+    let mut conv = FunctionConverter::new(program, naming, config, func, &name, used_names.clone()).with_offsets(f);
     let mut params = uniform_parameters();
+    params.extend(offset_parameters(naming, f));
     // Helper-specific parameters follow the uniform ones.
     for p in &func.parameters {
         let param = conv.declare_var(*p);
@@ -109,7 +120,7 @@ pub fn convert_density<'a>(
     let ComputeUnit::DensityFunction { function, source_hash, .. } = &program.compute_units[cu];
     let func = &program.functions[*function];
     let name = naming.density_fn(cu, dimensions).to_string();
-    let mut conv = FunctionConverter::new(program, naming, config, func, &name, used_names.clone());
+    let mut conv = FunctionConverter::new(program, naming, config, func, &name, used_names.clone()).with_offsets(*function);
     let mut body = declare_locals(&mut conv, func);
     body.extend(conv.convert_block(&func.body));
     let doc = format!(
@@ -123,7 +134,7 @@ pub fn convert_density<'a>(
         return_type: device_type(&func.return_type),
         attributes: String::new(),
         name,
-        params: uniform_parameters(),
+        params: uniform_parameters().into_iter().chain(offset_parameters(naming, *function)).collect(),
         body: Some(body),
     };
     finish(conv, function)
@@ -211,27 +222,70 @@ fn int3(x: cuda::Expression, y: cuda::Expression, z: cuda::Expression) -> cuda::
     C::BraceInit { t: cuda::Type::named("int3"), items: vec![x, y, z] }
 }
 
-/// The parameters every kernel body and wrapper shares after `local`.
-fn kernel_parameters() -> Vec<(cuda::Type, String)> {
+
+/// One kernel: the unit it runs per cell, the instance whose grid and buffer it fills, and its
+/// name. A refine kernel (`specs/refinement.md` §6.2) has an extra `offset` parameter that moves the
+/// iterator's position only.
+#[derive(Debug, Clone)]
+pub struct Kernel {
+    pub target: Instance,
+    pub unit: Ref<ComputeUnit>,
+    /// `Interface::kernel` or `Interface::refine_kernel`.
+    pub base: String,
+    pub refine: bool,
+}
+
+impl Kernel {
+    pub fn of_instance(naming: &Interface, inst: &Instance) -> Self {
+        Self { target: *inst, unit: inst.cu, base: naming.kernel(inst).to_string(), refine: false }
+    }
+
+    pub fn of_run(naming: &Interface, run: &RefineRun) -> Self {
+        Self { target: run.target, unit: run.unit, base: naming.refine_kernel(run).to_string(), refine: true }
+    }
+
+    /// The `extern "C"` symbol: `<kernel_prefix><base>`.
+    pub fn symbol(&self, config: &CudaConfig) -> String {
+        format!("{}{}", config.effective_kernel_prefix(), self.base)
+    }
+
+    /// The `__device__` function holding the per-instance logic.
+    pub fn body_name(&self) -> String {
+        format!("{}_body", self.base)
+    }
+}
+
+/// The parameters a kernel body and its wrapper share after `local`: the origin, the offset of a
+/// refine kernel, the slab, the kernel's own slot offset and its unit's input offsets, and the
+/// constants.
+fn kernel_parameters(program: &OptimizedProgram, naming: &Interface, k: &Kernel) -> Vec<(cuda::Type, String)> {
     let restrict = |n: &str| cuda::Type::const_restrict_ptr(cuda::Type::named(n));
-    vec![
-        (cuda::Type::named("double3"), "origin".into()),
-        (cuda::Type::ptr(cuda::Type::Char), "buffers".into()),
-        (restrict(AUTO_CONSTS_STRUCT), "auto_constants".into()),
-        (restrict(DEVICE_HOST_CONSTS_STRUCT), "host_consts".into()),
-    ]
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[k.unit];
+    let mut params = vec![(cuda::Type::named("double3"), "origin".to_string())];
+    if k.refine {
+        params.push((cuda::Type::named("int3"), "offset".into()));
+    }
+    params.push((cuda::Type::ptr(cuda::Type::Char), "buffers".into()));
+    params.push((cuda::Type::UnsignedLongLong, KERNEL_OUT_OFFSET.into()));
+    params.extend(offset_parameters(naming, *function));
+    params.push((restrict(AUTO_CONSTS_STRUCT), "auto_constants".into()));
+    params.push((restrict(DEVICE_HOST_CONSTS_STRUCT), "host_consts".into()));
+    params
 }
 
-fn kernel_arguments() -> Vec<cuda::Expression> {
-    kernel_parameters().into_iter().map(|(_, n)| C::Name(n)).collect()
+fn kernel_arguments(program: &OptimizedProgram, naming: &Interface, k: &Kernel) -> Vec<cuda::Expression> {
+    kernel_parameters(program, naming, k).into_iter().map(|(_, n)| C::Name(n)).collect()
 }
 
-/// `__device__ void <kernel>_body(int3 local, ...)`: bounds check, `Ctx`, position, call, store.
-pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config: &CudaConfig, inst: &Instance) -> cuda::Function {
+/// `__device__ void <kernel>_body(int3 local, ...)`: bounds check, `Ctx`, position, call, store at
+/// `out_off + idx`.
+pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config: &CudaConfig, k: &Kernel) -> cuda::Function {
+    let inst = &k.target;
     let element = device_type(unit_return_type(program, inst.cu));
     if element.is_pointer() {
         panic!("compute unit {} returns a sampler, which can't be stored in a buffer", naming.density_fn(inst.cu, inst.dimensions));
     }
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[k.unit];
     let (dx, dy, dz) = inst.dimensions;
     let local = |f: &str| C::field(C::name("local"), f);
     let ge = |a, b| C::binary(cuda::BinaryOperator::GreaterEqual, a, b);
@@ -257,37 +311,48 @@ pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config:
     };
     let mut index = C::call("tw::index", vec![C::name(PARAM_POS)]);
     if config.debug_checks {
-        let location = C::Raw(format!("\"{}\"", kernel_symbol(config, naming, inst)));
+        let location = C::Raw(format!("\"{}\"", k.symbol(config)));
         index = C::call("TW_CHECK_INDEX", vec![index, C::IntLit(dx * dy * dz), location]);
     }
-    let body = vec![
+    let mut body = vec![
         S::If { cond: out_of_bounds, then: vec![S::Return(None)], other: vec![] },
         S::Declare { t: cuda::Type::named(CTX_STRUCT), name: PARAM_CTX.into(), init: Some(ctx), is_const: true },
         S::Declare {
             t: cuda::Type::named(POSITION_ITERATOR_TYPE),
             name: PARAM_POS.into(),
             init: Some(C::call("tw::make_position", vec![C::field(C::name(PARAM_CTX), "config"), C::name("local")])),
-            is_const: true,
-        },
-        S::Declare {
-            t: element.clone(),
-            name: "r".into(),
-            init: Some(C::call(naming.density_fn(inst.cu, inst.dimensions), vec![C::name(PARAM_POS), C::name(PARAM_CTX)])),
-            is_const: true,
-        },
-        S::Assign {
-            target: C::index(buffer_pointer(element, C::name("buffers"), naming.buffer_field(inst)), index),
-            value: C::name("r"),
+            // A refine kernel moves `pos` below, and leaves `idx`, which the store and unindexed reads use.
+            is_const: !k.refine,
         },
     ];
+    if k.refine {
+        for axis in ["x", "y", "z"] {
+            let pos = C::field(C::field(C::name(PARAM_POS), "pos"), axis);
+            body.push(S::Assign {
+                target: pos.clone(),
+                value: C::binary(cuda::BinaryOperator::Add, pos, C::field(C::name("offset"), axis)),
+            });
+        }
+    }
+    let mut args = vec![C::name(PARAM_POS), C::name(PARAM_CTX)];
+    args.extend(offset_parameters(naming, *function).into_iter().map(|(_, n)| C::Name(n)));
+    body.push(S::Declare {
+        t: element.clone(),
+        name: "r".into(),
+        init: Some(C::call(naming.density_fn(k.unit, inst.dimensions), args)),
+        is_const: true,
+    });
+    // In range by construction, so never the `PerBuffer` form.
+    let out = buffer_pointer(element, C::name("buffers"), C::name(KERNEL_OUT_OFFSET));
+    body.push(S::Assign { target: C::index(out, index), value: C::name("r") });
     let mut params = vec![(cuda::Type::named("int3"), "local".to_string())];
-    params.extend(kernel_parameters());
+    params.extend(kernel_parameters(program, naming, k));
     cuda::Function {
         doc: None,
         qualifiers: "__device__".into(),
         return_type: cuda::Type::Void,
         attributes: String::new(),
-        name: kernel_body_name(naming, inst),
+        name: k.body_name(),
         params,
         body: Some(body),
     }
@@ -297,10 +362,16 @@ pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config:
 /// linear thread id into `local` (x fastest) and calls the body. Ids past the element count decode
 /// to `z >= DZ`, which the body's bounds check rejects. Without `body` it is the declaration that
 /// `interface.cuh` uses.
-pub fn build_kernel_wrapper(naming: &Interface, config: &CudaConfig, inst: &Instance, with_body: bool) -> cuda::Function {
+pub fn build_kernel_wrapper(
+    program: &OptimizedProgram,
+    naming: &Interface,
+    config: &CudaConfig,
+    k: &Kernel,
+    with_body: bool,
+) -> cuda::Function {
     use cuda::BinaryOperator::{Add, Divide, Multiply, Subtract};
-    let shape = launch_shape(inst.dimensions, config.block_size);
-    let (dx, dy, _) = inst.dimensions;
+    let shape = launch_shape(k.target.dimensions, config.block_size);
+    let (dx, dy, _) = k.target.dimensions;
     let declare = |name: &str, init| S::Declare { t: cuda::Type::Int, name: name.into(), init: Some(init), is_const: true };
     let linear = C::cast(
         cuda::Type::Int,
@@ -316,20 +387,20 @@ pub fn build_kernel_wrapper(naming: &Interface, config: &CudaConfig, inst: &Inst
         C::name("z"),
     );
     let mut args = vec![local];
-    args.extend(kernel_arguments());
+    args.extend(kernel_arguments(program, naming, k));
     cuda::Function {
         doc: None,
         qualifiers: "extern \"C\" __global__".into(),
         return_type: cuda::Type::Void,
         attributes: format!("__launch_bounds__({})", shape.threads_per_block()),
-        name: kernel_symbol(config, naming, inst),
-        params: kernel_parameters(),
+        name: k.symbol(config),
+        params: kernel_parameters(program, naming, k),
         body: with_body.then(|| {
             vec![
                 declare("i", linear),
                 declare("yz", C::binary(Divide, C::name("i"), C::IntLit(dx))),
                 declare("z", C::binary(Divide, C::name("yz"), C::IntLit(dy))),
-                S::Expr(C::call(&kernel_body_name(naming, inst), args)),
+                S::Expr(C::call(&k.body_name(), args)),
             ]
         }),
     }

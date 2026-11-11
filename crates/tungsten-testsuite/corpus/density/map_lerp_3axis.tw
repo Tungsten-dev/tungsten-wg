@@ -1,5 +1,4 @@
 // Lerp: all three axes interpolated, x first, then y, then z.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {
         let c: pos3 = ambient(pos3);

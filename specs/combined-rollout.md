@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1, 2A, 2B and 3 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1, 2A, 2B, 3 and 4 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -223,12 +223,12 @@ Three separate steps, each green before the next.
 
 Needs `nvcc` and the GPU.
 
-- [ ] **Workers (M4).** §3.3 and §5.4, the per-worker `<Base>Layout`, shared device autoconsts, worker streams, `Option<BufferBounds>`,
+- [x] **Workers (M4).** §3.3 and §5.4, the per-worker `<Base>Layout`, shared device autoconsts, worker streams, `Option<BufferBounds>`,
       harness move, removal of `BufferLayout`, and the CUDA §8 rows, including two workers on two host threads
-- [ ] **Mappings (M5).** Expand and the `__forceinline__` lerp helpers. Drop the guard and notes. Mutation checks
-- [ ] **Refinement (M5).** Refine kernels, `enqueue_refine_<name>`, real step handling in the driver and `tw::proto`. Remove
+- [x] **Mappings (M5).** Expand and the `__forceinline__` lerp helpers. Drop the guard and notes. Mutation checks
+- [x] **Refinement (M5).** Refine kernels, `enqueue_refine_<name>`, real step handling in the driver and `tw::proto`. Remove
       notes. Mutation checks, marched slices, worker isolation
-- [ ] Delete the guard helper (§3.1) and remove anything in `Interface` only the old APIs used
+- [x] Delete the guard helper (§3.1) and remove anything in `Interface` only the old APIs used
 
 **Exit.** `cargo test --workspace` is green with CUDA enabled, and a search for `pending: combined-rollout` finds nothing.
 
@@ -420,3 +420,28 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   and refine, the refusals and the 245/246 limit. `tungsten-testsuite/tests/java_workers.rs` builds and runs concurrency
   (an `ExecutorService`, with workers created on the pool and handed over), the bounds modes (`Unchecked` equals `Slab`),
   the lerp bounds, marched slices and worker isolation.
+
+**Phase 4 (CUDA).**
+
+- **Classes.** `Orchestration` holds a `shared_ptr<const OrchestrationShared>` (device id and device `AutoConsts`).
+  Each entry gets `<Base>HostConsts` and `<Base>Worker` in the public header, a `dev::<Base>Layout` in
+  `interface.cuh`, and a factory `create_<base>_worker`. Names come from `cuda_worker_names`. The program-wide public
+  `HostConsts` and `BufferLayout` are gone; `dev::DeviceHostConsts` stays as the internal struct, and a worker copies
+  each of its entry's fields into it as bytes (`static_assert`ed to match).
+- **Kernels.** `<symbol>(origin, [offset], buffers, out_off, off_.., auto_constants, host_consts)`. Offsets are
+  `unsigned long long` byte offsets. A refine kernel's `p` is non-const: it adds `offset` to `p.pos` and leaves `idx`.
+  Interface declarations list only kernels that are generated.
+- **`Slab` deviation.** `BufferBounds::Slab` generates the same code as `Unchecked` on CUDA, since worker-shared device
+  code has no slab length (`specs/workers.md` §5.1 says it checks against the slab). `CudaConfig::effective_bounds`
+  gives the mode.
+- **Runtime.** The test runtime defines `tw::check_index` and `TW_CHECK_INDEX` (print, then trap). The harness compiles
+  with `PerBuffer`. `proto.h` has `serve(request_len, step_len, run)` and `Reader::u32`.
+- **Guard** (`guard.rs`, `Feature`, `check_implemented`) is deleted, and `DeviceCodegen::generate_refine_kernel` has
+  no default body any more.
+- **Mutation checks** (each reverted). Reversing the lerp axis order turned 8 `map_lerp_*` trials red, a `t == 0`
+  shortcut turned `map_lerp_neg_zero` and `map_lerp_inf_nan` red (4 trials), dropping the offset turned the `refine/`
+  trials red, and adding the offset to `idx` did too. Rerunning a frozen instance and reading `@previous` from the cell
+  after are `Interface` rules shared with Rust and Java, so they were not repeated.
+- **Tests.** `tungsten-cuda/src/tests.rs` has text checks for layouts, offsets, mappings, bounds modes and refinement.
+  `tests/cuda_workers.rs` has two workers on two host threads, marched slices by bits, and worker isolation.
+- **Large tier** still not run on CUDA, as on Rust and Java.

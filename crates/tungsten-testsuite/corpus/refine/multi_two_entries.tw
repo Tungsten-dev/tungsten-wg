@@ -1,5 +1,4 @@
 // Multiple: two entries, only one refined. Orchestrate computes both.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn a_main() -> i32 @hosts(k) { return host(k); }

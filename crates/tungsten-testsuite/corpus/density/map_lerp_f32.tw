@@ -1,5 +1,4 @@
 // Lerp: an f32 input interpolates in f32, rounding after each step.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f32 {
         let c: pos3 = ambient(pos3);

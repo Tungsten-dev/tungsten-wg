@@ -13,14 +13,12 @@ use tungsten_ir::model::{AutoConst, AutoParam, AxisFactor,
 };
 
 pub mod compiler;
-mod guard;
 pub mod naming;
 mod refine;
 pub mod scale;
 mod workers;
 
 pub use compiler::{CompileError, Compiler, Inline, Passes};
-pub use guard::{Feature, check_implemented};
 pub use refine::RefineRun;
 pub use scale::Scale;
 pub use workers::{Pool, Slot, WorkerLayout};
@@ -99,12 +97,8 @@ pub trait DeviceCodegen {
     /// Generates the kernels running `cus` (implies `generate_compute_unit`).
     fn generate_kernel_of(&mut self, cus: Vec<Ref<ComputeUnit>>); // currently only 1 at a time
     /// Generates the refine kernel of one run (`specs/refinement.md` §6.2), and its unit at the
-    /// target's dims. Only called for programs with refinements, which backends refuse until
-    /// they implement them (`check_implemented`).
-    fn generate_refine_kernel(&mut self, run: &RefineRun) {
-        let _ = run;
-        panic!("{} does not implement refinement yet", self.codegen_language());
-    }
+    /// target's dims. Only called for programs with refinements.
+    fn generate_refine_kernel(&mut self, run: &RefineRun);
     fn codegen_language(&self) -> &str;
     /// Everything generated so far as source text, wrapped in `module_name` and importing `imports`.
     fn render(&self, module_name: &str, imports: &[String]) -> String;

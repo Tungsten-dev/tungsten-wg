@@ -1,5 +1,4 @@
 // Multiple: each case starts with a fresh orchestrate, so state from another case's refine calls doesn't carry over.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return 0; }
     unit seed { main seed_main; }

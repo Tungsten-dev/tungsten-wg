@@ -42,17 +42,25 @@ Known divergences from `tungsten-rust`, to rule out first in differential tests:
 
 ## Host orchestration contract
 
-- `create(<params>, out)` takes one typed argument per auto param, in declaration order (a program with
-  only `seed: i64` has `create(long long seed, out)`). It uses the current device (the caller calls `cudaSetDevice` first) and its
-  own non-blocking stream. On failure it releases what it acquired and leaves `out` null.
-- All work of an `Orchestration` runs on that one stream. Calls may be queued while earlier ones
-  are in flight and run in order. No host syncs happen between waves.
-- `result_<entry>()` is valid after `sync()` (or `query()` returning success) and until the next
-  `enqueue_<entry>()`. Calls to other entries don't touch it.
-- The single device `HostConsts` copy is safe to reuse because each upload is stream-ordered after
-  the previous call's kernels. A pinned staging slot is only reused after its event fires.
-- An `Orchestration` is not thread-safe. Use one per host thread. Several can coexist (e.g. with
-  different creation arguments).
+- `Orchestration::create(<params>, out)` takes one typed argument per auto param, in declaration order, and
+  fills a `std::shared_ptr<Orchestration>`. It builds the autoconsts on the host and copies them to the
+  current device once (the caller calls `cudaSetDevice` first). An `Orchestration` is immutable and
+  thread-safe; its job is to spawn workers.
+- `create_<entry>_worker(out)` makes one `<Base>Worker` per entry, on the current device. Another device gives
+  `cudaErrorInvalidDevice`. A worker owns a non-blocking stream, a slab laid out by its `dev::<Base>Layout`
+  (256-byte aligned, the entry's output first), a pinned `HostConsts` staging ring and a pinned result
+  buffer. It holds a `shared_ptr` to the shared state, so it may outlive the `Orchestration`.
+- A worker is not thread-safe: use one per host thread. Two workers on two threads don't interact.
+  CUDA sticky errors are context-wide: after one, the `Orchestration` and every worker are unusable.
+- All work of a worker runs on its stream, in order. No host syncs happen between waves.
+  `enqueue(origin, <Base>HostConsts)` copies that entry's hosts into the device struct and launches the
+  worker's schedule. Entries with refinements also get `enqueue_refine_<name>(Pos3 offset, hosts)`, which
+  continues from the origin of the last `enqueue`.
+- `result()` is valid after `sync()` (or `query()` returning success) and until the next `enqueue*()` of
+  that worker.
+- Buffer reads follow `CudaConfig::buffer_bounds`: `None` means `PerBuffer` (`TW_CHECK_INDEX`, which the runtime
+  must define) with `debug_checks`, else `Unchecked`. `Slab` generates the same code as `Unchecked`, since
+  device code shared by workers has no slab length.
 - Every CUDA call goes through `TUNGSTEN_CUDA_CHECK`, which returns a `Status` by default (works
   with `-fno-exceptions`, safe for JNI). Consumers can override it by defining it first or with
   `-DTUNGSTEN_CUDA_CHECK_HEADER="my_check.h"`. Device traps surface as a sticky error on the next
@@ -119,7 +127,7 @@ next to it, must provide:
 | `(1,1,1)` instances | Ordinary one-thread kernels. | Special-casing: wave fusion will remove the overhead. |
 | Buffers | One slab per `Orchestration`, offsets as `constexpr` in `interface.cuh`, 256-byte aligned. | One `cudaMalloc` per buffer; offsets computed in Rust, which doesn't know the sizes of runtime types. |
 | AutoConsts | Built on the host in heap memory, one H2D copy, read through `const __restrict__`. | The stack (too large). Shared-memory staging is deferred, not rejected. |
-| HostConsts | One device copy, uploaded per call through a ring of pinned staging slots; byte copy, since public and device structs are `static_assert`ed layout-identical. | A blocking upload per call: the ring only waits if a slot's previous H2D is still running. |
+| HostConsts | One device copy per worker, uploaded per call through a ring of pinned staging slots; byte copy, since public and device structs are `static_assert`ed layout-identical. | A blocking upload per call: the ring only waits if a slot's previous H2D is still running. |
 | Integer overflow | Always wrap via unsigned casts. | Plain signed ops: UB in C++, and NVVM exploits it. |
 | `Ref` on rvalues | `&tw::lval(expr)` in the expression. | Hoisting into pre-statements (as Java does): breaks `While` conditions (evaluated once) and short-circuited `&&`/`\|\|` operands. |
 | Vector construction | Aggregate `double3{...}` / `int3{...}`. | `make_double3`: not usable in `constexpr` constants. |

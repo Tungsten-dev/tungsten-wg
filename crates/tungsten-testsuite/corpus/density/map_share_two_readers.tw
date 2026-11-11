@@ -1,5 +1,4 @@
 // One mapped input listed by two units that run at different dims. Each reader is checked on its own grid.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> i32 {
         return (ambient(pos3).x * 10);

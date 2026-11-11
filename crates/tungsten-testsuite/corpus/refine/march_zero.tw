@@ -1,5 +1,4 @@
 // March: no `@march`, so the only offset is zero. The call still reruns with the new hosts.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn pos_main() -> i32 @hosts(k) { return (ambient(pos3).x + host(k)); }

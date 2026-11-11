@@ -10,9 +10,10 @@
 use std::fmt::Write as _;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use tungsten_cuda::orchestration::cuda_worker_names;
 use tungsten_cuda::{CudaConfig, Profile};
-use tungsten_interface::naming::entry_base_names;
-use tungsten_interface::{Backend, Interface};
+use tungsten_interface::naming::WorkerNames;
+use tungsten_interface::{Backend, BufferBounds, Interface};
 use tungsten_ir::VariableType;
 use tungsten_ir::model::{HostInput, OptimizedProgram};
 
@@ -144,12 +145,14 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, ids: &mut Ids, s
 }
 
 /// The driver part of `t_<hash>.cu`, in the test's namespace, plus the `tw_serve_<id>` entry the
-/// generated `main` calls.
+/// generated `main` calls. One `Orchestration` per case and one worker per entry (each given only
+/// its own entry's hosts), and then the case's refine calls, each on the worker of its
+/// refinement's entry.
 pub fn driver_source(
     program: &OptimizedProgram,
     interface: &Interface,
     id: &str,
-    entry_bases: &[String],
+    workers: &[WorkerNames],
     io: &TestIo,
     env: &TestEnv,
 ) -> Result<String, String> {
@@ -157,8 +160,9 @@ pub fn driver_source(
     let mut ids = Ids(0);
     let mut s = String::new();
     writeln!(s, "namespace {id} {{\n").unwrap();
-    // `steps:u32` ends the fixed part. It is always 0 until this backend has refinement.
+    // The fixed part ends with `steps:u32`, and each step is `refinement:u32 offset:[i32;3] host*`.
     writeln!(s, "static constexpr size_t REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)? + 4).unwrap();
+    writeln!(s, "static constexpr size_t STEP_LEN = {};", io.step_bytes(env)?).unwrap();
     s.push_str("static bool fail(std::string& err, const char* what, Status st) {\n");
     s.push_str("    err = std::string(what) + \": \" + st.message();\n    return false;\n}\n\n");
     s.push_str("static bool run_case(tw::proto::Reader& r, tw::proto::Writer& w, std::string& err) {\n");
@@ -173,58 +177,115 @@ pub fn driver_source(
         writeln!(s, "    {ty} ap{i};").unwrap();
         decode_into(&mut s, &format!("ap{i}"), t, &mut ids, spec);
     }
-    s.push_str("    HostConsts host{};\n");
-    for (r, h) in program.host_inputs.iter() {
-        if let HostInput::Static { t, .. } = h {
-            decode_into(&mut s, &format!("host.{}", interface.host_field(r)), t, &mut ids, spec);
-        }
+    // Hosts arrive in arena order and are decoded into the device struct, which every worker's own
+    // struct is then bound from: the layout assertions make the field copy a byte copy.
+    let statics: Vec<_> = program
+        .host_inputs
+        .iter()
+        .filter_map(|(r, h)| match h {
+            HostInput::Static { t, .. } => Some((r, t)),
+            HostInput::Dynamic => None,
+        })
+        .collect();
+    s.push_str("    dev::DeviceHostConsts dh{};\n");
+    for (r, t) in &statics {
+        decode_into(&mut s, &format!("dh.{}", interface.host_field(*r)), t, &mut ids, spec);
     }
-    s.push_str("    std::unique_ptr<Orchestration> orch;\n");
+    // `<Base>HostConsts hc` with the entry's own hosts copied from the device struct `src`.
+    let host_consts = |s: &mut String, e: usize, src: &str| {
+        writeln!(s, "{0} hc{{}};", workers[e].host_consts).unwrap();
+        for h in interface.entry_hosts(e) {
+            let f = interface.host_field(*h);
+            writeln!(s, "std::memcpy(&hc.{f}, &{src}.{f}, sizeof(hc.{f}));").unwrap();
+        }
+    };
+    s.push_str("    std::shared_ptr<Orchestration> orch;\n");
     let creation_args: String = (0..io.params.len()).map(|i| format!("ap{i}, ")).collect();
     writeln!(s, "    {{ Status st = Orchestration::create({creation_args}orch); if (!st.ok()) return fail(err, \"create\", st); }}").unwrap();
-    for b in entry_bases {
-        writeln!(s, "    {{ Status st = orch->enqueue_{b}(origin, host); if (!st.ok()) return fail(err, \"enqueue {b}\", st); }}").unwrap();
-    }
-    s.push_str("    { Status st = orch->sync(); if (!st.ok()) return fail(err, \"sync\", st); }\n");
-    for (e, b) in io.entries.iter().zip(entry_bases) {
-        if e.cells() == 1 {
-            writeln!(s, "    {{ const auto& res = orch->result_{b}();").unwrap();
-            encode_stmts(&mut s, "res", &e.ty, &mut ids, spec);
-        } else {
-            writeln!(s, "    {{ const auto* res = orch->result_{b}();").unwrap();
-            writeln!(s, "    for (int c = 0; c < {}; c++) {{", e.cells()).unwrap();
-            encode_stmts(&mut s, "res[c]", &e.ty, &mut ids, spec);
-            s.push_str("    }\n");
-        }
+    // The workers outlive the run, since refine calls continue from their buffers.
+    for (i, (e, names)) in io.entries.iter().zip(workers).enumerate() {
+        writeln!(s, "    std::unique_ptr<{}> wk{i};", names.worker).unwrap();
+        writeln!(s, "    {{ Status st = orch->{}(wk{i}); if (!st.ok()) return fail(err, \"{}\", st); }}", names.factory, names.factory).unwrap();
+        s.push_str("    {\n");
+        host_consts(&mut s, i, "dh");
+        writeln!(s, "    {{ Status st = wk{i}->enqueue(origin, hc); if (!st.ok()) return fail(err, \"enqueue {}\", st); }}", names.base).unwrap();
+        writeln!(s, "    {{ Status st = wk{i}->sync(); if (!st.ok()) return fail(err, \"sync\", st); }}").unwrap();
+        encode_result(&mut s, i, e, &mut ids, spec);
         s.push_str("    }\n");
     }
+    s.push_str("    const unsigned steps = r.u32();\n    for (unsigned step = 0; step < steps; step++) {\n");
+    s.push_str("        const unsigned refinement = r.u32();\n");
+    s.push_str("        Pos3 off; off.x = r.i32(); off.y = r.i32(); off.z = r.i32();\n");
+    s.push_str("        dev::DeviceHostConsts dsh{};\n");
+    for (r, t) in &statics {
+        decode_into(&mut s, &format!("dsh.{}", interface.host_field(*r)), t, &mut ids, spec);
+    }
+    s.push_str("        switch (refinement) {\n");
+    for (k, refinement) in program.refinements.iter().enumerate() {
+        let e = refinement.entry;
+        let method = format!("enqueue_{}", interface.refine_method(k));
+        writeln!(s, "        case {k}: {{").unwrap();
+        host_consts(&mut s, e, "dsh");
+        writeln!(s, "        {{ Status st = wk{e}->{method}(off, hc); if (!st.ok()) return fail(err, \"{method}\", st); }}").unwrap();
+        writeln!(s, "        {{ Status st = wk{e}->sync(); if (!st.ok()) return fail(err, \"sync\", st); }}").unwrap();
+        encode_result(&mut s, e, &io.entries[e], &mut ids, spec);
+        s.push_str("        break; }\n");
+    }
+    s.push_str("        default: err = \"unknown refinement\"; return false;\n        }\n    }\n");
     s.push_str("    return true;\n}\n\n");
     writeln!(s, "}}  // namespace {id}\n").unwrap();
     writeln!(
         s,
-        "int tw_serve_{id}() {{\n    cudaSetDevice(0);\n    return tw::proto::serve({id}::REQUEST_LEN, {id}::run_case);\n}}"
+        "int tw_serve_{id}() {{\n    cudaSetDevice(0);\n    return tw::proto::serve({id}::REQUEST_LEN, {id}::STEP_LEN, {id}::run_case);\n}}"
     )
     .unwrap();
     Ok(s)
+}
+
+/// Writes the result of worker `wk<i>` to `w`.
+fn encode_result(s: &mut String, i: usize, e: &super::protocol::EntryIo, ids: &mut Ids, spec: &RegistrySpec) {
+    if e.cells() == 1 {
+        writeln!(s, "    {{ const auto& res = wk{i}->result();").unwrap();
+        encode_stmts(s, "res", &e.ty, ids, spec);
+    } else {
+        writeln!(s, "    {{ const auto* res = wk{i}->result();").unwrap();
+        writeln!(s, "    for (int c = 0; c < {}; c++) {{", e.cells()).unwrap();
+        encode_stmts(s, "res[c]", &e.ty, ids, spec);
+        s.push_str("    }\n");
+    }
+    s.push_str("    }\n");
 }
 
 /// The generated files of one test as a blob with paths relative to `<id>/`, and the test's
 /// `<id>.cu` (path `../<id>.cu` is avoided: it is written next to the directory by the batch).
 /// Backend panics become an `Err`.
 pub fn generate_test(program: &OptimizedProgram, env: &TestEnv, id: &str) -> Result<String, String> {
+    generate_test_with(program, env, id, BufferBounds::PerBuffer)
+}
+
+/// [`generate_test`] with another bounds mode.
+pub fn generate_test_with(
+    program: &OptimizedProgram,
+    env: &TestEnv,
+    id: &str,
+    bounds: BufferBounds,
+) -> Result<String, String> {
     let io = TestIo::from_program(program)?;
     io.check_encodable()?;
     catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
-        let config = CudaConfig { namespace: id.to_string(), ..CudaConfig::default() };
+        // Corpus tests compile with `PerBuffer`, so bad indices fail where the interpreter's do.
+        let config = CudaConfig {
+            namespace: id.to_string(),
+            buffer_bounds: Some(bounds),
+            ..CudaConfig::default()
+        };
         let backend = config.to_backend();
         backend.validate().map_err(|e| format!("invalid config: {e}"))?;
         let rules = backend.naming_rules();
         let interface = Interface::build(program, &rules);
         let out = backend.generate(program, &interface).map_err(|e| format!("generate failed: {e:?}"))?;
-        let mut used = rules.used_set();
-        used.extend(["create", "sync", "query", "profile", "required_flags", "impl_"].map(String::from));
-        let bases = entry_base_names(program, &rules, used);
-        let driver = driver_source(program, &interface, id, &bases, &io, env)?;
+        let names = cuda_worker_names(program, &rules);
+        let driver = driver_source(program, &interface, id, &names, &io, env)?;
         let mut blob = String::new();
         for (name, text) in out.files() {
             writeln!(blob, "{MARKER}{id}/{name}\n{text}").unwrap();

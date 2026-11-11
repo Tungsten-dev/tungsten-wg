@@ -108,6 +108,7 @@ fn binary_symbol(op: BinaryOperator) -> &'static str {
         B::Subtract => "-",
         B::Multiply => "*",
         B::Divide => "/",
+        B::Modulo => "%",
         B::Equal => "==",
         B::NotEqual => "!=",
         B::Less => "<",
@@ -127,7 +128,7 @@ fn binary_symbol(op: BinaryOperator) -> &'static str {
 fn binary_precedence(op: BinaryOperator) -> u8 {
     use BinaryOperator as B;
     match op {
-        B::Multiply | B::Divide => 13,
+        B::Multiply | B::Divide | B::Modulo => 13,
         B::Add | B::Subtract => 12,
         B::ShiftLeft | B::ShiftRight => 11,
         B::Less | B::LessEqual | B::Greater | B::GreaterEqual => 9,

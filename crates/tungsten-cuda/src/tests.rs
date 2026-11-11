@@ -4,6 +4,8 @@
 use tungsten_interface::{Backend, BackendError, CompileError, Compiler, Interface};
 use tungsten_parse::{FileId, NoEnv, load};
 
+use tungsten_interface::BufferBounds;
+
 use crate::backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePolicy, Profile};
 
 const SMALL: &str = r#"
@@ -164,19 +166,22 @@ fn generates_cuda_for_small_program() {
         "tw::sample(&ctx.auto_constants->minecraft_temperature_0_, p.pos.x)",
         "tw::nudge(&v, &tw::lval(v * 2.0))",
         // buffers and array access
-        "tw::buffer<double>(ctx.buffers, BufferLayout::minecraft_noise_d4x4x4_output)[tw::index(p)]",
-        "tw::buffer<int>(ctx.buffers, BufferLayout::minecraft_scalar_d1x1x1_output)[0]",
+        "tw::buffer<double>(ctx.buffers, off_noise_in)[tw::index(p)]",
+        "tw::buffer<int>(ctx.buffers, off_scalar_in)[0]",
+        // offsets are parameters, after the uniform ones; kernels add their own slot's offset first
+        "__device__ double minecraft_final_d4x4x4(tw::PositionIterator p, const Ctx& ctx, unsigned long long off_noise_in, unsigned long long off_scalar_in)",
+        "tw::buffer<double>(buffers, out_off)[tw::index(p)] = r;",
         "points[(int)bits]",
         "double3{0.0, (double)0, 0.0}",
         // kernels
-        "__device__ void minecraft_final_d4x4x4_kernel_body(int3 local, double3 origin, char* buffers,",
+        "__device__ void minecraft_final_d4x4x4_kernel_body(int3 local, double3 origin, char* buffers, unsigned long long out_off, unsigned long long off_noise_in, unsigned long long off_scalar_in,",
         "if ((local.x >= 4) || (local.y >= 4) || (local.z >= 4)) {",
         "const tw::PositionIterator p = tw::make_position(ctx.config, local);",
         "extern \"C\" __global__ void __launch_bounds__(64) tungsten_gen_minecraft_final_d4x4x4_kernel(",
         "const int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);",
         "const int yz = i / 4;",
         "const int z = yz / 4;",
-        "minecraft_final_d4x4x4_kernel_body(int3{i - yz * 4, yz - z * 4, z}, origin,",
+        "minecraft_final_d4x4x4_kernel_body(int3{i - yz * 4, yz - z * 4, z}, origin, buffers, out_off, off_noise_in, off_scalar_in,",
     ]);
     assert!(
         output.density_source.find("constexpr double base").unwrap()
@@ -188,6 +193,7 @@ fn generates_cuda_for_small_program() {
         "#pragma once",
         "struct DeviceHostConsts {\n    int sea_level;\n};",
         "tw::PerlinNoiseSampler minecraft_temperature_0_;",
+        "struct MinecraftFinalLayout {\n    static constexpr unsigned long long minecraft_final_d4x4x4_output = 0;",
         "static constexpr unsigned long long total_bytes = tw::align_up(",
         "const AutoConsts* __restrict__ auto_constants;",
         "extern \"C\" __global__ void __launch_bounds__(1) tungsten_gen_minecraft_scalar_d1x1x1_kernel(",
@@ -195,11 +201,15 @@ fn generates_cuda_for_small_program() {
 
     assert_contains("orchestration.h", &output.public_header, &[
         "#include <memory>",
-        "struct HostConsts {\n    int sea_level;\n};",
-        "static constexpr int minecraft_final_len = 64;",
-        "static constexpr int minecraft_final_dims[3] = {4, 4, 4};",
-        "Status enqueue_minecraft_final(Vec3 origin, const HostConsts& host_consts);",
-        "const double* result_minecraft_final() const;",
+        "struct MinecraftFinalHostConsts {\n    int sea_level;\n};",
+        "class MinecraftFinalWorker {",
+        "static constexpr int len = 64;",
+        "static constexpr int dims[3] = {4, 4, 4};",
+        "Status enqueue(Vec3 origin, const MinecraftFinalHostConsts& host_consts);",
+        "const double* result() const;",
+        "static Status create(long long seed, std::shared_ptr<Orchestration>& out);",
+        "Status create_minecraft_final_worker(std::unique_ptr<MinecraftFinalWorker>& out) const;",
+        "std::shared_ptr<const OrchestrationShared> shared_;",
         "static constexpr const char* required_flags = \"--fmad=false",
     ]);
     for cuda_only in ["#include <cuda", "cudaStream_t", "double3", "int3", "__device__"] {
@@ -209,11 +219,13 @@ fn generates_cuda_for_small_program() {
     assert_contains("orchestration.cu", &output.orchestration_source, &[
         "#define TUNGSTEN_CUDA_CHECK(expr)",
         "return ::tungsten_gen::Status{(int)tw_e_};",
-        "static_assert(offsetof(HostConsts, sea_level) == offsetof(dev::DeviceHostConsts, sea_level)",
+        "static_assert(sizeof(MinecraftFinalHostConsts::sea_level) == sizeof(dev::DeviceHostConsts::sea_level)",
+        "std::memcpy(&s.staging[slot]->sea_level, &host_consts.sea_level, sizeof(host_consts.sea_level));",
+        "if (device != shared_->device) return Status{(int)cudaErrorInvalidDevice};",
         "auto_constants->minecraft_temperature_0_ = tw::make_permutation_table(seed, (long long)0x",
-        "dev::tungsten_gen_minecraft_scalar_d1x1x1_kernel<<<1, 1, 0, s.stream>>>",
-        "dev::tungsten_gen_minecraft_final_d4x4x4_kernel<<<1, 64, 0, s.stream>>>",
-        "cudaMemcpyAsync(s.result_minecraft_final, s.slab + dev::BufferLayout::minecraft_final_d4x4x4_output",
+        "dev::tungsten_gen_minecraft_scalar_d1x1x1_kernel<<<1, 1, 0, s.stream>>>(o, s.slab, dev::MinecraftFinalLayout::minecraft_scalar_d1x1x1_output, s.shared->auto_constants, s.host_consts);",
+        "dev::tungsten_gen_minecraft_final_d4x4x4_kernel<<<1, 64, 0, s.stream>>>(o, s.slab, dev::MinecraftFinalLayout::minecraft_final_d4x4x4_output, dev::MinecraftFinalLayout::minecraft_noise_d4x4x4_output, dev::MinecraftFinalLayout::minecraft_scalar_d1x1x1_output,",
+        "cudaMemcpyAsync(s.result, s.slab + dev::MinecraftFinalLayout::minecraft_final_d4x4x4_output",
     ]);
     // The entry's dependencies run in an earlier wave than the entry itself.
     let src = &output.orchestration_source;
@@ -251,12 +263,12 @@ fn program_without_inputs_or_entries() {
     let output = generate(MINIMAL, CudaConfig::default());
     write_out(&output, "minimal");
     assert_contains("interface.cuh", &output.interface_header, &["struct AutoConsts {\n};", "struct DeviceHostConsts {\n};"]);
-    assert_contains("orchestration.cu", &output.orchestration_source, &["Orchestration::create(std::unique_ptr<Orchestration>& out)", "(void)host_consts;"]);
+    assert_contains("orchestration.cu", &output.orchestration_source, &["Orchestration::create(std::shared_ptr<Orchestration>& out)", "(void)host_consts;"]);
     assert!(!output.orchestration_source.contains("cudaEventSynchronize"));
 
     let output = generate("program { }", CudaConfig::default());
-    assert_contains("orchestration.h", &output.public_header, &["Status sync();"]);
-    assert_contains("interface.cuh", &output.interface_header, &["static constexpr unsigned long long total_bytes = 0;"]);
+    assert_contains("orchestration.h", &output.public_header, &["static Status create(std::shared_ptr<Orchestration>& out);"]);
+    assert!(!output.public_header.contains("Worker"), "{}", output.public_header);
 }
 
 #[test]
@@ -282,9 +294,9 @@ fn bytes() {
         "wide = (int)a & 255;",
         "a = tw::f2i8(d);",
         "return (signed char)((unsigned)a + (unsigned)(signed char)wide);",
-        "tw::buffer<signed char>(buffers, BufferLayout::minecraft_bytes_d4x4x4_output)",
+        "tw::buffer<signed char>(buffers, out_off)",
     ]);
-    assert_contains("orchestration.h", &output.public_header, &["const signed char* result_minecraft_bytes() const;"]);
+    assert_contains("orchestration.h", &output.public_header, &["const signed char* result() const;"]);
 }
 
 #[test]
@@ -324,13 +336,15 @@ fn every_setter_sets_its_field() {
         .host_consts_ring(4)
         .debug_checks(true)
         .inline_policy(InlinePolicy::Force)
-        .namespace("ns");
+        .namespace("ns")
+        .buffer_bounds(BufferBounds::Slab);
     let config = c.backend().config();
     assert_eq!(config.profile, Profile::Tolerance);
     assert_eq!((config.block_size, config.host_consts_ring), (256, 4));
     assert!(config.debug_checks);
     assert_eq!(config.inline_policy, InlinePolicy::Force);
     assert_eq!(config.namespace, "ns");
+    assert_eq!(config.buffer_bounds, Some(BufferBounds::Slab));
     // The namespace is picked up by the naming rules, which are computed at compile time.
     assert!(c.backend().naming_rules().used_set().contains("ns"));
     c.compile().unwrap();
@@ -382,4 +396,107 @@ program {
         "tw::make_v(scale, buffers_1, TW_NAN_F64, TW_INF_F64, (-TW_INF_F64))",
         "tw::make_i((long long)0x0000000000000007ULL, false)",
     ]);
+}
+
+/// A 3x1x3 leaf read with `@lerp(2, *, 2)` and a 2x1x1 one read with `@expand(2, *, *)`, from a
+/// 4x3x3 entry. An explicit index reads the lerp input too.
+const MAPPED: &str = r#"
+program {
+    fn leaf() -> f64 { return (ambient(pos3).x as f64); }
+    unit leaf_u { main leaf; }
+    input d = leaf_u @dims(3, 1, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, 2);
+    input e = leaf_u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(2, *, *);
+    fn top() -> f64 { return (density(d) + density(e)); }
+    unit t { main top; inputs [d, e]; }
+    entry t @dims(4, 3, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+#[test]
+fn mappings() {
+    let output = generate(MAPPED, CudaConfig::default());
+    write_out(&output, "mapped");
+    let src = &output.density_source;
+    assert_contains("density.cu", src, &[
+        // one helper per distinct shape, before the functions that call it
+        "__device__ __forceinline__ double lerp_3x1x3_by_2xrx2_f64(const double* pool, int3 pos) {",
+        "const int x0 = pos.x >> 1;",
+        "const double tx = (double)(pos.x & 1) / 2.0;",
+        "const double v000 = pool[x0 + z0 * 3];",
+        "const double v100 = pool[x0 + 1 + z0 * 3];",
+        "const double lx00 = v000 + tx * (v100 - v000);",
+        // the caller passes the input's cells and the reader's position
+        "lerp_3x1x3_by_2xrx2_f64(tw::buffer<double>(ctx.buffers, off_d), p.pos)",
+        // `Expand` is an inline index: x divided by 2, y and z dropped
+        "tw::buffer<double>(ctx.buffers, off_e)[p.pos.x >> 1]",
+    ]);
+    assert!(src.find("lerp_3x1x3_by_2xrx2_f64(const").unwrap() < src.find("double t_d4x3x3(").unwrap_or(usize::MAX));
+    // Without checks, reads are bare.
+    assert!(!src.contains("TW_CHECK_INDEX"), "{src}");
+}
+
+#[test]
+fn bounds_modes_follow_debug_checks_unless_set() {
+    let per_buffer = |c: CudaConfig| generate(MAPPED, c).density_source;
+    let check = "TW_CHECK_INDEX(";
+    // `None` and no debug checks: unchecked, as before.
+    assert!(!per_buffer(CudaConfig::default()).contains(check));
+    // `None` with debug checks: `PerBuffer`, for the lerp loads and the other reads.
+    let debug = per_buffer(CudaConfig { debug_checks: true, ..CudaConfig::default() });
+    assert!(debug.contains("pool[TW_CHECK_INDEX(x0 + z0 * 3, 9, \"lerp_3x1x3_by_2xrx2_f64\")]"), "{debug}");
+    assert!(debug.contains("tw::buffer<double>(ctx.buffers, off_e)[TW_CHECK_INDEX(p.pos.x >> 1, 2,"), "{debug}");
+    // An explicit mode wins either way.
+    let explicit = |b, debug_checks| per_buffer(CudaConfig { buffer_bounds: Some(b), debug_checks, ..CudaConfig::default() });
+    assert!(explicit(BufferBounds::PerBuffer, false).contains("off_e)[TW_CHECK_INDEX("));
+    assert!(!explicit(BufferBounds::Unchecked, true).contains("off_e)[TW_CHECK_INDEX("));
+    // `Slab` has no slab length in code shared by workers, so it reads like `Unchecked`.
+    assert_eq!(explicit(BufferBounds::Slab, false), explicit(BufferBounds::Unchecked, false));
+}
+
+/// One entry with a refinement: a `@previous` read and a `@march` grid.
+const REFINED: &str = r#"
+program {
+    fn seed_main() -> i32 { return (ambient(pos3).x * 10); }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn acc_main() -> i32 { return (density(prev) + 1); }
+    unit acc { main acc_main; inputs [prev]; }
+    entry seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+"#;
+
+#[test]
+fn refinement() {
+    let output = generate(REFINED, CudaConfig::default());
+    write_out(&output, "refined");
+    // The refine kernel has an extra `offset`, moves `pos` only, and keeps `idx` for the store.
+    assert_contains("density.cu", &output.density_source, &[
+        "_refine_kernel_body(int3 local, double3 origin, int3 offset, char* buffers, unsigned long long out_off,",
+        "p.pos.x = p.pos.x + offset.x;",
+        "p.pos.z = p.pos.z + offset.z;",
+        "tw::buffer<int>(buffers, out_off)[tw::index(p)] = r;",
+        "extern \"C\" __global__ void __launch_bounds__(2) tungsten_gen_",
+    ]);
+    assert!(output.density_source.contains("tw::PositionIterator p = tw::make_position("), "a refine kernel's p is not const");
+    assert_contains("orchestration.h", &output.public_header, &[
+        "Status enqueue_refine_step(Pos3 offset, const SeedMainHostConsts& host_consts);",
+    ]);
+    assert_contains("orchestration.cu", &output.orchestration_source, &[
+        "double3 origin = {0.0, 0.0, 0.0};",
+        // `enqueue` stores the origin, the refine call continues from it
+        "s.origin = o;",
+        "const double3 o = s.origin;",
+        "const int3 off = make_int3(offset.x, offset.y, offset.z);",
+        "Status SeedMainWorker::enqueue_refine_step(Pos3 offset, const SeedMainHostConsts& host_consts) {",
+    ]);
+}
+
+#[test]
+fn an_entry_without_refinements_stores_no_origin() {
+    let output = generate(SMALL, CudaConfig::default());
+    assert!(!output.orchestration_source.contains("s.origin"));
+    assert!(!output.public_header.contains("enqueue_refine"));
 }

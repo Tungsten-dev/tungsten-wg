@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{
-    Backend, BackendError, BufferBounds, Compiler, Feature, Instance, Interface,
+    Backend, BackendError, BufferBounds, Compiler, Instance, Interface,
     OrchestrationCodegen,
 };
 use tungsten_ir::model::{ComputeUnit, OptimizedProgram};
@@ -84,7 +84,6 @@ impl Backend for RustBackend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<RustOutput, BackendError> {
-        tungsten_interface::check_implemented(program, &[Feature::Mappings, Feature::Refinement])?;
         crate::mapping::check_emittable(program, interface)?;
         check_slots(program, interface)?;
         let pools = Pools::new(program, interface, self.config.buffer_bounds);

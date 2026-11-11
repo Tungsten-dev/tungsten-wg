@@ -149,11 +149,10 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   `Config`, `PositionIterator` and saturating casts follow `../cuda-density/src/tw/`; `tw::f2i8` clamps.
   The pure toy-table functions in `utilsf64.rs` are named `perm_lookup` and `sample_state`, so glob imports of
   generated code can't see two `perm_get`/`sampler_sample`.
-- **Naming outside the crate.** The CUDA driver calls `enqueue_<base>`, whose names come from
-  `tungsten_interface::naming::{entry_method_names, entry_base_names}`, shared with the backend. The Rust and
-  Java drivers create one `Orchestration` per case and one worker per entry, with the names from
+- **Naming outside the crate.** The CUDA driver gets its worker names from
+  `tungsten_cuda::orchestration::cuda_worker_names`. All three drivers create one `Orchestration` per case and one worker per entry, with the names from
   `tungsten_rust::orchestration::rust_worker_names` and `tungsten_java::orchestration::java_worker_names`, and bind
-  only that entry's hosts (`specs/workers.md`). `tests/rust_workers.rs` and `tests/java_workers.rs` cover what the
+  only that entry's hosts (`specs/workers.md`). `tests/rust_workers.rs`, `tests/java_workers.rs` and `tests/cuda_workers.rs` cover what the
   corpus can't: threads (`std::thread` and an `ExecutorService`), the bounds modes, marched slices and worker
   isolation, and on Rust the `Send + Sync` assertion and records without `Default`.
 - **What is not covered yet.** The random program generator and decision traces (see below).

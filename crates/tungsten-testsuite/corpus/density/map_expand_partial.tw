@@ -1,5 +1,4 @@
 // Expand: a reader smaller than the mapping allows is legal and reads the start of the input.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> i32 {
         let c: pos3 = ambient(pos3);

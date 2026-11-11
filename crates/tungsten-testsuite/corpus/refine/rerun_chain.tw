@@ -1,5 +1,4 @@
 // Rerun: a chain of three rerun instances, each reading the next.
-@knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;
     fn c_main() -> i32 @hosts(k) { return host(k); }
