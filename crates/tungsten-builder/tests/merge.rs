@@ -191,3 +191,96 @@ fn value_autoconsts_are_read_like_expressions_and_listed() {
     let ComputeUnit::DensityFunction { auto_consts, .. } = p.compute_units.values().next().unwrap();
     assert_eq!(auto_consts.len(), 1, "the unit lists the autoconst its function reads");
 }
+
+#[test]
+fn mapping_and_previous_separate_inputs() {
+    use tungsten_builder::{AxisFactor::Repeat, DensityMapping};
+    let mut pb = ProgramBuilder::new();
+    let b = base(&mut pb, "b");
+    let g = Grid::new((1, 1, 1));
+    let cell_zero = DensityMapping::Expand([Repeat; 3]);
+    let lerp = DensityMapping::Lerp([Repeat; 3]);
+
+    let plain = pb.input(b, g);
+    let expanded = pb.input_with(InputSpec::new(b, g).mapping(cell_zero));
+    let lerped = pb.input_with(InputSpec::new(b, g).mapping(lerp));
+    let previous = pb.input_with(InputSpec::new(b, g).previous());
+    let both = pb.input_with(InputSpec::new(b, g).mapping(cell_zero).previous());
+    let all = [plain, expanded, lerped, previous, both];
+    for (i, x) in all.iter().enumerate() {
+        for y in &all[i + 1..] {
+            assert_ne!(x, y);
+        }
+    }
+
+    // Equal specs still merge, and an explicit `Identity` is the default.
+    assert_eq!(expanded, pb.input_with(InputSpec::new(b, g).mapping(cell_zero)));
+    assert_eq!(previous, pb.input_with(InputSpec::new(b, g).previous()));
+    assert_eq!(plain, pb.input_with(InputSpec::new(b, g).mapping(DensityMapping::Identity)));
+
+    let p = pb.build().unwrap();
+    let stored: Vec<_> = p.density_inputs.values().map(|d| (d.mapping, d.previous)).collect();
+    assert_eq!(
+        stored,
+        [
+            (DensityMapping::Identity, false),
+            (cell_zero, false),
+            (lerp, false),
+            (DensityMapping::Identity, true),
+            (cell_zero, true),
+        ]
+    );
+}
+
+#[test]
+fn refinement_is_recorded_as_written() {
+    let mut pb = ProgramBuilder::new();
+    let (seed, detail, surface) = (base(&mut pb, "seed"), base(&mut pb, "detail"), base(&mut pb, "surface"));
+    let g = Grid::new((16, 1, 16)).position_scale((1.0, 8.0, 1.0));
+    pb.entry(detail, Grid::new((1, 1, 1)));
+    let entry = pb.entry(seed, g);
+    pb.refinement(
+        "step",
+        entry,
+        (0, 383, 0),
+        [RerunSpec::new(seed, g).with(surface), RerunSpec::new(detail, g)],
+    );
+    let p = pb.build().unwrap();
+
+    let [r] = &p.refinements[..] else { panic!("one refinement") };
+    assert_eq!((r.name.as_str(), r.entry, r.march), ("step", 1, (0, 383, 0)));
+    let unit_ref = |name: &str| -> Ref<ComputeUnit> {
+        p.compute_units
+            .iter()
+            .find(|(_, u)| {
+                let ComputeUnit::DensityFunction { function, .. } = u;
+                p.functions[*function].canonical_name.as_deref() == Some(name)
+            })
+            .unwrap()
+            .0
+    };
+    assert_eq!(r.reruns[0].cu, unit_ref("seed"));
+    assert_eq!(r.reruns[0].with, Some(unit_ref("surface")));
+    assert_eq!(r.reruns[0].dimensions, (16, 1, 16));
+    assert_eq!(r.reruns[0].scaled_position, (1.0, 8.0, 1.0));
+    assert_eq!(r.reruns[1].cu, unit_ref("detail"));
+    assert_eq!(r.reruns[1].with, None);
+}
+
+#[test]
+fn refinement_rejects_foreign_handles() {
+    let mut other = ProgramBuilder::new();
+    let foreign_unit = base(&mut other, "foreign");
+    let foreign_entry = other.entry(foreign_unit, Grid::new((1, 1, 1)));
+
+    let mut pb = ProgramBuilder::new();
+    let b = base(&mut pb, "b");
+    let g = Grid::new((1, 1, 1));
+    let entry = pb.entry(b, g);
+    pb.refinement("a", foreign_entry, (0, 0, 0), [RerunSpec::new(b, g)]);
+    pb.refinement("b", entry, (0, 0, 0), [RerunSpec::new(foreign_unit, g)]);
+    pb.refinement("c", entry, (0, 0, 0), [RerunSpec::new(b, g).with(foreign_unit)]);
+    let errors = pb.build().err().expect("three foreign handles").0;
+    assert_eq!(errors.len(), 3, "{errors:?}");
+    assert!(errors.iter().all(|e| matches!(e.kind, BuildErrorKind::ForeignHandle { .. })), "{errors:?}");
+}

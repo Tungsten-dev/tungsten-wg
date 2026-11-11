@@ -227,6 +227,7 @@ impl Backend for CudaBackend {
     }
 
     fn generate(&self, program: &OptimizedProgram, interface: &Interface) -> Result<CudaOutput, BackendError> {
+        tungsten_interface::check_implemented(program, &[])?;
         let naming_rules = self.naming_rules();
         let device = CudaCodegen::new(program, interface, &naming_rules, &self.config);
         let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &naming_rules);

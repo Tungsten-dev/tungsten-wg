@@ -126,6 +126,9 @@ pub enum LowerErrorKind {
     AutoInitializerReturn { initializer: String, returns: String, declared: String },
     #[error("string argument {index} contains a NUL character")]
     AutoArgHasNul { index: usize },
+    /// Temporary, until the interpreter implements these (`specs/combined-rollout.md` phase 2A).
+    #[error("{0} not supported yet")]
+    NotSupportedYet(String),
 }
 
 /// Where an error is: an item and a path inside it.

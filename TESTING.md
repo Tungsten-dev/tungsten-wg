@@ -367,6 +367,9 @@ program {
 Every fn and every `input` is top level, and a unit names its main fn (`main f;`). Lists (`helpers`, `tables`,
 `hosts`, `consts`, `inputs`) are explicit and never derived. Simple statements and items end in `;`.
 
+An `input` can also carry `@expand(fx, fy, fz)` or `@lerp(fx, fy, fz)` (a factor is an integer, or `*` for repeat) and
+`@previous`. A `refinement step of e @march(x, y, z) { rerun u <grid> with v; }` item declares a refinement of entry `e`.
+
 Other directives: `@fuel(n)`, `@tier(large)`, and `@cells(sample = n, seed = s)` to compare only
 a sample of cells on large grids.
 

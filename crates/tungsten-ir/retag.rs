@@ -102,6 +102,7 @@ impl Clone for OptimizedProgram {
             auto_params: self.auto_params.clone(),
             auto_consts: self.auto_consts.clone(),
             density_inputs: self.density_inputs.clone(),
+            refinements: self.refinements.clone(),
         };
 
         let mut map = HashMap::from([
@@ -130,6 +131,12 @@ impl Clone for OptimizedProgram {
 pub(crate) fn walk_program(p: &mut OptimizedProgram, v: &mut impl RefVisitor) {
     for e in &mut p.entry_points {
         v.compute_unit(&mut e.density_function);
+    }
+    for rerun in p.refinements.iter_mut().flat_map(|r| &mut r.reruns) {
+        v.compute_unit(&mut rerun.cu);
+        if let Some(with) = &mut rerun.with {
+            v.compute_unit(with);
+        }
     }
     for cu in p.compute_units.values_mut() {
         walk_compute_unit(cu, v);
@@ -352,6 +359,7 @@ mod tests {
             auto_params: Arena::new(),
             auto_consts: Arena::new(),
             density_inputs: Arena::new(),
+            refinements: vec![],
         };
         let a = p.constants.insert(Constant {
             value: ConstExpr::Double(0.5),
@@ -405,6 +413,8 @@ mod tests {
             scaled_origin: (1.0, 1.0, 1.0),
             scaled_position: (1.0, 1.0, 1.0),
             dimensions: (4, 4, 4),
+            mapping: DensityMapping::Lerp([AxisFactor::Factor(4), AxisFactor::Repeat, AxisFactor::Factor(1)]),
+            previous: false,
         });
 
         let mut helper = function("helper");
@@ -466,7 +476,88 @@ mod tests {
             scaled_origin: (1.0, 1.0, 1.0),
             scaled_position: (1.0, 1.0, 1.0),
         });
+        p.refinements.push(Refinement {
+            name: "step".into(),
+            entry: 0,
+            march: (0, 3, 0),
+            reruns: vec![Rerun {
+                cu: root,
+                dimensions: (4, 4, 4),
+                scaled_origin: (1.0, 1.0, 1.0),
+                scaled_position: (1.0, 1.0, 1.0),
+                with: Some(leaf),
+            }],
+        });
         p
+    }
+
+    fn main_name(p: &OptimizedProgram, cu: Ref<ComputeUnit>) -> Option<String> {
+        let ComputeUnit::DensityFunction { function, .. } = &p.compute_units[cu];
+        p.functions[*function].canonical_name.clone()
+    }
+
+    /// Each rerun still names the units it named in `p`, through refs valid in `q`.
+    fn assert_same_refinements(p: &OptimizedProgram, q: &OptimizedProgram) {
+        assert_eq!(p.refinements.len(), q.refinements.len());
+        for (a, b) in p.refinements.iter().zip(&q.refinements) {
+            assert_eq!((&a.name, a.entry, a.march), (&b.name, b.entry, b.march));
+            for (x, y) in a.reruns.iter().zip(&b.reruns) {
+                assert_eq!(main_name(p, x.cu), main_name(q, y.cu));
+                assert_eq!(main_name(p, x.with.unwrap()), main_name(q, y.with.unwrap()));
+            }
+        }
+    }
+
+    #[test]
+    fn clone_and_rebuild_keep_refinement_refs() {
+        let p = program();
+        assert_same_refinements(&p, &p.clone());
+        assert_same_refinements(&p, &crate::rebuild::compact(&p));
+        let mut shuffled = p.clone();
+        crate::rebuild::permute(&mut shuffled, 7);
+        assert_same_refinements(&p, &shuffled);
+    }
+
+    #[test]
+    fn isomorphic_sees_refinements_and_mappings() {
+        let p = program();
+        assert!(crate::rebuild::isomorphic(&p, &p.clone()));
+
+        let mut q = p.clone();
+        q.refinements[0].march.1 = 2;
+        assert!(!crate::rebuild::isomorphic(&p, &q), "march");
+
+        let mut q = p.clone();
+        let root = q.refinements[0].reruns[0].cu;
+        q.refinements[0].reruns[0].with = Some(root);
+        assert!(!crate::rebuild::isomorphic(&p, &q), "with");
+
+        let mut a = p.clone();
+        a.refinements[0].reruns[0].scaled_position.0 = f64::from_bits(0x7ff8_0000_0000_0001);
+        let mut b = p.clone();
+        b.refinements[0].reruns[0].scaled_position.0 = f64::from_bits(0x7ff8_0000_0000_0002);
+        assert!(!crate::rebuild::isomorphic(&a, &b), "NaN payload of a rerun scale");
+
+        let mut q = p.clone();
+        q.density_inputs.values_mut().next().unwrap().mapping = DensityMapping::Identity;
+        assert!(!crate::rebuild::isomorphic(&p, &q), "mapping");
+
+        let mut q = p.clone();
+        q.density_inputs.values_mut().next().unwrap().previous = true;
+        assert!(!crate::rebuild::isomorphic(&p, &q), "previous");
+    }
+
+    #[test]
+    fn is_identity_on() {
+        use AxisFactor::{Factor, Repeat};
+        let d = (5, 1, 5);
+        assert!(DensityMapping::Identity.is_identity_on(d));
+        assert!(DensityMapping::Expand([Factor(1), Repeat, Factor(1)]).is_identity_on(d));
+        assert!(DensityMapping::Lerp([Factor(1), Repeat, Factor(1)]).is_identity_on(d));
+        assert!(DensityMapping::Expand([Repeat; 3]).is_identity_on((1, 1, 1)));
+        assert!(!DensityMapping::Expand([Factor(2), Repeat, Factor(1)]).is_identity_on(d));
+        assert!(!DensityMapping::Lerp([Factor(1), Factor(4), Factor(1)]).is_identity_on(d));
+        assert!(!DensityMapping::Expand([Repeat, Repeat, Factor(1)]).is_identity_on(d));
     }
 
     #[test]

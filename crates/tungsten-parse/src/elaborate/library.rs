@@ -118,6 +118,12 @@ fn build(cx: &mut Ctx, name: &str, ast: &File) -> R<Lib> {
                     "a library may only contain `fn`, `const` and `use`",
                 ));
             }
+            Item::Refinement(r) => {
+                return Err(Diagnostic::elab(
+                    r.span,
+                    "a library may only contain `fn`, `const` and `use`",
+                ));
+            }
         }
     }
     Ok(lib)

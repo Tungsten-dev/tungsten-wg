@@ -88,6 +88,7 @@ pub enum Item {
     Unit(UnitItem),
     Input(InputItem),
     Entry(Box<EntryItem>),
+    Refinement(Box<RefinementItem>),
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +179,48 @@ pub struct InputItem {
     pub label: Label,
     pub target: Label,
     pub grid: GridAttrs,
+    pub mapping: Option<MappingAttr>,
+    pub previous: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MappingKind {
+    Expand,
+    Lerp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Factor {
+    /// `*`
+    Repeat,
+    Uint(u64),
+}
+
+/// `@expand(fx, fy, fz)` or `@lerp(fx, fy, fz)`.
+#[derive(Debug, Clone)]
+pub struct MappingAttr {
+    pub span: Span,
+    pub kind: MappingKind,
+    pub factors: [Factor; 3],
+}
+
+/// `refinement name of entry @march(x, y, z) { rerun … }`
+#[derive(Debug, Clone)]
+pub struct RefinementItem {
+    pub span: Span,
+    pub label: Label,
+    pub entry: Label,
+    pub march: Option<([u64; 3], Span)>,
+    pub reruns: Vec<RerunItem>,
+}
+
+/// `rerun target grid_attrs (with unit)?;`
+#[derive(Debug, Clone)]
+pub struct RerunItem {
+    pub span: Span,
+    pub target: Label,
+    pub grid: GridAttrs,
+    pub with: Option<Label>,
 }
 
 #[derive(Debug, Clone)]

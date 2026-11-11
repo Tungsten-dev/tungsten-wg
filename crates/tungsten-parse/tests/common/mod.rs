@@ -427,6 +427,7 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],
+        refinements: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
         auto_params: Arena::new(),
@@ -595,6 +596,8 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
             scaled_origin: (f64_edge(rng), 1.0, -2.5),
             scaled_position: (0.5, f64_edge(rng), 1.0),
             dimensions: (rng.below(5) as i32 - 1, 4, 16),
+            mapping: gen_mapping(rng),
+            previous: rng.chance(1, 4),
         }));
     }
     for &u in &units {
@@ -632,7 +635,46 @@ pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
             scaled_position: (1.0, 2.0, f64_edge(rng)),
         });
     }
+
+    // refinements resolve names only, so reruns and `with` can be any unit, and names can repeat
+    for _ in 0..if p.entry_points.is_empty() { 0 } else { rng.below(3) } {
+        let reruns = (0..rng.below(4))
+            .map(|_| Rerun {
+                cu: *rng.pick(&units),
+                dimensions: (rng.below(5) as i32 - 1, 1, 16),
+                scaled_origin: (f64_edge(rng), 0.0, 1.0),
+                scaled_position: (1.0, f64_edge(rng), 4.0),
+                with: if rng.chance(1, 2) { Some(*rng.pick(&units)) } else { None },
+            })
+            .collect();
+        p.refinements.push(Refinement {
+            name: name(rng),
+            entry: rng.below(p.entry_points.len()),
+            march: if rng.chance(1, 3) {
+                (0, 0, 0)
+            } else {
+                (rng.below(4) as i32, rng.below(400) as i32, 0)
+            },
+            reruns,
+        });
+    }
     p
+}
+
+fn gen_mapping(rng: &mut Rng) -> DensityMapping {
+    fn axis(rng: &mut Rng) -> AxisFactor {
+        if rng.chance(1, 3) {
+            AxisFactor::Repeat
+        } else {
+            AxisFactor::Factor(rng.below(9) as i32)
+        }
+    }
+    let factors = [axis(rng), axis(rng), axis(rng)];
+    match rng.below(3) {
+        0 => DensityMapping::Identity,
+        1 => DensityMapping::Expand(factors),
+        _ => DensityMapping::Lerp(factors),
+    }
 }
 
 /// A value of type `t`; `t` must be a valued type (no density, …). Records get fields of any

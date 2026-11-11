@@ -21,6 +21,7 @@ fn roundtrip(values: Vec<ConstExpr>) {
                     compute_units: tungsten_ir::Arena::new(),
                     functions: tungsten_ir::Arena::new(),
                     entry_points: vec![],
+                    refinements: vec![],
                     constants: tungsten_ir::Arena::new(),
                     host_inputs: tungsten_ir::Arena::new(),
                     auto_params: tungsten_ir::Arena::new(),

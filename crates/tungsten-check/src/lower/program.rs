@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet};
 use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
-    AutoConst, AutoConstArg, ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram,
-    VariableType,
+    AutoConst, AutoConstArg, ComputeUnit, DensityInput, DensityMapping, EntryPoint, Function, HostInput, Name,
+    OptimizedProgram, VariableType,
 };
 
 use super::{Ctx, get};
@@ -49,6 +49,7 @@ pub(crate) fn run(
     let units = cx.units();
     let inputs = cx.inputs();
     let entries = cx.entries();
+    cx.refinements();
     let program = core::Program {
         units,
         functions,
@@ -541,6 +542,12 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 name,
             });
             let source = self.at(Step::Source, |cx| cx.unit_ref(d.density_function));
+            if d.mapping != DensityMapping::Identity {
+                self.err(LowerErrorKind::NotSupportedYet("density mappings are".into()));
+            }
+            if d.previous {
+                self.err(LowerErrorKind::NotSupportedYet("`@previous` inputs are".into()));
+            }
             out.push(core::InputDecl {
                 source,
                 dims: dims(d.dimensions),
@@ -549,6 +556,14 @@ impl<'p, 'r> Ctx<'p, 'r> {
             });
         }
         out
+    }
+
+    fn refinements(&mut self) {
+        let p = self.p;
+        self.enter(Item::Program);
+        for r in &p.refinements {
+            self.err(LowerErrorKind::NotSupportedYet(format!("refinement `{}` is", r.name)));
+        }
     }
 
     fn entries(&mut self) -> Vec<core::Entry> {

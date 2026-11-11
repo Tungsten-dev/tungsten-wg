@@ -194,6 +194,7 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],
+            refinements: vec![],
             constants: Arena::new(),
             host_inputs: Arena::new(),
             auto_params: Arena::new(),
@@ -313,6 +314,11 @@ impl<'a> Ctx<'a> {
         for item in &file.program.items {
             if let Item::Entry(e) = item {
                 self.declare_entry(e)?;
+            }
+        }
+        for item in &file.program.items {
+            if let Item::Refinement(r) = item {
+                self.declare_refinement(r)?;
             }
         }
 
@@ -598,16 +604,39 @@ impl<'a> Ctx<'a> {
     fn declare_input(&mut self, input: &ast::InputItem) -> R<()> {
         let target = self.lookup_unit(&input.target)?;
         let (dimensions, scaled_origin, scaled_position) = self.grid(&input.grid)?;
+        let mapping = Self::mapping(input.mapping.as_ref())?;
         let r = self.prog.density_inputs.insert(DensityInput {
             name: var_name(&input.label),
             density_function: target,
             scaled_origin,
             scaled_position,
             dimensions,
+            mapping,
+            previous: input.previous,
         });
         declare(&mut self.inputs, &input.label, r, "input")?;
         self.map.inputs.insert(r, input.span);
         Ok(())
+    }
+
+    fn mapping(attr: Option<&ast::MappingAttr>) -> R<DensityMapping> {
+        let Some(attr) = attr else {
+            return Ok(DensityMapping::Identity);
+        };
+        let mut factors = [AxisFactor::Repeat; 3];
+        for (out, f) in factors.iter_mut().zip(attr.factors) {
+            if let ast::Factor::Uint(n) = f {
+                *out = AxisFactor::Factor(Self::attr_i32(n, attr.span)?);
+            }
+        }
+        Ok(match attr.kind {
+            ast::MappingKind::Expand => DensityMapping::Expand(factors),
+            ast::MappingKind::Lerp => DensityMapping::Lerp(factors),
+        })
+    }
+
+    fn attr_i32(n: u64, span: Span) -> R<i32> {
+        i32::try_from(n).or_else(|_| err(span, format!("{n} is out of range for i32")))
     }
 
     /// A unit's `inputs` list, once every input is declared.
@@ -634,6 +663,40 @@ impl<'a> Ctx<'a> {
         });
         self.entry_labels.push(label.display());
         self.map.entries.push(e.span);
+        Ok(())
+    }
+
+    /// Only names are resolved here. Whether the refinement makes sense is lowering's to judge.
+    fn declare_refinement(&mut self, r: &ast::RefinementItem) -> R<()> {
+        let entry = Self::lookup(&self.entry_keys, &r.entry, "entry")?;
+        let march = match &r.march {
+            None => (0, 0, 0),
+            Some(([x, y, z], span)) => (
+                Self::attr_i32(*x, *span)?,
+                Self::attr_i32(*y, *span)?,
+                Self::attr_i32(*z, *span)?,
+            ),
+        };
+        let mut reruns = vec![];
+        for rerun in &r.reruns {
+            let cu = self.lookup_unit(&rerun.target)?;
+            let (dimensions, scaled_origin, scaled_position) = self.grid(&rerun.grid)?;
+            let with = rerun.with.as_ref().map(|l| self.lookup_unit(l)).transpose()?;
+            reruns.push(Rerun {
+                cu,
+                dimensions,
+                scaled_origin,
+                scaled_position,
+                with,
+            });
+        }
+        self.prog.refinements.push(Refinement {
+            name: r.label.display(),
+            entry,
+            march,
+            reruns,
+        });
+        self.map.refinements.push(r.span);
         Ok(())
     }
 

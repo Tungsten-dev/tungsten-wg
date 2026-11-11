@@ -4,7 +4,7 @@ use tungsten_ir::*;
 
 use super::derive::Deriver;
 use super::expr::{ExprPrinter, const_to_expression, type_text};
-use super::float::{f64_lit, quote_string};
+use super::float::{f64_lit, quote_name, quote_string};
 use super::labels::Labels;
 use crate::stack;
 
@@ -88,10 +88,12 @@ pub fn print(p: &OptimizedProgram) -> String {
     let mut s = String::new();
     for (d, input) in p.density_inputs.iter() {
         s.push_str(&format!(
-            "    input {} = {}{};\n",
+            "    input {} = {}{}{}{};\n",
             labels.input(d),
             labels.unit(input.density_function),
             grid_text(input.dimensions, input.scaled_origin, input.scaled_position),
+            mapping_text(input.mapping),
+            if input.previous { " @previous" } else { "" },
         ));
     }
     sections.push(s);
@@ -110,6 +112,13 @@ pub fn print(p: &OptimizedProgram) -> String {
         ));
     }
     sections.push(s);
+
+    let s: Vec<String> = p
+        .refinements
+        .iter()
+        .map(|r| refinement_text(p, &labels, r))
+        .collect();
+    sections.push(s.join("\n"));
 
     out.push_str(
         &sections
@@ -141,6 +150,51 @@ fn grid_text(d: (i32, i32, i32), o: (f64, f64, f64), s: (f64, f64, f64)) -> Stri
         f64_lit(s.1),
         f64_lit(s.2)
     )
+}
+
+/// Empty for `Identity`, which is the default.
+fn mapping_text(m: DensityMapping) -> String {
+    let (name, factors) = match m {
+        DensityMapping::Identity => return String::new(),
+        DensityMapping::Expand(f) => ("expand", f),
+        DensityMapping::Lerp(f) => ("lerp", f),
+    };
+    let [x, y, z] = factors.map(|f| match f {
+        AxisFactor::Repeat => "*".to_string(),
+        AxisFactor::Factor(n) => n.to_string(),
+    });
+    format!(" @{name}({x}, {y}, {z})")
+}
+
+fn refinement_text(p: &OptimizedProgram, labels: &Labels, r: &Refinement) -> String {
+    assert!(
+        r.entry < p.entry_points.len(),
+        "refinement `{}` refers to an entry that is not in the program",
+        r.name
+    );
+    let (x, y, z) = r.march;
+    let march = if r.march == (0, 0, 0) {
+        String::new()
+    } else {
+        format!(" @march({x}, {y}, {z})")
+    };
+    let mut s = format!(
+        "    refinement {} of {}{march} {{\n",
+        quote_name(&r.name),
+        labels.entry(r.entry)
+    );
+    for rerun in &r.reruns {
+        let with = rerun
+            .with
+            .map_or(String::new(), |u| format!(" with {}", labels.unit(u)));
+        s.push_str(&format!(
+            "        rerun {}{}{with};\n",
+            labels.unit(rerun.cu),
+            grid_text(rerun.dimensions, rerun.scaled_origin, rerun.scaled_position)
+        ));
+    }
+    s.push_str("    }\n");
+    s
 }
 
 fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> String {

@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: plan, not started. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phase 1 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -110,30 +110,30 @@ No generated code changes. Corpus results and L2 snapshots don't change.
 
 ### Density mappings (M1)
 
-- [ ] `AxisFactor`, `DensityMapping`, `DensityInput::mapping`, `DensityMapping::is_identity_on` (§2, §5.4)
-- [ ] Parser and printer for `@expand` and `@lerp` (§5.5), and the generators in `tungsten-parse/tests/common/mod.rs`
-- [ ] `InputSpec::mapping` in the builder, joining the input merge key (§5.6)
+- [x] `AxisFactor`, `DensityMapping`, `DensityInput::mapping`, `DensityMapping::is_identity_on` (§2, §5.4)
+- [x] Parser and printer for `@expand` and `@lerp` (§5.5), and the generators in `tungsten-parse/tests/common/mod.rs`
+- [x] `InputSpec::mapping` in the builder, joining the input merge key (§5.6)
 
 ### Refinement (M1)
 
-- [ ] `Refinement`, `Rerun`, `OptimizedProgram::refinements`, `DensityInput::previous` (§3)
-- [ ] `retag.rs` and `rebuild.rs`, with a test that `Clone` and `rebuild` keep refinement refs valid (§9)
-- [ ] Parser and printer for `refinement`, `@march`, `rerun` and `@previous`, with contextual keywords (§8.2). `@refine` and
+- [x] `Refinement`, `Rerun`, `OptimizedProgram::refinements`, `DensityInput::previous` (§3)
+- [x] `retag.rs` and `rebuild.rs`, with a test that `Clone` and `rebuild` keep refinement refs valid (§9)
+- [x] Parser and printer for `refinement`, `@march`, `rerun` and `@previous`, with contextual keywords (§8.2). `@refine` and
       `after` wait for 2A
-- [ ] `isomorphic` over `refinements`, and the generators
-- [ ] Builder: `InputSpec::previous` in the merge key, `pb.refinement`, `RerunSpec` (§3)
+- [x] `isomorphic` over `refinements`, and the generators
+- [x] Builder: `InputSpec::previous` in the merge key, `pb.refinement`, `RerunSpec` (§3)
 
 ### Shared
 
-- [ ] Lowering rejects a non-`Identity` mapping and any refinement with one temporary `LowerErrorKind`, covered by unit
+- [x] Lowering rejects a non-`Identity` mapping and any refinement with one temporary `LowerErrorKind`, covered by unit
       tests only (no `reject/` file, since the kind goes away in 2A)
-- [ ] The backend guard (§3.1), with unit tests
+- [x] The backend guard (§3.1), with unit tests
 
 ### Workers (M1)
 
-- [ ] `WorkerLayout`, `Pool`, `Slot`, `Interface::worker`, `slot`, `worker_schedule`, `input_params`, `entry_hosts` (§4)
-- [ ] Naming for workers, host consts and factories in `tungsten-interface::naming` (§2)
-- [ ] The Interface and Naming test rows of §8
+- [x] `WorkerLayout`, `Pool`, `Slot`, `Interface::worker`, `slot`, `worker_schedule`, `input_params`, `entry_hosts` (§4)
+- [x] Naming for workers, host consts and factories in `tungsten-interface::naming` (§2)
+- [x] The Interface and Naming test rows of §8
 
 `worker_schedule` is the plain closure here. Refinement extends it in 2B.
 
@@ -253,3 +253,18 @@ Needs `nvcc` and the GPU.
 ## 11. Implementation notes
 
 Add deviations here as phases land, and in the relevant spec if they change its design.
+
+**Phase 1.**
+
+- Lowering's temporary kind is `LowerErrorKind::NotSupportedYet`. It also refuses a `@previous` input in a program with no
+  refinement, which §4 didn't list: such an input would otherwise lower as an ordinary read. 2A removes the kind.
+- `DensityMapping::is_identity_on` counts `Repeat` only on an axis of size 1. That is the one use of its `input_dims`
+  parameter, and `Repeat` on a wider axis is invalid anyway.
+- `naming::worker_names` also fixes `<Base>Layout`, for CUDA. A `FactoryStyle` gives the spellings in `specs/workers.md` §3.
+  If any of a worker's three type names is taken, all three move to `<Base>_N`, so one entry keeps one stem.
+- **For 2A:** `specs/refinement.md` §9 asks for one `reject/` file per error, but two can't be written in text.
+  `RefineBadEntry` needs an entry index no label can name (an unknown label is an elaboration error), and `RefineBadMarch`
+  needs a negative `@march`, which the `UINT` grammar refuses. They need unit tests on hand-built IR. A negative factor
+  has the same limit, but `MappingBadFactor` is still reachable with factor 0.
+- Exit criterion checked by generating all 86 corpus programs before and after the phase, on three backends and two stages
+  (516 outputs, driver included), and comparing bytes: no differences.

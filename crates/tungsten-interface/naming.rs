@@ -303,6 +303,101 @@ pub fn entry_base_names(
         .collect()
 }
 
+/// How a backend spells the factory that creates a worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactoryStyle {
+    /// `final_density_worker` (Rust).
+    Snake,
+    /// `finalDensityWorker` (Java).
+    LowerCamel,
+    /// `create_final_density_worker` (CUDA).
+    CreateSnake,
+}
+
+/// The generated names belonging to one entry's worker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerNames {
+    /// The entry's base name, from [`entry_base_names`].
+    pub base: String,
+    /// `<Base>Worker`
+    pub worker: String,
+    /// `<Base>HostConsts`
+    pub host_consts: String,
+    /// `<Base>Layout` (CUDA)
+    pub layout: String,
+    /// The method on `Orchestration` that creates the worker.
+    pub factory: String,
+}
+
+/// Names of every entry's worker, in entry order. Type names are unique against the reserved names
+/// of `rules`, `used_types` (the other generated types) and each other. Factories are unique
+/// against the reserved names, `used_members` (the other members of `Orchestration`) and each other.
+pub fn worker_names(
+    program: &OptimizedProgram,
+    rules: &NamingRules,
+    style: FactoryStyle,
+    used_types: HashSet<String>,
+    used_members: HashSet<String>,
+) -> Vec<WorkerNames> {
+    let mut types = rules.used_set();
+    types.extend(used_types);
+    let mut members = rules.used_set();
+    members.extend(used_members);
+    entry_base_names(program, rules, members.clone())
+        .into_iter()
+        .map(|base| {
+            let camel = (rules.sanitize)(&upper_camel(&base));
+            let [worker, host_consts, layout] = free_type_names(&mut types, &camel);
+            let snake = format!("{base}_worker");
+            let factory = match style {
+                FactoryStyle::Snake => snake,
+                FactoryStyle::LowerCamel => lower_camel(&snake),
+                FactoryStyle::CreateSnake => format!("create_{snake}"),
+            };
+            let factory = unique(&mut members, factory);
+            WorkerNames {
+                base,
+                worker,
+                host_consts,
+                layout,
+                factory,
+            }
+        })
+        .collect()
+}
+
+/// The three type names of `camel`, or of `camel_N` for the first N that leaves all three free.
+fn free_type_names(used: &mut HashSet<String>, camel: &str) -> [String; 3] {
+    let mut base = camel.to_string();
+    let mut n = 0;
+    loop {
+        let names = ["Worker", "HostConsts", "Layout"].map(|suffix| format!("{base}{suffix}"));
+        if names.iter().all(|name| !used.contains(name)) {
+            used.extend(names.iter().cloned());
+            return names;
+        }
+        n += 1;
+        base = format!("{camel}_{n}");
+    }
+}
+
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map_or(String::new(), |c| c.to_ascii_uppercase().to_string() + chars.as_str())
+}
+
+/// `final_density` → `FinalDensity`. Only underscores separate words, so `aB` stays `AB`.
+fn upper_camel(name: &str) -> String {
+    name.split('_').map(capitalized).collect()
+}
+
+/// `final_density_worker` → `finalDensityWorker`.
+fn lower_camel(name: &str) -> String {
+    let camel = upper_camel(name);
+    let mut chars = camel.chars();
+    chars.next().map_or(String::new(), |c| c.to_ascii_lowercase().to_string() + chars.as_str())
+}
+
 /// Field name of an autoconst in `AutoConsts`: its sanitized name (the caller makes it unique).
 pub fn auto_const_field_name(rules: &NamingRules, a: &AutoConst) -> String {
     (rules.sanitize)(&a.name)
@@ -347,8 +442,121 @@ pub fn unit_base_name(
 
 #[cfg(test)]
 mod tests {
-    use super::{cuda_sanitize, unique};
+    use super::{FactoryStyle, NamingRules, WorkerNames, cuda_sanitize, unique, worker_names};
     use std::collections::HashSet;
+    use tungsten_ir::model::{Arena, ComputeUnit, EntryPoint, Function, OptimizedProgram, VariableType};
+
+    /// One unit per name, each an entry.
+    fn entries(names: &[&str]) -> OptimizedProgram {
+        let mut p = OptimizedProgram {
+            compute_units: Arena::new(),
+            functions: Arena::new(),
+            entry_points: vec![],
+            refinements: vec![],
+            constants: Arena::new(),
+            host_inputs: Arena::new(),
+            auto_params: Arena::new(),
+            auto_consts: Arena::new(),
+            density_inputs: Arena::new(),
+        };
+        for name in names {
+            let function = p.functions.insert(Function {
+                canonical_name: Some(name.to_string()),
+                host_inputs: vec![],
+                body: vec![],
+                variables: Arena::new(),
+                parameters: vec![],
+                return_type: VariableType::F64,
+                source_hash: 0,
+            });
+            let unit = p.compute_units.insert(ComputeUnit::DensityFunction {
+                function,
+                density_inputs: vec![],
+                auto_consts: vec![],
+                host_inputs: vec![],
+                helper_functions: vec![],
+                constants: vec![],
+                source_hash: 0,
+            });
+            p.entry_points.push(EntryPoint {
+                density_function: unit,
+                dimensions: (1, 1, 1),
+                scaled_origin: (1.0, 1.0, 1.0),
+                scaled_position: (1.0, 1.0, 1.0),
+            });
+        }
+        p
+    }
+
+    fn names(p: &OptimizedProgram, rules: &NamingRules, style: FactoryStyle) -> Vec<WorkerNames> {
+        worker_names(p, rules, style, HashSet::new(), HashSet::new())
+    }
+
+    #[test]
+    fn worker_names_by_style() {
+        let p = entries(&["final_density"]);
+        let n = &names(&p, &NamingRules::rust(), FactoryStyle::Snake)[0];
+        assert_eq!(n.base, "final_density");
+        assert_eq!(n.worker, "FinalDensityWorker");
+        assert_eq!(n.host_consts, "FinalDensityHostConsts");
+        assert_eq!(n.layout, "FinalDensityLayout");
+        assert_eq!(n.factory, "final_density_worker");
+        let java = &names(&p, &NamingRules::java(), FactoryStyle::LowerCamel)[0];
+        assert_eq!(java.factory, "finalDensityWorker");
+        let cuda = &names(&p, &NamingRules::cuda(), FactoryStyle::CreateSnake)[0];
+        assert_eq!(cuda.factory, "create_final_density_worker");
+    }
+
+    #[test]
+    fn worker_types_stay_unique_after_camel_casing() {
+        let p = entries(&["a_b", "aB"]);
+        for (rules, style) in [
+            (NamingRules::rust(), FactoryStyle::Snake),
+            (NamingRules::java(), FactoryStyle::LowerCamel),
+            (NamingRules::cuda(), FactoryStyle::CreateSnake),
+        ] {
+            let n = names(&p, &rules, style);
+            assert_ne!(n[0].worker, n[1].worker);
+            assert_ne!(n[0].host_consts, n[1].host_consts);
+            assert_ne!(n[0].layout, n[1].layout);
+            assert_ne!(n[0].factory, n[1].factory);
+        }
+    }
+
+    #[test]
+    fn entry_named_orchestration_does_not_clash() {
+        let p = entries(&["orchestration"]);
+        for (rules, style) in [
+            (NamingRules::rust(), FactoryStyle::Snake),
+            (NamingRules::java(), FactoryStyle::LowerCamel),
+            (NamingRules::cuda(), FactoryStyle::CreateSnake),
+        ] {
+            let n = &names(&p, &rules, style)[0];
+            assert_eq!(n.worker, "OrchestrationWorker");
+            assert_eq!(n.host_consts, "OrchestrationHostConsts");
+        }
+    }
+
+    /// All three type names move together when any one is taken, and a name that camel-cases to
+    /// nothing or to a leading digit stays legal.
+    #[test]
+    fn worker_types_avoid_taken_names_and_stay_legal() {
+        let p = entries(&["buffer", "_3d", "_"]);
+        let rules = NamingRules::cuda();
+        let n = names(&p, &rules, FactoryStyle::CreateSnake);
+        assert_eq!(n[0].layout, "Buffer_1Layout", "BufferLayout is reserved on CUDA");
+        assert_eq!(n[0].worker, "Buffer_1Worker");
+        for n in names(&p, &NamingRules::rust(), FactoryStyle::Snake) {
+            assert!(!n.worker.starts_with(|c: char| c.is_ascii_digit()), "{}", n.worker);
+        }
+        let taken = HashSet::from(["FooHostConsts".to_string()]);
+        let p = entries(&["foo"]);
+        let n = worker_names(&p, &NamingRules::rust(), FactoryStyle::Snake, taken, HashSet::new());
+        assert_eq!(n[0].worker, "Foo_1Worker");
+        let members = HashSet::from(["foo_worker".to_string()]);
+        let n = worker_names(&p, &NamingRules::rust(), FactoryStyle::Snake, HashSet::new(), members);
+        assert_eq!(n[0].factory, "foo_worker_1");
+    }
 
     #[test]
     fn unique_suffixes_collisions() {

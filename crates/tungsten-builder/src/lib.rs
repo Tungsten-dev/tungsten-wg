@@ -19,10 +19,10 @@ pub use error::{BuildError, BuildErrorKind, BuildErrors, FieldProblem};
 pub use expr::{Expr, origin, origin_scale, pos3, position_scale};
 pub use function::{Block, FnBuilder, Local};
 pub use program::{
-    Auto, AutoArg, Constant, Grid, Helper, Host, Input, InputSpec, Param, ProgramBuilder, Unit,
+    Auto, AutoArg, Constant, Entry, Grid, Helper, Host, Input, InputSpec, Param, ProgramBuilder, RerunSpec, Unit,
 };
 
-pub use tungsten_ir::{AutoArgType, OptimizedProgram, VariableType};
+pub use tungsten_ir::{AutoArgType, AxisFactor, DensityMapping, OptimizedProgram, VariableType};
 
 #[doc(hidden)]
 pub use tungsten_ir as __ir;
@@ -31,9 +31,9 @@ pub use tungsten_ir as __ir;
 /// type names (`F64`, `I32`, …).
 pub mod prelude {
     pub use crate::{
-        Auto, AutoArg, Block, BuildError, BuildErrors, Constant, Expr, FnBuilder, Grid, Helper, Host, Input,
-        InputSpec, Local, Param, ProgramBuilder, Unit, origin, origin_scale, pos3,
-        position_scale,
+        Auto, AutoArg, AxisFactor, Block, BuildError, BuildErrors, Constant, DensityMapping, Entry, Expr, FnBuilder,
+        Grid, Helper, Host, Input, InputSpec, Local, Param, ProgramBuilder, RerunSpec, Unit, origin, origin_scale,
+        pos3, position_scale,
     };
     // `pos3` above brings both the ambient function and the `pos3!` macro.
     pub use crate::{array, auto_initializers, body, build, extern_fns, record_decls, vec3, vt};

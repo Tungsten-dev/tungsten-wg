@@ -631,7 +631,31 @@ impl Parser {
                 let label = self.label()?;
                 self.expect(Tok::Assign)?;
                 let target = self.label()?;
-                let mut grid = self.grid_attrs()?;
+                let mut mapping = None;
+                let mut previous = false;
+                let mut grid = self.grid_attrs_and(&mut |p, name, span| {
+                    let kind = match name {
+                        "expand" => MappingKind::Expand,
+                        "lerp" => MappingKind::Lerp,
+                        "previous" => {
+                            if std::mem::replace(&mut previous, true) {
+                                return p.fail(span, "duplicate `@previous`");
+                            }
+                            return Ok(true);
+                        }
+                        _ => return Ok(false),
+                    };
+                    let factors = p.factors()?;
+                    let attr = MappingAttr {
+                        span: span.to(p.prev_span()),
+                        kind,
+                        factors,
+                    };
+                    if mapping.replace(attr).is_some() {
+                        return p.fail(span, "an input has at most one mapping");
+                    }
+                    Ok(true)
+                })?;
                 self.expect(Tok::Semi)?;
                 grid.span = start.to(self.prev_span());
                 Ok(Item::Input(InputItem {
@@ -639,6 +663,8 @@ impl Parser {
                     label,
                     target,
                     grid,
+                    mapping,
+                    previous,
                 }))
             }
             Tok::Kw(Kw::Entry) => {
@@ -660,9 +686,12 @@ impl Parser {
                     grid,
                 })))
             }
+            Tok::Name { .. } if self.at_word("refinement") => {
+                Ok(Item::Refinement(Box::new(self.refinement_item()?)))
+            }
             _ => {
                 self.unexpected(
-                    "an item (`fn`, `unit`, `input`, `entry`, `const`, `host`, `param`, `auto`, `use`)",
+                    "an item (`fn`, `unit`, `input`, `entry`, `refinement`, `const`, `host`, `param`, `auto`, `use`)",
                 )
             }
         }
@@ -802,8 +831,86 @@ impl Parser {
         Ok(u)
     }
 
+    /// `refinement`, `of`, `rerun` and `with` are contextual, so they stay usable as labels.
+    fn refinement_item(&mut self) -> R<RefinementItem> {
+        let start = self.expect_word("refinement")?;
+        let label = self.label()?;
+        self.expect_word("of")?;
+        let entry = self.label()?;
+        let mut march = None;
+        if let Some((a, span)) = self.attr() {
+            if a != "march" {
+                return self.fail(span, format!("unknown refinement attribute `@{a}`"));
+            }
+            self.expect(Tok::LParen)?;
+            let x = self.uint()?;
+            self.expect(Tok::Comma)?;
+            let y = self.uint()?;
+            self.expect(Tok::Comma)?;
+            let z = self.uint()?;
+            self.expect(Tok::RParen)?;
+            march = Some(([x, y, z], span.to(self.prev_span())));
+        }
+        self.expect(Tok::LBrace)?;
+        let mut reruns = vec![];
+        while !self.is(&Tok::RBrace) {
+            let rerun_start = self.expect_word("rerun")?;
+            let target = self.label()?;
+            let grid = self.grid_attrs()?;
+            let with = if self.at_word("with") {
+                self.bump();
+                Some(self.label()?)
+            } else {
+                None
+            };
+            self.expect(Tok::Semi)?;
+            reruns.push(RerunItem {
+                span: rerun_start.to(self.prev_span()),
+                target,
+                grid,
+                with,
+            });
+        }
+        let end = self.expect(Tok::RBrace)?;
+        Ok(RefinementItem {
+            span: start.to(end),
+            label,
+            entry,
+            march,
+            reruns,
+        })
+    }
+
+    /// `(f, f, f)`, each `f` an unsigned integer or `*`.
+    fn factors(&mut self) -> R<[Factor; 3]> {
+        self.expect(Tok::LParen)?;
+        let x = self.factor()?;
+        self.expect(Tok::Comma)?;
+        let y = self.factor()?;
+        self.expect(Tok::Comma)?;
+        let z = self.factor()?;
+        self.expect(Tok::RParen)?;
+        Ok([x, y, z])
+    }
+
+    fn factor(&mut self) -> R<Factor> {
+        if self.eat(&Tok::Star) {
+            Ok(Factor::Repeat)
+        } else {
+            Ok(Factor::Uint(self.uint()?))
+        }
+    }
+
     /// `@dims(..) @origin_scale(..) @position_scale(..)` in any order.
     fn grid_attrs(&mut self) -> R<GridAttrs> {
+        self.grid_attrs_and(&mut |_, _, _| Ok(false))
+    }
+
+    /// `grid_attrs`, mixed with attributes that `extra` consumes (it returns whether it did).
+    fn grid_attrs_and(
+        &mut self,
+        extra: &mut dyn FnMut(&mut Self, &str, Span) -> R<bool>,
+    ) -> R<GridAttrs> {
         let mut g = GridAttrs {
             span: self.span(),
             dims: None,
@@ -839,6 +946,7 @@ impl Parser {
                         return self.fail(span, dup);
                     }
                 }
+                other if extra(self, other, span)? => {}
                 _ => return self.fail(span, format!("unknown attribute `@{name}` here")),
             }
         }

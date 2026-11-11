@@ -76,6 +76,7 @@ impl Backend for RustBackend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<RustOutput, BackendError> {
+        tungsten_interface::check_implemented(program, &[])?;
         // The arena only lives for this call; the output is stored as finished strings.
         let arena = bumpalo::Bump::new();
         let device = RCLCodegen::new(program, &arena, interface);

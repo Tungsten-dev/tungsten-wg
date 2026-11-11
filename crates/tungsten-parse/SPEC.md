@@ -170,7 +170,7 @@ Rules:
 ```ebnf
 file      = directive* program directive* ;
 program   = "program" "{" item* "}" ;
-item      = use | host | param | auto | const | fn | input | unit | entry ;
+item      = use | host | param | auto | const | fn | input | unit | entry | refinement ;
 
 use       = "use" IDENT "::" "{" label ("," label)* ","? "}" ";" ;
 host      = "host" label ( ":" type | "dynamic" ) ";" ;
@@ -183,7 +183,13 @@ param     = label (":" type)? ;
 vars      = "vars" "{" (label ":" type ("," label ":" type)* ","?)? "}" ;
 fn_attr   = "@hash" "(" UINT ")" | "@hosts" "(" labels? ")" ;
 unit      = "unit" label ("@hash" "(" UINT ")")? "{" unit_item* "}" ;
-input     = "input" label "=" label grid_attrs ";" ;
+input     = "input" label "=" label input_attrs ";" ;
+input_attrs = (* grid_attrs, plus at most one mapping and at most one "@previous", in any order *) ;
+mapping   = ("@expand" | "@lerp") "(" factor "," factor "," factor ")" ;
+factor    = UINT | "*" ;
+refinement= "refinement" label "of" label march? "{" rerun* "}" ;
+march     = "@march" "(" UINT "," UINT "," UINT ")" ;
+rerun     = "rerun" label grid_attrs ("with" label)? ";" ;
 unit_item = "main" label ";"
           | ("helpers" | "autos" | "hosts" | "consts" | "inputs") "[" labels? "]" ";" ;
 entry     = "entry" (label "=")? label grid_attrs ";" ;
@@ -205,6 +211,7 @@ block     = "{" stmt* "}" ;
 
 `num` in `grid_attrs` is an attribute position: an int literal is accepted for an f64 (§4.1, §2).
 `input` inside a unit is an `ElabError` that points to the top-level form, and `@var` is an unknown attribute.
+`refinement` is an item like the others. `refinement`, `of`, `rerun` and `with` are contextual, so they stay usable as labels.
 
 ### 5.2 Labels per namespace
 
@@ -252,6 +259,11 @@ per fn. The input namespace is program-wide.
   resolves the `inputs` lists, so references don't depend on order.
 - **`entry [l =] u grid_attrs;`**: without `l =`, the label is the unit label. Duplicate entry
   labels are an error.
+- **Input mappings**: `*` is `AxisFactor::Repeat`. A missing mapping is `Identity`, and the printer omits it.
+  Mappings are never derived, and entries and reruns don't accept one.
+- **`refinement r of e … { … }`**: `e` is an entry label and the targets and `with` are unit labels. A missing
+  `@march` is all zero, and the printer omits an all-zero one. Only names are resolved here: duplicate names, empty
+  rerun lists and factor 0 load, and lowering judges them.
 
 ### 5.4 Types
 

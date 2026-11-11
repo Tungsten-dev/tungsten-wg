@@ -376,6 +376,42 @@ pub enum ComputeUnit {
         source_hash: u64,
     },
 }
+
+/// How one axis of an un-indexed read maps the reader's coordinate to the input's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AxisFactor {
+    /// The input has size 1 on this axis. Every reader coordinate reads coordinate 0.
+    Repeat,
+    /// Each input coordinate covers `n` reader coordinates. `n >= 1`.
+    Factor(i32),
+}
+
+/// How an un-indexed read maps the reader's cell to the input's buffer. A read with an explicit
+/// index ignores it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum DensityMapping {
+    #[default]
+    Identity,
+    Expand([AxisFactor; 3]),
+    Lerp([AxisFactor; 3]),
+}
+
+impl DensityMapping {
+    /// Whether a read through this mapping, on an input of `input_dims`, reads the reader's own
+    /// cell. `Repeat` only counts on an axis of size 1, the only place it is valid.
+    pub fn is_identity_on(&self, input_dims: (i32, i32, i32)) -> bool {
+        let factors = match self {
+            DensityMapping::Identity => return true,
+            DensityMapping::Expand(f) | DensityMapping::Lerp(f) => f,
+        };
+        let sizes = [input_dims.0, input_dims.1, input_dims.2];
+        factors.iter().zip(sizes).all(|(f, size)| match f {
+            AxisFactor::Repeat => size == 1,
+            AxisFactor::Factor(n) => *n == 1,
+        })
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct DensityInput {
     pub name: Name,
@@ -383,6 +419,33 @@ pub struct DensityInput {
     pub scaled_origin: (f64, f64, f64),
     pub scaled_position: (f64, f64, f64),
     pub dimensions: (i32, i32, i32),
+    pub mapping: DensityMapping,
+    /// Reads this instance's output from before the current call. Only refined units may list it.
+    pub previous: bool,
+}
+
+/// A second generated call on an entry's worker that reruns part of its closure, with `Pos3`
+/// moved by an offset. Everything not listed in `reruns` stays frozen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refinement {
+    pub name: String,
+    /// Index into `entry_points`.
+    pub entry: usize,
+    /// Largest allowed offset per axis, each >= 0. An axis with 0 doesn't march.
+    pub march: (i32, i32, i32),
+    pub reruns: Vec<Rerun>,
+}
+
+/// One instance a refinement reruns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rerun {
+    /// The buffer written, identified as an instance: unit, dims and scales.
+    pub cu: Ref<ComputeUnit>,
+    pub dimensions: (i32, i32, i32),
+    pub scaled_origin: (f64, f64, f64),
+    pub scaled_position: (f64, f64, f64),
+    /// The refined unit that runs instead of `cu`. `None` reruns `cu`.
+    pub with: Option<Ref<ComputeUnit>>,
 }
 
 /// A value supplied once, when the orchestration is created. Programs can't read it directly;
@@ -536,6 +599,7 @@ pub struct OptimizedProgram {
     /// Values built at creation time, in creation order.
     pub auto_consts: Arena<AutoConst>,
     pub density_inputs: Arena<DensityInput>,
+    pub refinements: Vec<Refinement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

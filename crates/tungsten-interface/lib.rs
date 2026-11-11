@@ -13,11 +13,15 @@ use tungsten_ir::model::{AutoConst, AutoParam,
 };
 
 pub mod compiler;
+mod guard;
 pub mod naming;
 pub mod scale;
+mod workers;
 
 pub use compiler::{CompileError, Compiler, Inline, Passes};
+pub use guard::{Feature, check_implemented};
 pub use scale::Scale;
+pub use workers::{Pool, Slot, WorkerLayout};
 
 use naming::{CREATION_RESERVED, auto_const_field_name, host_field_name, unique, unit_base_name};
 
@@ -168,6 +172,7 @@ pub struct Interface {
     auto_consts: HashMap<Ref<AutoConst>, String>,
     auto_params: HashMap<Ref<AutoParam>, String>,
     host_fields: HashMap<Ref<HostInput>, String>,
+    workers: workers::Workers,
 }
 
 impl Interface {
@@ -249,7 +254,7 @@ impl Interface {
             }
         }
 
-        Self {
+        let mut interface = Self {
             instances,
             dependencies,
             waves,
@@ -261,7 +266,10 @@ impl Interface {
             auto_consts,
             auto_params,
             host_fields,
-        }
+            workers: workers::Workers::default(),
+        };
+        interface.workers = workers::Workers::build(program, &interface);
+        interface
     }
 
     pub fn instances(&self) -> &[Instance] {
@@ -291,6 +299,33 @@ impl Interface {
             })
             .filter(|w| !w.is_empty())
             .collect()
+    }
+
+    /// The waves that entry `entry`'s worker runs.
+    pub fn worker_schedule(&self, entry: usize) -> &[Vec<Instance>] {
+        &self.workers.schedules[entry]
+    }
+
+    /// Where entry `entry`'s worker keeps its buffers.
+    pub fn worker(&self, entry: usize) -> &WorkerLayout {
+        &self.workers.layouts[entry]
+    }
+
+    /// `inst`'s place in entry `entry`'s worker, if that worker computes it.
+    pub fn slot(&self, entry: usize, inst: &Instance) -> Option<Slot> {
+        let slots = &self.workers.layouts[entry].slots;
+        slots.iter().find(|(i, _)| i == inst).map(|(_, s)| *s)
+    }
+
+    /// Inputs `f` reads, directly or through the helpers it calls, in program arena order,
+    /// deduplicated.
+    pub fn input_params(&self, f: Ref<Function>) -> &[Ref<DensityInput>] {
+        &self.workers.input_params[&f]
+    }
+
+    /// Static hosts read by any unit in entry `entry`'s worker schedule, in arena order.
+    pub fn entry_hosts(&self, entry: usize) -> &[Ref<HostInput>] {
+        &self.workers.entry_hosts[entry]
     }
 
     pub fn instances_of(&self, cu: Ref<ComputeUnit>) -> Vec<Instance> {

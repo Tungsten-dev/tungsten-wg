@@ -699,6 +699,7 @@ fn empty_program() -> OptimizedProgram {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],
+        refinements: vec![],
         constants: Arena::new(),
         host_inputs: Arena::new(),
         auto_params: Arena::new(),
@@ -2001,6 +2002,8 @@ fn printing_is_total_for_unusual_programs() {
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
         dimensions: (1, 1, 1),
+        mapping: Default::default(),
+        previous: false,
     });
     shared.body = vec![Statement::Return(Expression::Field {
         base: Box::new(Expression::DensityVariable(d, None)),
@@ -2138,4 +2141,154 @@ fn removed_table_syntax_fails() {
     fails("program { table t = base3d; }", "expected an item");
     fails("program { fn f() -> f64 { return 1.0; } unit u { main f; tables [t]; } }", "main` or a list");
     fails("program { param seed: i64; fn f() -> f64 { return 1.0; } unit u { main f; } }\n@case \"c\" origin(0, 0, 0) seed(1)", "seed");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Mappings and refinements
+// ---------------------------------------------------------------------------------------------
+
+/// `base` and `other` are units, with entry `e` on `other`; `items` goes after them.
+fn with_units(items: &str) -> String {
+    format!(
+        "program {{
+            fn base() -> f64 {{ return 1.0; }}
+            fn other() -> f64 {{ return 2.0; }}
+            unit base {{ main base; }}
+            unit other {{ main other; }}
+            entry e = other @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+            {items}
+        }}"
+    )
+}
+
+const GRID4: &str = "@dims(4, 1, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)";
+
+fn load_ok(src: &str) -> TestFile {
+    load(src, FileId(0), &TestEnv).unwrap_or_else(|d| panic!("{d:?}"))
+}
+
+fn load_err(src: &str) -> String {
+    format!("{:?}", load(src, FileId(0), &TestEnv).err().expect("should not load"))
+}
+
+fn round_trips(tf: &TestFile) {
+    let text = print(&tf.program);
+    let again = load_ok(&text);
+    assert!(isomorphic(&compact(&tf.program), &again.program), "{text}");
+    assert_eq!(print(&again.program), text);
+}
+
+#[test]
+fn input_mappings_parse_and_print() {
+    use AxisFactor::{Factor, Repeat};
+    let tf = load_ok(&with_units(&format!(
+        "input a = base {GRID4};
+         input b = base @expand(4, *, 1) {GRID4};
+         input c = base {GRID4} @lerp(4, 8, 4);
+         input d = base @dims(4, 1, 4) @lerp(*, *, 3) @origin_scale(1, 1, 1) @previous @position_scale(1, 1, 1);
+         input e = base {GRID4} @previous;"
+    )));
+    let got: Vec<_> = tf.program.density_inputs.values().map(|d| (d.mapping, d.previous)).collect();
+    assert_eq!(
+        got,
+        [
+            (DensityMapping::Identity, false),
+            (DensityMapping::Expand([Factor(4), Repeat, Factor(1)]), false),
+            (DensityMapping::Lerp([Factor(4), Factor(8), Factor(4)]), false),
+            (DensityMapping::Lerp([Repeat, Repeat, Factor(3)]), true),
+            (DensityMapping::Identity, true),
+        ]
+    );
+    let text = print(&tf.program);
+    assert!(text.contains("@position_scale(1.0, 1.0, 1.0) @expand(4, *, 1);"), "{text}");
+    assert!(text.contains("@lerp(*, *, 3) @previous;"), "{text}");
+    assert!(!text.contains("input a = base @dims(4, 1, 4) @origin_scale(1.0, 1.0, 1.0) @position_scale(1.0, 1.0, 1.0) @"));
+    round_trips(&tf);
+}
+
+#[test]
+fn mapping_errors() {
+    let bad = [
+        ("@expand(1, 1, 1) @lerp(1, 1, 1)", "at most one mapping"),
+        ("@expand(1, 1, 1) @expand(1, 1, 1)", "at most one mapping"),
+        ("@previous @previous", "duplicate `@previous`"),
+        ("@expand(1, 1)", "expected `,`"),
+        ("@expand(-1, 1, 1)", "an unsigned integer"),
+        ("@lerp(1.5, 1, 1)", "an unsigned integer"),
+        ("@expand(2147483648, 1, 1)", "out of range for i32"),
+    ];
+    for (attrs, want) in bad {
+        let e = load_err(&with_units(&format!("input a = base {GRID4} {attrs};")));
+        assert!(e.contains(want), "{attrs}: {e}");
+    }
+    // Factor 0 is the validator's to reject (`MappingBadFactor`), so it must load.
+    load_ok(&with_units(&format!("input a = base {GRID4} @expand(0, 1, 1);")));
+    // Mappings and `@previous` belong to inputs only.
+    for attr in ["@expand(1, 1, 1)", "@lerp(1, 1, 1)", "@previous"] {
+        let e = load_err(&with_units(&format!("entry f = base {GRID4} {attr};")));
+        assert!(e.contains("unknown attribute"), "{attr}: {e}");
+        let e = load_err(&with_units(&format!("refinement r of e {{ rerun base {GRID4} {attr}; }}")));
+        assert!(e.contains("unknown attribute"), "{attr}: {e}");
+    }
+}
+
+#[test]
+fn refinements_parse_and_print() {
+    let tf = load_ok(&with_units(&format!(
+        "refinement step of e @march(0, 383, 0) {{
+            rerun other {GRID4} with base;
+            rerun base {GRID4};
+         }}
+         refinement `odd name` of e {{ }}"
+    )));
+    let r = &tf.program.refinements;
+    assert_eq!((r[0].name.as_str(), r[0].entry, r[0].march), ("step", 0, (0, 383, 0)));
+    assert_eq!(r[0].reruns.len(), 2);
+    assert!(r[0].reruns[0].with.is_some() && r[0].reruns[1].with.is_none());
+    assert_eq!((r[1].name.as_str(), r[1].march), ("odd name", (0, 0, 0)));
+    let text = print(&tf.program);
+    assert!(text.contains("refinement step of other @march(0, 383, 0) {"), "{text}");
+    assert!(text.contains("refinement `odd name` of other {"), "{text}");
+    assert_eq!(tf.source_map.refinements.len(), 2);
+    round_trips(&tf);
+}
+
+/// Every contextual keyword still works as a label, including in its own construct.
+#[test]
+fn refinement_words_are_contextual() {
+    let src = format!(
+        "program {{
+            fn refinement() -> f64 {{ let of: f64 = 1.0; return of; }}
+            fn with() -> f64 {{ return 2.0; }}
+            unit rerun {{ main refinement; }}
+            unit with {{ main with; }}
+            input of = rerun {GRID4};
+            entry of = rerun {GRID4};
+            refinement of of of {{ rerun rerun {GRID4} with with; }}
+        }}"
+    );
+    let tf = load_ok(&src);
+    assert_eq!(tf.program.refinements[0].name, "of");
+    round_trips(&tf);
+}
+
+#[test]
+fn refinement_errors() {
+    let bad = [
+        (format!("refinement r of nope {{ }}"), "unknown entry `nope`"),
+        (format!("refinement r of e {{ rerun nope {GRID4}; }}"), "unknown unit `nope`"),
+        (format!("refinement r of e {{ rerun base {GRID4} with nope; }}"), "unknown unit `nope`"),
+        (format!("refinement r of e {{ rerun base @dims(1, 1, 1); }}"), "missing `@origin_scale"),
+        (format!("refinement r of e @march(-1, 0, 0) {{ }}"), "an unsigned integer"),
+        (format!("refinement r of e @march(0, 0, 3000000000) {{ }}"), "out of range for i32"),
+        (format!("refinement r of e @hash(1) {{ }}"), "unknown refinement attribute"),
+        (format!("refinement r e {{ }}"), "expected `of`"),
+        (format!("refinement r of e {{ base; }}"), "expected `rerun`"),
+    ];
+    for (src, want) in bad {
+        let e = load_err(&with_units(&src));
+        assert!(e.contains(want), "{src}: {e}");
+    }
+    // Duplicate names and empty rerun lists are the validator's to reject, so they must load.
+    load_ok(&with_units("refinement r of e { } refinement r of e { }"));
 }

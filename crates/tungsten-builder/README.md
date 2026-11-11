@@ -53,7 +53,8 @@ let program: OptimizedProgram = pb.build()?;
 | `FnBuilder` | One function, owned and borrowing nothing, so several can be open at once. `finish_unit` or `finish_helper` decides what it becomes |
 | `Local` | A parameter or local of one function, from `param`, `local` (unique name), `temp` (name hint) or `anon` |
 | `Expr` | An IR expression with its type and any mistakes found so far. Handles and literals convert into it |
-| `Grid`, `InputSpec` | Dims and scales, and everything that describes an input |
+| `Grid`, `InputSpec` | Dims and scales, and everything that describes an input, including its `DensityMapping` and `previous` |
+| `Entry`, `RerunSpec` | The handle `entry` returns, and one rerun of a `refinement` on it |
 | `Decls` | Extern, record and initializer declarations from `extern_fns!`, `record_decls!` and `auto_initializers!` |
 
 **Recursive lowering** needs nothing special. The program and the current function are separate

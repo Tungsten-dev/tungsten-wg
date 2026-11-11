@@ -75,6 +75,7 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
         auto_params: Arena::new(),
         auto_consts: Arena::new(),
         density_inputs: Arena::new(),
+        refinements: p.refinements.clone(),
     };
     let mut m = Remap::default();
 
@@ -266,6 +267,10 @@ fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
         triple(e.scaled_origin, &mut out);
         triple(e.scaled_position, &mut out);
     }
+    for rerun in p.refinements.iter().flat_map(|r| &r.reruns) {
+        triple(rerun.scaled_origin, &mut out);
+        triple(rerun.scaled_position, &mut out);
+    }
     for c in p.constants.values() {
         cexpr(&c.value, &mut out);
     }
@@ -319,8 +324,9 @@ fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
     walk_program(&mut c, &mut f);
     let floats = float_bits(&c);
     let text = format!(
-        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
+        "{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}\n{:?}",
         c.entry_points,
+        c.refinements,
         c.host_inputs.values().collect::<Vec<_>>(),
         c.auto_params.values().collect::<Vec<_>>(),
         c.auto_consts.values().collect::<Vec<_>>(),

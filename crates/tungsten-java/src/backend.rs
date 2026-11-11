@@ -73,6 +73,7 @@ impl Backend for JavaBackend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<JavaOutput, BackendError> {
+        tungsten_interface::check_implemented(program, &[])?;
         let class_name = java_sanitize(&self.config.class_name);
         let naming_rules = self.naming_rules();
         let device = JavaCodegen::new(program, interface, &naming_rules, &class_name);

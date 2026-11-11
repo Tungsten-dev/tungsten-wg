@@ -29,6 +29,7 @@ impl<'a> Ctx<'a> {
                 compute_units: Arena::new(),
                 functions: Arena::new(),
                 entry_points: vec![],
+                refinements: vec![],
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
                 auto_params: Arena::new(),

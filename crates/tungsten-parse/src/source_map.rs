@@ -59,6 +59,8 @@ pub struct SourceMap {
     pub auto_consts: HashMap<Ref<AutoConst>, Span>,
     /// Index = `entry_points` index.
     pub entries: Vec<Span>,
+    /// Index = `refinements` index.
+    pub refinements: Vec<Span>,
     pub vars: HashMap<(Ref<Function>, Ref<Var>), Span>,
     pub inputs: HashMap<Ref<DensityInput>, Span>,
     pub statements: HashMap<(Ref<Function>, StmtPath), Span>,

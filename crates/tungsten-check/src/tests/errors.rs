@@ -147,6 +147,8 @@ fn hand_built() {
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
         dimensions: (1, 1, 1),
+        mapping: Default::default(),
+        previous: false,
     });
     inputs.remove(din);
     p.functions[fr]
@@ -197,6 +199,8 @@ fn dangling_lists() {
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
         dimensions: (1, 1, 1),
+        mapping: Default::default(),
+        previous: false,
     });
     p.functions[main].host_inputs.push(h);
     let mut u = unit(main);
@@ -245,6 +249,8 @@ fn dangling_input_source_and_main() {
         scaled_origin: (1.0, 1.0, 1.0),
         scaled_position: (1.0, 1.0, 1.0),
         dimensions: (1, 1, 1),
+        mapping: Default::default(),
+        previous: false,
     });
     let ComputeUnit::DensityFunction { density_inputs, .. } = &mut u;
     density_inputs.push(d);
@@ -292,5 +298,39 @@ fn errors_display_one_per_line() {
         e.to_string(),
         "host `#1`: dynamic host inputs are not supported\n\
          fn `top` › stmt 0 › value: unknown extern function `nope`"
+    );
+}
+
+/// Temporary (`specs/combined-rollout.md` phase 1): the interpreter doesn't implement these yet,
+/// so lowering refuses them, including the `Expand` of a `(1,1,1)` input that backends accept.
+#[test]
+fn mappings_and_refinements_are_refused_for_now() {
+    use tungsten_ir::{AxisFactor, DensityMapping, Refinement};
+
+    let mut p = empty();
+    let leaf = p.functions.insert(function("leaf", &[], &[], VariableType::F64, |_| vec![]));
+    let src = p.compute_units.insert(unit(leaf));
+    let input = |name: &str, mapping, previous| DensityInput {
+        name: Name::Named(name.into()),
+        density_function: src,
+        scaled_origin: (1.0, 1.0, 1.0),
+        scaled_position: (1.0, 1.0, 1.0),
+        dimensions: (1, 1, 1),
+        mapping,
+        previous,
+    };
+    p.density_inputs.insert(input("plain", DensityMapping::Identity, false));
+    p.density_inputs.insert(input("repeat", DensityMapping::Expand([AxisFactor::Repeat; 3]), false));
+    p.density_inputs.insert(input("lerp", DensityMapping::Lerp([AxisFactor::Factor(4); 3]), false));
+    p.density_inputs.insert(input("prev", DensityMapping::Identity, true));
+    p.refinements.push(Refinement { name: "step".into(), entry: 0, march: (0, 0, 0), reruns: vec![] });
+    assert_eq!(
+        errs(&p, &registry()),
+        [
+            "input `repeat`: density mappings are not supported yet",
+            "input `lerp`: density mappings are not supported yet",
+            "input `prev`: `@previous` inputs are not supported yet",
+            "program: refinement `step` is not supported yet",
+        ]
     );
 }

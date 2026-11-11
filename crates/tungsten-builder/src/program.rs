@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::panic::Location;
 
 use tungsten_ir::{
-    Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput, EntryPoint, Expression, Function, HostInput,
-    Name, OptimizedProgram, Ref, UnaryOperator, VariableType,
+    Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput, DensityMapping, EntryPoint, Expression,
+    Function, HostInput, Name, OptimizedProgram, OwnerTag, Ref, Refinement, Rerun, UnaryOperator, VariableType,
 };
 
 use crate::derive::{Summary, const_deps, summarize};
@@ -34,6 +34,13 @@ pub struct Helper {
     pub(crate) r: Ref<Function>,
     pub(crate) params: &'static [Ty],
     pub(crate) ret: Ty,
+}
+
+/// An entry point, for declaring refinements on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Entry {
+    index: usize,
+    owner: OwnerTag,
 }
 
 /// A density input. As an `Expr` it is an unindexed read.
@@ -159,12 +166,14 @@ impl Grid {
     }
 }
 
-/// Everything that describes an input. Later fields (`mapping`, `previous`) join here.
+/// Everything that describes an input.
 #[derive(Debug, Clone)]
 pub struct InputSpec {
     source: Unit,
     grid: Grid,
     name: Option<String>,
+    mapping: DensityMapping,
+    previous: bool,
 }
 
 impl InputSpec {
@@ -173,6 +182,8 @@ impl InputSpec {
             source,
             grid,
             name: None,
+            mapping: DensityMapping::Identity,
+            previous: false,
         }
     }
 
@@ -181,9 +192,45 @@ impl InputSpec {
         self.name = Some(name.to_string());
         self
     }
+
+    /// How an un-indexed read maps the reader's cell to this input's buffer.
+    pub fn mapping(mut self, mapping: DensityMapping) -> Self {
+        self.mapping = mapping;
+        self
+    }
+
+    /// Reads the instance's own output from before the current refine call.
+    pub fn previous(mut self) -> Self {
+        self.previous = true;
+        self
+    }
 }
 
-type InputKey = (Ref<ComputeUnit>, (i32, i32, i32), [u64; 6]);
+/// One instance a refinement reruns: `target` on `grid`.
+#[derive(Debug, Clone, Copy)]
+pub struct RerunSpec {
+    target: Unit,
+    grid: Grid,
+    with: Option<Unit>,
+}
+
+impl RerunSpec {
+    pub fn new(target: Unit, grid: Grid) -> Self {
+        Self {
+            target,
+            grid,
+            with: None,
+        }
+    }
+
+    /// Runs `refined` instead of `target`, writing `target`'s buffer.
+    pub fn with(mut self, refined: Unit) -> Self {
+        self.with = Some(refined);
+        self
+    }
+}
+
+type InputKey = (Ref<ComputeUnit>, (i32, i32, i32), [u64; 6], DensityMapping, bool);
 
 /// Builds an [`OptimizedProgram`]. Errors from every function and declaration collect here, and
 /// [`build`](Self::build) returns them all.
@@ -213,6 +260,7 @@ impl ProgramBuilder {
                 compute_units: Arena::new(),
                 functions: Arena::new(),
                 entry_points: Vec::new(),
+                refinements: vec![],
                 constants: Arena::new(),
                 host_inputs: Arena::new(),
                 auto_params: Arena::new(),
@@ -325,16 +373,59 @@ impl ProgramBuilder {
 
     /// Adds an entry point for `unit`.
     #[track_caller]
-    pub fn entry(&mut self, unit: Unit, grid: Grid) {
+    pub fn entry(&mut self, unit: Unit, grid: Grid) -> Entry {
+        let handle = Entry {
+            index: self.program.entry_points.len(),
+            owner: self.program.compute_units.tag(),
+        };
         if !self.program.compute_units.contains(unit.r) {
             self.foreign("a unit", Location::caller());
-            return;
+            return handle;
         }
         self.program.entry_points.push(EntryPoint {
             density_function: unit.r,
             dimensions: grid.dimensions,
             scaled_origin: grid.scaled_origin,
             scaled_position: grid.scaled_position,
+        });
+        handle
+    }
+
+    /// Declares a refinement of `entry`. `march` is the largest offset per axis. Whether the
+    /// refinement is valid is checked when the program is lowered.
+    #[track_caller]
+    pub fn refinement(
+        &mut self,
+        name: &str,
+        entry: Entry,
+        march: (i32, i32, i32),
+        reruns: impl IntoIterator<Item = RerunSpec>,
+    ) {
+        let at = Location::caller();
+        if entry.owner != self.program.compute_units.tag() {
+            self.foreign("an entry", at);
+            return;
+        }
+        let reruns: Vec<RerunSpec> = reruns.into_iter().collect();
+        let units = reruns.iter().flat_map(|r| [Some(r.target), r.with]).flatten();
+        if units.into_iter().any(|u| !self.program.compute_units.contains(u.r)) {
+            self.foreign("a unit", at);
+            return;
+        }
+        self.program.refinements.push(Refinement {
+            name: name.to_string(),
+            entry: entry.index,
+            march,
+            reruns: reruns
+                .into_iter()
+                .map(|r| Rerun {
+                    cu: r.target.r,
+                    dimensions: r.grid.dimensions,
+                    scaled_origin: r.grid.scaled_origin,
+                    scaled_position: r.grid.scaled_position,
+                    with: r.with.map(|u| u.r),
+                })
+                .collect(),
         });
     }
 
@@ -352,7 +443,7 @@ impl ProgramBuilder {
     // ---- inputs and declarations ---------------------------------------------------------
 
     /// An input reading `source` on `grid`. An equal input (same source, dims and scales by
-    /// bits) is returned instead of a new one.
+    /// bits, same mapping and `previous`) is returned instead of a new one.
     #[track_caller]
     pub fn input(&mut self, source: Unit, grid: Grid) -> Input {
         self.input_with(InputSpec::new(source, grid))
@@ -366,7 +457,7 @@ impl ProgramBuilder {
             self.foreign("a unit", Location::caller());
         }
         let (dims, bits) = spec.grid.key();
-        let key = (spec.source.r, dims, bits);
+        let key = (spec.source.r, dims, bits, spec.mapping, spec.previous);
         if let Some(r) = self.inputs.get(&key) {
             return Input { r: *r, ty };
         }
@@ -376,6 +467,8 @@ impl ProgramBuilder {
             scaled_origin: spec.grid.scaled_origin,
             scaled_position: spec.grid.scaled_position,
             dimensions: spec.grid.dimensions,
+            mapping: spec.mapping,
+            previous: spec.previous,
         });
         self.inputs.insert(key, r);
         Input { r, ty }
