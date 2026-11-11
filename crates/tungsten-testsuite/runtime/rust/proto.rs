@@ -33,6 +33,9 @@ impl Reader {
     pub fn i64(&mut self) -> i64 {
         i64::from_le_bytes(self.take())
     }
+    pub fn u32(&mut self) -> u32 {
+        u32::from_le_bytes(self.take())
+    }
     pub fn u64(&mut self) -> u64 {
         u64::from_le_bytes(self.take())
     }
@@ -97,8 +100,9 @@ fn failure(msg: &str) -> Vec<u8> {
     out
 }
 
-/// Reads requests of `request_len` bytes from stdin until EOF, and answers each on stdout.
-pub fn serve(request_len: usize, run: fn(&mut Reader) -> Vec<u8>) {
+/// Reads requests from stdin until EOF, and answers each on stdout. A request is `request_len`
+/// bytes, which end with the `steps` count, followed by that many steps of `step_len` bytes.
+pub fn serve(request_len: usize, step_len: usize, run: fn(&mut Reader) -> Vec<u8>) {
     std::panic::set_hook(Box::new(|info| {
         let payload = info.payload();
         let msg = payload
@@ -115,6 +119,11 @@ pub fn serve(request_len: usize, run: fn(&mut Reader) -> Vec<u8>) {
         match stdin.read_exact(&mut buf) {
             Ok(()) => {}
             Err(_) => return,
+        }
+        let steps = u32::from_le_bytes(buf[request_len - 4..].try_into().unwrap()) as usize;
+        buf.resize(request_len + steps * step_len, 0);
+        if stdin.read_exact(&mut buf[request_len..]).is_err() {
+            return;
         }
         let mut r = Reader::new(buf);
         let reply = match catch_unwind(AssertUnwindSafe(|| run(&mut r))) {

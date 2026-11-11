@@ -142,8 +142,9 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, depth: usize, sp
     }
 }
 
-/// The `driver` module of one test: one `Orchestration` per case, and one worker per entry, each
-/// given only its own entry's hosts.
+/// The `driver` module of one test: one `Orchestration` per case, one worker per entry (each given
+/// only its own entry's hosts), and then the case's refine calls, each on the worker of its
+/// refinement's entry.
 pub fn driver_source(
     program: &OptimizedProgram,
     interface: &Interface,
@@ -154,7 +155,9 @@ pub fn driver_source(
     let spec = env.spec();
     let mut s = String::new();
     s.push_str("pub mod driver {\n    use super::*;\n    use super::orchestration::*;\n");
-    writeln!(s, "    pub const REQUEST_LEN: usize = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
+    // The fixed part ends with `steps:u32`, and each step is `refinement:u32 offset:[i32;3] host*`.
+    writeln!(s, "    pub const REQUEST_LEN: usize = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)? + 4).unwrap();
+    writeln!(s, "    pub const STEP_LEN: usize = {};", io.step_bytes(env)?).unwrap();
     s.push_str("    pub fn run_case(r: &mut crate::proto::Reader) -> Vec<u8> {\n");
     s.push_str("        let origin = Vec3::new(r.f64(), r.f64(), r.f64());\n");
     for (i, (_, t)) in io.params.iter().enumerate() {
@@ -168,32 +171,56 @@ pub fn driver_source(
             statics.push(r);
         }
     }
-    let creation_args: Vec<String> = (0..io.params.len()).map(|i| format!("ap{i}")).collect();
-    writeln!(s, "        let orch = Orchestration::new({});", creation_args.join(", ")).unwrap();
-    s.push_str("        let mut w = crate::proto::Writer::new();\n");
-    for (i, (e, names)) in io.entries.iter().zip(workers).enumerate() {
+    let host_consts = |e: usize, prefix: &str| -> String {
         let fields: Vec<String> = interface
-            .entry_hosts(i)
+            .entry_hosts(e)
             .iter()
             .map(|h| {
                 let k = statics.iter().position(|x| x == h).expect("entry host is static");
-                format!("{}: h{k}", interface.host_field(*h))
+                format!("{}: {prefix}{k}", interface.host_field(*h))
             })
             .collect();
-        writeln!(s, "        {{ let hc = {} {{ {} }};", names.host_consts, fields.join(", ")).unwrap();
-        writeln!(s, "        let mut wk = orch.{}();", names.factory).unwrap();
-        s.push_str("        let res = wk.run(origin, &hc);\n");
-        if e.cells() == 1 {
-            encode_stmts(&mut s, "res", &e.ty, 0, spec);
-        } else {
-            s.push_str("        for c in res.iter() { let v = *c;\n");
-            encode_stmts(&mut s, "v", &e.ty, 0, spec);
-            s.push_str("        }\n");
-        }
+        format!("{} {{ {} }}", workers[e].host_consts, fields.join(", "))
+    };
+    let creation_args: Vec<String> = (0..io.params.len()).map(|i| format!("ap{i}")).collect();
+    writeln!(s, "        let orch = Orchestration::new({});", creation_args.join(", ")).unwrap();
+    s.push_str("        let mut w = crate::proto::Writer::new();\n");
+    // The workers outlive the run, since refine calls continue from their buffers.
+    for (i, (e, names)) in io.entries.iter().zip(workers).enumerate() {
+        writeln!(s, "        let mut wk{i} = orch.{}();", names.factory).unwrap();
+        writeln!(s, "        {{ let hc = {};", host_consts(i, "h")).unwrap();
+        writeln!(s, "        let res = wk{i}.run(origin, &hc);").unwrap();
+        encode_result(&mut s, e, spec);
         s.push_str("        }\n");
     }
+    s.push_str("        let steps = r.u32();\n        for _ in 0..steps {\n");
+    s.push_str("            let refinement = r.u32();\n");
+    s.push_str("            let offset = Pos3::new(r.i32(), r.i32(), r.i32());\n");
+    for (k, (_, t)) in io.hosts.iter().enumerate() {
+        writeln!(s, "            let sh{k} = {};", decode_expr(t, spec)).unwrap();
+    }
+    s.push_str("            match refinement {\n");
+    for (k, refinement) in program.refinements.iter().enumerate() {
+        let e = refinement.entry;
+        writeln!(s, "                {k} => {{ let hc = {};", host_consts(e, "sh")).unwrap();
+        writeln!(s, "                let res = wk{e}.{}(offset, &hc);", interface.refine_method(k)).unwrap();
+        encode_result(&mut s, &io.entries[e], spec);
+        s.push_str("                }\n");
+    }
+    s.push_str("                _ => panic!(\"unknown refinement {}\", refinement),\n            }\n        }\n");
     s.push_str("        w.finish()\n    }\n}\n");
     Ok(s)
+}
+
+/// Writes the value or array `res` of an entry to `w`.
+fn encode_result(s: &mut String, e: &super::protocol::EntryIo, spec: &RegistrySpec) {
+    if e.cells() == 1 {
+        encode_stmts(s, "res", &e.ty, 0, spec);
+    } else {
+        s.push_str("        for c in res.iter() { let v = *c;\n");
+        encode_stmts(s, "v", &e.ty, 0, spec);
+        s.push_str("        }\n");
+    }
 }
 
 /// Module source of one test: runtime imports, both backend modules and the driver. Panics in
@@ -242,11 +269,15 @@ pub fn main_source(ids: &[String]) -> String {
         writeln!(s, "mod {id};").unwrap();
     }
     s.push_str("fn main() {\n    let id = std::env::args().nth(1).expect(\"test id\");\n");
-    s.push_str("    let (len, run): (usize, fn(&mut proto::Reader) -> Vec<u8>) = match id.as_str() {\n");
+    s.push_str("    let (len, step, run): (usize, usize, fn(&mut proto::Reader) -> Vec<u8>) = match id.as_str() {\n");
     for id in ids {
-        writeln!(s, "        \"{id}\" => ({id}::driver::REQUEST_LEN, {id}::driver::run_case),").unwrap();
+        writeln!(
+            s,
+            "        \"{id}\" => ({id}::driver::REQUEST_LEN, {id}::driver::STEP_LEN, {id}::driver::run_case),"
+        )
+        .unwrap();
     }
     s.push_str("        _ => { eprintln!(\"unknown test id {id}\"); std::process::exit(2) }\n    };\n");
-    s.push_str("    proto::serve(len, run);\n}\n");
+    s.push_str("    proto::serve(len, step, run);\n}\n");
     s
 }

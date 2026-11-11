@@ -1,5 +1,4 @@
 // March: `Pos3` moves by the offset, while the buffer index stays in the buffer.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

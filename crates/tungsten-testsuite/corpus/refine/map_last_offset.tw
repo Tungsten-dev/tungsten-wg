@@ -1,5 +1,4 @@
 // Mappings: the last valid offset reads the input's last cell on the marched axis.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

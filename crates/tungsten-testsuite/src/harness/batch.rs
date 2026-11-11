@@ -357,7 +357,7 @@ impl Harness {
             return Ok(None);
         }
         let Ok(run) = oracle::run_all(&tf, &env) else { return Ok(None) };
-        if run.results.iter().all(|r| oracle::skipped_for_backend(r, self.lang.name())) {
+        if (0..tf.cases.len()).all(|i| oracle::case_skipped(&run, i, self.lang.name())) {
             return Ok(None);
         }
         let mut program = tf.program.clone();

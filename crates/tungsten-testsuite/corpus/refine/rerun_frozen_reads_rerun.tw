@@ -1,5 +1,4 @@
 // Rerun: a frozen instance that reads a rerun one keeps the value it computed from the old one.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

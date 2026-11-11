@@ -84,7 +84,7 @@ impl Backend for RustBackend {
         program: &OptimizedProgram,
         interface: &Interface,
     ) -> Result<RustOutput, BackendError> {
-        tungsten_interface::check_implemented(program, &[Feature::Mappings])?;
+        tungsten_interface::check_implemented(program, &[Feature::Mappings, Feature::Refinement])?;
         crate::mapping::check_emittable(program, interface)?;
         check_slots(program, interface)?;
         let pools = Pools::new(program, interface, self.config.buffer_bounds);
@@ -119,8 +119,15 @@ impl Backend for RustBackend {
 /// (a unit reads only its listed inputs), but the low-level path doesn't run the checker.
 fn check_slots(program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
     for e in 0..program.entry_points.len() {
-        for inst in interface.worker_schedule(e).iter().flatten() {
-            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
+        let refined = program
+            .refinements
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.entry == e)
+            .flat_map(|(r, _)| interface.refine_waves(r).iter().flatten().map(|run| run.unit));
+        let scheduled = interface.worker_schedule(e).iter().flatten().map(|i| i.cu);
+        for cu in scheduled.chain(refined) {
+            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
             for &d in interface.input_params(*function) {
                 let input = Instance::from_input(&program.density_inputs[d]);
                 if interface.slot(e, &input).is_none() {

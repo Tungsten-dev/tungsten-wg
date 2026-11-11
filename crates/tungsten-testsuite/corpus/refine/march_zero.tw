@@ -1,5 +1,4 @@
 // March: no `@march`, so the only offset is zero. The call still reruns with the new hosts.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

@@ -9,6 +9,7 @@ use tungsten_parse::{ExpectKind, TestFile};
 
 use crate::env::TestEnv;
 use crate::externs::CaseExterns;
+use crate::harness::protocol::StepRequest;
 use crate::values::{core_eq, show, to_core};
 
 pub fn fuel(tf: &TestFile) -> u64 {
@@ -281,6 +282,20 @@ fn expects_out_of_fuel_at(tf: &TestFile, i: usize, n: usize) -> bool {
 /// Cases no backend must be sent (crate README, "Rules and contracts").
 pub fn skipped_for_backends(r: &CaseResult) -> bool {
     has_out_of_fuel(r)
+}
+
+/// Whether `backend` must not be sent case `i`, counting its refine steps: one step that runs out
+/// of fuel (or on CUDA, errors) skips the case.
+pub fn case_skipped(run: &Interp, i: usize, backend: &str) -> bool {
+    std::iter::once(&run.results[i]).chain(&run.steps[i]).any(|r| skipped_for_backend(r, backend))
+}
+
+/// The refine calls of a case as they go on the wire: every host given, in `SequenceCase` form.
+pub fn wire_steps(case: &SequenceCase) -> Vec<StepRequest> {
+    case.steps
+        .iter()
+        .map(|c| StepRequest { refinement: c.refinement, offset: c.offset, hosts: c.hosts.clone() })
+        .collect()
 }
 
 /// Cases `backend` must not be sent: `OutOfFuel` everywhere, and on CUDA every case where the

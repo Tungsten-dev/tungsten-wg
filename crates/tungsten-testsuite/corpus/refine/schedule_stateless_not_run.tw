@@ -1,5 +1,4 @@
 // Schedule: a rerun instance that only a rerun reads isn't computed by orchestrate. It would divide by zero there.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

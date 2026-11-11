@@ -5,6 +5,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -42,7 +43,9 @@ struct Running {
     stderr: Arc<Mutex<Vec<u8>>>,
 }
 
-fn spawn(mut cmd: Command, body_len: usize) -> std::io::Result<Running> {
+/// `body_len` is the size of the `Ok` response being waited for: the caller sets it before sending
+/// each request.
+fn spawn(mut cmd: Command, body_len: Arc<AtomicUsize>) -> std::io::Result<Running> {
     let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -75,7 +78,7 @@ fn spawn(mut cmd: Command, body_len: usize) -> std::io::Result<Running> {
             }
             let msg = match tag[0] {
                 0 => {
-                    let mut body = vec![0u8; body_len];
+                    let mut body = vec![0u8; body_len.load(Ordering::SeqCst)];
                     match stdout.read_exact(&mut body) {
                         Ok(()) => Message::Ok(body),
                         Err(_) => Message::Dead("stdout closed inside a response".into()),
@@ -162,14 +165,29 @@ pub fn run_cases_opts(
     startup: Duration,
     restart_after_failure: bool,
 ) -> Vec<CaseOutcome> {
+    run_cases_lens(make, requests, &vec![body_len; requests.len()], timeout, startup, restart_after_failure)
+}
+
+/// `run_cases_opts` with an `Ok` response size per request, since it depends on the case's steps.
+pub fn run_cases_lens(
+    make: &dyn Fn() -> Command,
+    requests: &[Vec<u8>],
+    body_lens: &[usize],
+    timeout: Duration,
+    startup: Duration,
+    restart_after_failure: bool,
+) -> Vec<CaseOutcome> {
+    assert_eq!(requests.len(), body_lens.len(), "one response size per request");
     let mut outcomes = Vec::with_capacity(requests.len());
     let mut proc: Option<Running> = None;
     let mut first_in_process = true;
-    for req in requests {
+    let body_len = Arc::new(AtomicUsize::new(0));
+    for (req, &len) in requests.iter().zip(body_lens) {
+        body_len.store(len, Ordering::SeqCst);
         if proc.is_none() {
             let cmd = make();
             let name = cmd.get_program().to_string_lossy().into_owned();
-            match spawn(cmd, body_len) {
+            match spawn(cmd, body_len.clone()) {
                 Ok(p) => {
                     proc = Some(p);
                     first_in_process = true;

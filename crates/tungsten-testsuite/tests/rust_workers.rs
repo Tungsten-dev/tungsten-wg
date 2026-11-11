@@ -39,7 +39,7 @@ fn generate(src: &str, bounds: BufferBounds) -> (String, Vec<tungsten_interface:
 }
 
 /// A test module: runtime imports, `items` (runtime additions the program names), the generated
-/// modules and a driver whose `run_case` is `body`, answering 24-byte requests.
+/// modules and a driver whose `run_case` is `body`, answering 28-byte requests (the 24 of an origin, and `steps = 0`).
 fn module(id: &str, items: &str, generated: &str, body: &str) -> TestSource {
     TestSource {
         name: id.to_string(),
@@ -47,7 +47,7 @@ fn module(id: &str, items: &str, generated: &str, body: &str) -> TestSource {
         source: format!(
             "use crate::mathf64::*;\nuse crate::utilsf64::*;\n{items}\n{generated}\n\
              pub mod driver {{\n    use super::*;\n    use super::orchestration::*;\n    \
-             pub const REQUEST_LEN: usize = 24;\n    \
+             pub const REQUEST_LEN: usize = 28;\n    pub const STEP_LEN: usize = 16;\n    \
              pub fn run_case(r: &mut crate::proto::Reader) -> Vec<u8> {{\n{body}\n    }}\n}}\n"
         ),
     }
@@ -60,7 +60,7 @@ fn records() -> String {
 /// Builds `t` alone and runs one request on it.
 fn run_one(h: &Harness, t: &TestSource, body_len: usize) -> CaseOutcome {
     let bin = h.build(&records(), &[t]).unwrap_or_else(|(out, dir)| panic!("build failed ({}):\n{out}", dir.display()));
-    let mut outcomes = run_cases(&bin, &t.id, &[vec![0u8; 24]], body_len, TIMEOUT);
+    let mut outcomes = run_cases(&bin, &t.id, &[vec![0u8; 28]], body_len, TIMEOUT);
     outcomes.remove(0)
 }
 
@@ -295,4 +295,134 @@ program {
     let t = module("t_rw_no_default", items, &generate(program, BufferBounds::PerBuffer).0, STUB_DRIVER);
     let out = build_error(&h, &t);
     assert!(out.contains("NoDefault: Default"), "{out}");
+}
+
+/// `corpus/refine/march_slices_full_grid.tw`: `full` is the whole 2x4x2 volume, `slice` one y layer
+/// of it, marched top-down.
+const SLICES: &str = r#"
+program {
+    fn coarse_main() -> f64 {
+        let y: i32 = ambient(pos3).y;
+        return (((((y * y) + ambient(pos3).x) as f64) * 0.7) + 0.1);
+    }
+    unit coarse { main coarse_main; }
+    input g = coarse @dims(2, 3, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(1, 3, 1);
+    fn f_main() -> f64 {
+        let c: pos3 = ambient(pos3);
+        return ((density(g) + ((c.x as f64) * 0.1)) + ((c.z as f64) * 0.01));
+    }
+    unit f { main f_main; inputs [g]; }
+    entry full = f @dims(2, 4, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry slice = f @dims(2, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement down of slice @march(0, 3, 0) {
+        rerun f @dims(2, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+"#;
+
+/// Marched slices equal the full grid, by bits (`specs/refinement.md` §9), on the generated Rust.
+#[test]
+fn marched_slices_equal_the_full_grid() {
+    let Some(h) = harness() else { return };
+    let (generated, names) = generate(SLICES, BufferBounds::PerBuffer);
+    let (full, slice) = (&names[0], &names[1]);
+    let body = format!(
+        r#"
+        let _ = (r.f64(), r.f64(), r.f64());
+        let orch = Orchestration::new();
+        let origin = Vec3::new(0.0, 0.0, 0.0);
+        let mut full = orch.{ff}();
+        let full_bits: Vec<u64> = full.run(origin, &{fh}::default()).iter().map(|x| x.to_bits()).collect();
+        let hc = {sh}::default();
+        let mut slice = orch.{sf}();
+        let _ = slice.run(origin, &hc);
+        let mut equal = true;
+        let mut layers = 0;
+        for y in (0..4).rev() {{
+            let got = slice.refine_down(Pos3::new(0, y, 0), &hc);
+            layers += 1;
+            for z in 0..2 {{
+                for x in 0..2 {{
+                    equal &= got[x + 2 * z].to_bits() == full_bits[x + 2 * (y as usize + 4 * z)];
+                }}
+            }}
+        }}
+        let mut w = crate::proto::Writer::new();
+        w.bool(equal);
+        w.bool(layers == 4);
+        w.finish()"#,
+        ff = full.factory,
+        fh = full.host_consts,
+        sf = slice.factory,
+        sh = slice.host_consts,
+    );
+    let t = module("t_rw_slices", "", &generated, &body);
+    assert_eq!(run_one(&h, &t, 2), CaseOutcome::Returned(vec![1, 1]));
+}
+
+/// Entry `a` marches an accumulator over a frozen `leaf` and the origin. Entry `b` is `leaf` itself,
+/// so both workers hold an instance of it, in buffers of their own.
+const ISOLATION: &str = r#"
+program {
+    fn leaf_main() -> f64 { return ((ambient(origin).x * 3.0) + (ambient(pos3).x as f64)); }
+    unit leaf { main leaf_main; }
+    input frozen = leaf @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn seed_main() -> f64 { return 0.0; }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn step_main() -> f64 {
+        return (((density(prev) + density(frozen)) + ambient(origin).x) + (ambient(pos3).y as f64));
+    }
+    unit step { main step_main; inputs [prev, frozen]; }
+    entry a = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry b = leaf @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement go of a @march(0, 3, 0) {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with step;
+    }
+}
+"#;
+
+/// Creating and running a worker of another entry between `run` and `refine_*` leaves the first
+/// worker's march unchanged: each worker keeps its own origin and its own frozen buffers.
+#[test]
+fn another_worker_between_run_and_refine_changes_nothing() {
+    let Some(h) = harness() else { return };
+    let (generated, names) = generate(ISOLATION, BufferBounds::PerBuffer);
+    let (a, b) = (&names[0], &names[1]);
+    let body = format!(
+        r#"
+        let _ = (r.f64(), r.f64(), r.f64());
+        let orch = Orchestration::new();
+        let (ha, hb) = ({ah}::default(), {bh}::default());
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<u64>>();
+        let march = |between: bool| -> Vec<Vec<u64>> {{
+            let mut a = orch.{af}();
+            let _ = a.run(Vec3::new(1.5, 0.0, 0.0), &ha);
+            let mut out = vec![];
+            for y in [1, 3, 2] {{
+                if between {{
+                    // Another origin, and a `leaf` buffer of its own.
+                    let mut other = orch.{bf}();
+                    let _ = other.run(Vec3::new(40.0, 0.0, 0.0), &hb);
+                }}
+                out.push(bits(a.refine_go(Pos3::new(0, y, 0), &ha)));
+            }}
+            out
+        }};
+        let (alone, interleaved) = (march(false), march(true));
+        let mut w = crate::proto::Writer::new();
+        w.bool(alone == interleaved);
+        // By hand, from origin 1.5: `frozen` is [4.5, 5.5], and each step adds `frozen`, the origin and
+        // the marked y to the cell before: [7, 8], then [16, 18], then [24, 27]. So the march does
+        // depend on the origin and on the frozen leaf, and the comparison above can fail.
+        let want: Vec<Vec<u64>> = [[7.0, 8.0], [16.0, 18.0], [24.0, 27.0]].iter().map(|v| bits(v)).collect();
+        w.bool(alone == want);
+        w.finish()"#,
+        ah = a.host_consts,
+        bh = b.host_consts,
+        af = a.factory,
+        bf = b.factory,
+    );
+    let t = module("t_rw_isolation", "", &generated, &body);
+    assert_eq!(run_one(&h, &t, 2), CaseOutcome::Returned(vec![1, 1]));
 }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use std::sync::Mutex;
 
 use super::batch::{Artifact, Harness, Lang, Stage};
-use super::process::{CaseOutcome, STARTUP_ALLOWANCE, run_cases_opts};
+use super::process::{CaseOutcome, STARTUP_ALLOWANCE, run_cases_lens};
 use super::protocol::TestIo;
 use crate::compare::{Verdict, score_case, score_unbuilt};
 use crate::corpus::{CorpusFile, load_file};
@@ -38,7 +38,7 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
     io.check_encodable()?;
 
     let artifact = h.artifact(file.dir(), stage, &file.name);
-    let eligible: Vec<usize> = (0..n).filter(|&i| !oracle::skipped_for_backend(&run.results[i], h.lang.name())).collect();
+    let eligible: Vec<usize> = (0..n).filter(|&i| !oracle::case_skipped(&run, i, h.lang.name())).collect();
     if eligible.is_empty() {
         return Ok(vec![]);
     }
@@ -51,7 +51,7 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
                 let v = if !eligible.contains(&i) {
                     Verdict::Skipped
                 } else {
-                    score_unbuilt(&tf, &run.results[i], i, &format!("generation failed: {why}"))
+                    score_unbuilt(&tf, &run.results[i], &run.steps[i], i, &format!("generation failed: {why}"))
                 };
                 scores.push(CaseScore { case: tf.cases[i].name.clone(), verdict: v });
             }
@@ -59,25 +59,29 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
         Artifact::BuildFailed { output, source } => {
             let why = format!("build failed (sources in {}):\n{output}", source.display());
             for i in 0..n {
-                let v = if !eligible.contains(&i) { Verdict::Skipped } else { score_unbuilt(&tf, &run.results[i], i, &why) };
+                let v = if !eligible.contains(&i) { Verdict::Skipped } else { score_unbuilt(&tf, &run.results[i], &run.steps[i], i, &why) };
                 scores.push(CaseScore { case: tf.cases[i].name.clone(), verdict: v });
             }
         }
         Artifact::Binary { path, id } => {
             let mut requests = vec![];
+            let mut body_lens = vec![];
             for &i in &eligible {
-                let (named, params) = oracle::named_case(&tf, i, &env)?;
+                let (seq, params) = oracle::sequence_case(&tf, i, &env)?;
                 let c = &tf.cases[i];
-                requests.push(io.encode_request(&env, c.origin, &params, &named.hosts)?);
+                let steps = oracle::wire_steps(&seq);
+                requests.push(io.encode_request(&env, c.origin, &params, &seq.run.hosts, &steps)?);
+                let refinements: Vec<usize> = steps.iter().map(|s| s.refinement).collect();
+                body_lens.push(io.response_bytes(&env, &refinements)?);
             }
             let large = tf.tier.as_deref() == Some("large");
             let make = || h.command(&path, &id);
             // One GPU: jobs on it run one at a time (crate README, "Rules and contracts, Processes").
             let _gpu = (h.lang == Lang::Cuda).then(|| GPU_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
-            let outcomes = run_cases_opts(
+            let outcomes = run_cases_lens(
                 &make,
                 &requests,
-                io.response_bytes(&env)?,
+                &body_lens,
                 case_timeout(large),
                 STARTUP_ALLOWANCE,
                 h.restart_after_failure(),
@@ -89,7 +93,7 @@ pub fn run_backend_trial(h: &Harness, file: &CorpusFile, stage: Stage) -> Result
             for i in 0..n {
                 let verdict = match &by_case[i] {
                     None => Verdict::Skipped,
-                    Some(o) => score_case(&tf, &env, &io, i, &run.results[i], o),
+                    Some(o) => score_case(&tf, &env, &io, i, &run.results[i], &run.steps[i], o),
                 };
                 scores.push(CaseScore { case: tf.cases[i].name.clone(), verdict });
             }

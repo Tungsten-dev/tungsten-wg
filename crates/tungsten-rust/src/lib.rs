@@ -16,6 +16,11 @@
 //! sizes the pools for its own entry and passes the offsets of its instances to the kernels
 //! (`specs/workers.md`).
 //!
+//! Refinement (`specs/refinement.md` §6.2): a worker of an entry with refinements also stores the
+//! origin of its last `run`, and has one `refine_<name>(offset: Pos3, host_consts)` method per
+//! refinement. Each runs the refinement's waves through refine kernels, which are kernels with an
+//! extra `offset` that adds to the iterator's `pos` and leaves `idx`, so buffer indices stay put.
+//!
 //! Modules:
 //! - `types`: type and operator conversion, type derivation.
 //! - `converter`: per-function state (variables, lookups, type derivation).
@@ -31,7 +36,7 @@
 
 use std::collections::HashSet;
 
-use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
 
 use crate::interned::Interned;
@@ -151,6 +156,7 @@ pub struct RCLCodegen<'a, 'm> {
     done_functions: HashSet<Ref<Function>>,
     done_constants: HashSet<Ref<Constant>>,
     done_kernels: HashSet<Instance>,
+    done_refine_kernels: HashSet<RefineRun>,
     done_lerps: HashSet<String>,
 } // TODO add config parameters (if necessary)
 
@@ -175,6 +181,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
             done_functions: HashSet::new(),
             done_constants: HashSet::new(),
             done_kernels: HashSet::new(),
+            done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
         }
     }
@@ -250,6 +257,18 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
 }
 
 impl DeviceCodegen for RCLCodegen<'_, '_> {
+    /// The refined unit at the target's dims, and the kernel running it. Repeats are no-ops.
+    fn generate_refine_kernel(&mut self, run: &RefineRun) {
+        self.generate_compute_unit(run.unit);
+        self.generate_compute_unit(run.target.cu);
+        if !self.done_refine_kernels.insert(*run) {
+            return;
+        }
+        let kernel = function::build_refine_kernel(self.source, self.naming, self.pools, run);
+        let kernel = self.intern(kernel);
+        self.model.main_functions.push(kernel);
+    }
+
     /// Generates one density function per dimension the unit is scheduled at, plus its helpers and constants.
     fn generate_compute_unit(&mut self, cu: Ref<ComputeUnit>) {
         if !self.done_units.insert(cu) {

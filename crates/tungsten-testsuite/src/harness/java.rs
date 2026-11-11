@@ -203,7 +203,8 @@ pub fn driver_source(
     let mut s = String::new();
     writeln!(s, "package {id};\n\nimport tungsten.runtime.*;\n").unwrap();
     s.push_str("public final class Driver {\n");
-    writeln!(s, "    public static final int REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
+    // `steps:u32` ends the fixed part. It is always 0 until this backend has refinement.
+    writeln!(s, "    public static final int REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)? + 4).unwrap();
     s.push_str("    static byte[] runCase(Proto.Reader r) {\n");
     s.push_str("        Vec3 origin = new Vec3(r.f64(), r.f64(), r.f64());\n");
     for (i, (_, t)) in io.params.iter().enumerate() {

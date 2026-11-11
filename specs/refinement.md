@@ -507,3 +507,12 @@ instance's `@previous`; `with` units getting their own kernels per target; conte
   can't express them (`specs/combined-rollout.md`, phase 1 notes).
 - A step program adds its offset and buffer hosts to every unit's and function's host list, not only those
   that read them. Units that don't run in the step are never evaluated, so this changes nothing.
+
+### Milestone 3 (`specs/combined-rollout.md` phase 2B, step 6.3)
+
+- `Interface::worker_schedule(entry)` returns only what `run` computes (§4.5). The rerun-only instances of §6.1 have slots
+  and buffers, but aren't in it, since `run` iterates it.
+- A refine kernel's `offset: Pos3` parameter follows `origin`. Kernel names are
+  `<unit fn>_<target base>_refine_kernel`.
+- Marching `idx` by the offset went unnoticed by the corpus until `refine/march_identity_reads.tw`, which reads a
+  frozen and a `@previous` buffer on a grid wider than one cell at a non-zero offset.

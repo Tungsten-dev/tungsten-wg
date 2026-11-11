@@ -442,3 +442,44 @@ program {{
     generate(&program("f64", "1.0", "@lerp(2, 2, 2)"));
     generate(&program("i32", "1", "@expand(2, 2, 2)"));
 }
+
+/// `specs/refinement.md` §6.2: the worker stores the origin of `run`, a refine call takes a `Pos3`
+/// offset, and its kernel moves `pos` and not `idx`.
+const ACCUMULATOR: &str = r#"
+program {
+    fn seed_main() -> i32 { return (ambient(pos3).x * 10); }
+    unit seed { main seed_main; }
+    input prev = seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn acc_main() -> i32 { return (density(prev) + 1); }
+    unit acc { main acc_main; inputs [prev]; }
+    entry seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of seed @march(0, 3, 0) {
+        rerun seed @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with acc;
+    }
+}
+"#;
+
+#[test]
+fn refine_method_stores_the_origin_and_moves_pos_only() {
+    let output = generate(ACCUMULATOR);
+    let text = &output.full_source;
+    assert_contains(text, &[
+        // The worker keeps the origin of its last run.
+        "        origin: Vec3,\n",
+        "self.origin = origin;",
+        // `refine_step` and its kernel, which takes the offset after the origin.
+        "pub fn refine_step(&mut self, offset: Pos3, host_consts: &",
+        "_refine_kernel(origin: Vec3, offset: Pos3, buffers: &mut InternalBuffers, out_off: usize,",
+        // The refined unit's density function, and the call with the stored origin.
+        "acc_main_d2x1x1(PositionIterator { pos: (p.pos + offset), idx: p.idx }",
+        "_refine_kernel(self.origin, offset, (&mut self.buffers), 0_usize, 0_usize,",
+    ]);
+    // The offset is added to `pos` only: the store still uses `index(p)` of the loop variable.
+    assert!(text.contains("(out_off + index(p))"), "{text}");
+}
+
+#[test]
+fn workers_without_refinements_are_unchanged() {
+    let text = generate(AMBIENTS).full_source;
+    assert!(!text.contains("self.origin") && !text.contains("refine_"), "{text}");
+}

@@ -306,6 +306,33 @@ pub fn entry_base_names(
         .collect()
 }
 
+/// The worker method of each refinement, in `program.refinements` order: `refine_<name>`, made
+/// unique among the refinements of the same entry and against `run` and `reserved` (the other
+/// members the backend gives a worker). Refinement names are unique per entry, so two entries'
+/// methods may share a spelling: they live on different workers.
+pub fn refinement_method_names(
+    program: &OptimizedProgram,
+    rules: &NamingRules,
+    reserved: &HashSet<String>,
+) -> Vec<String> {
+    let mut per_entry: Vec<HashSet<String>> = vec![];
+    program
+        .refinements
+        .iter()
+        .map(|r| {
+            if per_entry.len() <= r.entry {
+                per_entry.resize_with(r.entry + 1, || {
+                    let mut used = rules.used_set();
+                    used.extend(reserved.iter().cloned());
+                    used.insert("run".to_string());
+                    used
+                });
+            }
+            unique(&mut per_entry[r.entry], (rules.sanitize)(&format!("refine_{}", r.name)))
+        })
+        .collect()
+}
+
 /// How a backend spells the factory that creates a worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactoryStyle {

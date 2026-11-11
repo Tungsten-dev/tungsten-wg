@@ -157,7 +157,8 @@ pub fn driver_source(
     let mut ids = Ids(0);
     let mut s = String::new();
     writeln!(s, "namespace {id} {{\n").unwrap();
-    writeln!(s, "static constexpr size_t REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)?).unwrap();
+    // `steps:u32` ends the fixed part. It is always 0 until this backend has refinement.
+    writeln!(s, "static constexpr size_t REQUEST_LEN = {};", 24 + io.param_bytes(env)? + io.host_bytes(env)? + 4).unwrap();
     s.push_str("static bool fail(std::string& err, const char* what, Status st) {\n");
     s.push_str("    err = std::string(what) + \": \" + st.message();\n    return false;\n}\n\n");
     s.push_str("static bool run_case(tw::proto::Reader& r, tw::proto::Writer& w, std::string& err) {\n");

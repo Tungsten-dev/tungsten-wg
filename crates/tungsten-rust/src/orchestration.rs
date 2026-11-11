@@ -217,11 +217,15 @@ fn orchestration_struct() -> rcl::Struct {
     s
 }
 
-fn worker_struct(names: &WorkerNames) -> rcl::Struct {
+/// A worker of an entry with refinements also stores the origin of its last `run`.
+fn worker_struct(names: &WorkerNames, refined: bool) -> rcl::Struct {
     let mut s = rcl::Struct::new(names.worker.clone());
     s.add_field("orch".into(), struct_type(ORCHESTRATION_STRUCT_NAME));
     s.add_field("buffers".into(), struct_type(INTERNAL_BUFFERS_STRUCT_NAME));
     s.add_field("hosts".into(), struct_type(HOST_CONSTS_STRUCT_NAME));
+    if refined {
+        s.add_field("origin".into(), struct_type("Vec3"));
+    }
     s.public_fields = false;
     s
 }
@@ -293,6 +297,7 @@ fn new_fn<'m>(
 /// `<factory>(&self) -> <Base>Worker`: one allocation per pool, sized for this entry. Pools the
 /// worker doesn't use are empty.
 fn factory_fn<'m>(
+    program: &OptimizedProgram,
     interface: &Interface,
     pools: &Pools,
     entry: usize,
@@ -325,9 +330,10 @@ fn factory_fn<'m>(
         arguments: vec![],
     };
     let this = E::Variable(var("self", struct_type("Self")));
+    let refined = refined(program, entry);
     f.add_statement(rcl::Statement::Return(Some(E::StructInit {
         struct_name: names.worker.clone(),
-        fields: vec![
+        fields: [
             (
                 "orch".into(),
                 E::MethodCall { receiver: Box::new(this), method: "clone".into(), arguments: vec![] },
@@ -337,14 +343,26 @@ fn factory_fn<'m>(
                 E::StructInit { struct_name: INTERNAL_BUFFERS_STRUCT_NAME.into(), fields: buffers },
             ),
             ("hosts".into(), default_hosts),
-        ],
+        ]
+        .into_iter()
+        .chain(refined.then(|| ("origin".to_string(), zero(&VariableType::Vec3))))
+        .collect(),
     })));
     f
 }
 
-/// `run(&mut self, origin, host_consts: &<Base>HostConsts)`: copies the entry's hosts into the
-/// private `HostConsts`, runs the worker's waves and returns a view of the entry's slot, which is
-/// at offset 0 of pool 0. A single-cell entry returns the value.
+/// Whether some refinement belongs to `entry`.
+fn refined(program: &OptimizedProgram, entry: usize) -> bool {
+    program.refinements.iter().any(|r| r.entry == entry)
+}
+
+/// `run(&mut self, origin, host_consts: &<Base>HostConsts)`, or with `refinement` the method
+/// `refine_<name>(&mut self, offset: Pos3, host_consts: &<Base>HostConsts)`: copies the entry's
+/// hosts into the private `HostConsts`, runs the waves and returns a view of the entry's slot, which
+/// is at offset 0 of pool 0. A single-cell entry returns the value.
+///
+/// `run` runs the worker's schedule and stores the origin when the entry has refinements. A refine
+/// call runs its refinement's waves with the stored origin and the offset.
 ///
 /// Calls are `let _kernel_call_<wave>_<i>: () = ..` because RCL has no expression statements.
 fn run_fn<'m>(
@@ -353,6 +371,7 @@ fn run_fn<'m>(
     pools: &Pools,
     entry: usize,
     names: &WorkerNames,
+    refinement: Option<usize>,
 ) -> rcl::Function<'m> {
     use rcl::Expression as E;
     use rcl::Statement as S;
@@ -363,6 +382,7 @@ fn run_fn<'m>(
     let pool = pools.field(element_ir);
 
     let vec3 = struct_type("Vec3");
+    let pos3 = struct_type("Pos3");
     let hosts_t = rcl::Type::Ref(Box::new(struct_type(&names.host_consts)));
     let single = len == 1;
     let return_type = if single {
@@ -370,11 +390,13 @@ fn run_fn<'m>(
     } else {
         rcl::Type::ArrayRef(Box::new(element.clone()), len)
     };
-    let mut f = rcl::Function::new(Some("run".into()), Some(return_type.clone()));
+    let name = refinement.map_or("run", |r| interface.refine_method(r));
+    let mut f = rcl::Function::new(Some(name.into()), Some(return_type.clone()));
     f.receiver = Some(rcl::Receiver::MutRef);
-    f.add_parameter("origin".to_string(), vec3.clone());
+    let (first_name, first_type) = if refinement.is_some() { ("offset", pos3) } else { ("origin", vec3.clone()) };
+    f.add_parameter(first_name.to_string(), first_type.clone());
     f.add_parameter("host_consts".to_string(), hosts_t.clone());
-    let origin = var("origin", vec3);
+    let first = var(first_name, first_type);
     let host_consts = var("host_consts", hosts_t);
 
     for (name, _) in static_hosts(program, interface, Some(interface.entry_hosts(entry))) {
@@ -383,35 +405,60 @@ fn run_fn<'m>(
             value: field(E::Variable(host_consts.clone()), &name),
         });
     }
+    if refinement.is_none() && refined(program, entry) {
+        f.add_statement(S::AssignPlace {
+            target: self_path(&["origin"]),
+            value: E::Variable(first.clone()),
+        });
+    }
 
     let slot = |inst: &Instance| {
         interface
             .slot(entry, inst)
             .unwrap_or_else(|| panic!("entry {entry}'s worker has no slot for {inst:?}"))
     };
-    for (w, wave) in interface.worker_schedule(entry).iter().enumerate() {
-        for (i, inst) in wave.iter().enumerate() {
-            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
+    // (kernel, the buffer it writes, the unit it runs) for each call, wave by wave.
+    let waves: Vec<Vec<(String, Instance, tungsten_ir::model::Ref<ComputeUnit>)>> = match refinement {
+        None => interface
+            .worker_schedule(entry)
+            .iter()
+            .map(|w| w.iter().map(|i| (interface.kernel(i).to_string(), *i, i.cu)).collect())
+            .collect(),
+        Some(r) => interface
+            .refine_waves(r)
+            .iter()
+            .map(|w| w.iter().map(|run| (interface.refine_kernel(run).to_string(), run.target, run.unit)).collect())
+            .collect(),
+    };
+    for (w, wave) in waves.iter().enumerate() {
+        for (i, (kernel, inst, unit)) in wave.iter().enumerate() {
+            let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[*unit];
             let offsets = interface.input_params(*function).iter().map(|&d| {
                 let input = Instance::from_input(&program.density_inputs[d]);
                 E::UsizeLiteral(slot(&input).offset)
             });
-            let arguments = [
-                E::Variable(origin.clone()),
-                E::MutRef(Box::new(self_path(&["buffers"]))),
-                E::UsizeLiteral(slot(inst).offset),
-            ]
-            .into_iter()
-            .chain(offsets)
-            .chain([
-                E::Ref(Box::new(self_path(&["orch", "shared", "auto_constants"]))),
-                E::Ref(Box::new(self_path(&["hosts"]))),
-            ])
-            .collect();
+            // A refine call takes the origin of the last `run`.
+            let leading = if refinement.is_some() {
+                vec![self_path(&["origin"]), E::Variable(first.clone())]
+            } else {
+                vec![E::Variable(first.clone())]
+            };
+            let arguments = leading
+                .into_iter()
+                .chain([
+                    E::MutRef(Box::new(self_path(&["buffers"]))),
+                    E::UsizeLiteral(slot(inst).offset),
+                ])
+                .chain(offsets)
+                .chain([
+                    E::Ref(Box::new(self_path(&["orch", "shared", "auto_constants"]))),
+                    E::Ref(Box::new(self_path(&["hosts"]))),
+                ])
+                .collect();
             f.add_statement(S::Declare {
                 variable: var(&format!("_kernel_call_{}_{}", w, i), rcl::Type::Void),
                 init: Some(E::LateBoundCall {
-                    function_name: interface.kernel(inst).to_string(),
+                    function_name: kernel.clone(),
                     argument_types: vec![],
                     return_type: rcl::Type::Void,
                     arguments,
@@ -501,6 +548,11 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
                 self.device_codegen.generate_kernel_of(vec![inst.cu]);
             }
         }
+        for r in 0..program.refinements.len() {
+            for run in interface.refine_waves(r).iter().flatten() {
+                self.device_codegen.generate_refine_kernel(run);
+            }
+        }
 
         self.model = rcl::RCL::new();
         self.model
@@ -523,7 +575,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
             let (s, default) = host_struct(&n.host_consts, &own, "pub ");
             structs.push(s);
             impls.push(self.default_impl(&n.host_consts, default));
-            structs.push(worker_struct(n));
+            structs.push(worker_struct(n, refined(program, e)));
         }
         for s in structs {
             let s = self.struct_ref(s);
@@ -533,7 +585,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
         let mut orch = rcl::Impl::new(ORCHESTRATION_STRUCT_NAME);
         orch.methods.push(self.intern(new_fn(program, interface, &specs)));
         for (e, n) in names.iter().enumerate() {
-            orch.methods.push(self.intern(factory_fn(interface, &self.pools, e, n)));
+            orch.methods.push(self.intern(factory_fn(program, interface, &self.pools, e, n)));
         }
         self.model.impls.push(orch);
         for (e, n) in names.iter().enumerate() {
@@ -554,7 +606,10 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
                     rcl::Expression::I32Literal(z),
                 ]),
             ));
-            worker.methods.push(self.intern(run_fn(program, interface, &self.pools, e, n)));
+            worker.methods.push(self.intern(run_fn(program, interface, &self.pools, e, n, None)));
+            for (r, _) in program.refinements.iter().enumerate().filter(|(_, r)| r.entry == e) {
+                worker.methods.push(self.intern(run_fn(program, interface, &self.pools, e, n, Some(r))));
+            }
             self.model.impls.push(worker);
         }
         self.model.impls.extend(impls);

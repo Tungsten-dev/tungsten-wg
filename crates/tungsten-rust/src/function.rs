@@ -11,13 +11,16 @@ use super::types::convert_type;
 use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
 use crate::pools::Pools;
-use tungsten_interface::{BufferBounds, Instance, Interface, LerpHelper};
+use tungsten_interface::{BufferBounds, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{
     ComputeUnit, Constant, Function, OptimizedProgram, Ref,
 };
 
 /// Name of a kernel's own slot offset.
 pub const KERNEL_OUT_OFFSET: &str = "out_off";
+
+/// Name of a refine kernel's `Pos3` offset parameter.
+pub const KERNEL_REFINE_OFFSET: &str = "offset";
 
 /// A converted function plus the items it still needs generated.
 pub struct Converted<'m> {
@@ -144,10 +147,36 @@ pub fn build_kernel<'m>(
     pools: &Pools,
     inst: &Instance,
 ) -> rcl::Function<'m> {
+    kernel(program, naming, pools, inst, inst.cu, naming.kernel(inst), false)
+}
+
+/// The kernel of one refine run (`specs/refinement.md` §6.2): `build_kernel` with an extra
+/// `offset: Pos3` after `origin`. It runs `run.unit` over the target's grid and adds the offset to
+/// the iterator's `pos` only, so the store index stays in the buffer.
+pub fn build_refine_kernel<'m>(
+    program: &OptimizedProgram,
+    naming: &Interface,
+    pools: &Pools,
+    run: &RefineRun,
+) -> rcl::Function<'m> {
+    kernel(program, naming, pools, &run.target, run.unit, naming.refine_kernel(run), true)
+}
+
+/// `unit` is the one called per cell, and `target` the instance whose grid and buffer it fills.
+fn kernel<'m>(
+    program: &OptimizedProgram,
+    naming: &Interface,
+    pools: &Pools,
+    inst: &Instance,
+    unit: Ref<ComputeUnit>,
+    name: &str,
+    refine: bool,
+) -> rcl::Function<'m> {
     use rcl::Expression as E;
     use rcl::Statement as S;
-    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
-    let return_type = convert_type(&program.functions[*function].return_type);
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[unit];
+    let ComputeUnit::DensityFunction { function: target_function, .. } = &program.compute_units[inst.cu];
+    let return_type = convert_type(&program.functions[*target_function].return_type);
 
     let var = |name: &str, t: rcl::Type| {
         Rc::new(rcl::Variable {
@@ -175,8 +204,12 @@ pub fn build_kernel<'m>(
         .map(|&d| var(naming.offset_param(d), rcl::Type::Usize))
         .collect();
 
-    let mut kernel = rcl::Function::new(Some(naming.kernel(inst).to_string()), None);
+    let offset = var(KERNEL_REFINE_OFFSET, rcl::Type::Struct("Pos3".to_string()));
+    let mut kernel = rcl::Function::new(Some(name.to_string()), None);
     kernel.add_parameter("origin".to_string(), vec3());
+    if refine {
+        kernel.add_parameter(KERNEL_REFINE_OFFSET.to_string(), offset.t.clone());
+    }
     for v in [&buffers, &out_off].into_iter().chain(&offsets).chain([&auto_consts, &host_consts]) {
         kernel.add_parameter(v.name.clone().unwrap(), v.t.clone());
     }
@@ -212,12 +245,31 @@ pub fn build_kernel<'m>(
         mutable: false,
     });
 
+    // A refine call moves `pos` and leaves `idx`, which the store and unindexed reads use.
+    let position = if refine {
+        E::StructInit {
+            struct_name: "PositionIterator".to_string(),
+            fields: vec![
+                (
+                    "pos".to_string(),
+                    E::BinaryOp {
+                        op: rcl::BinaryOperator::Add,
+                        left: Box::new(E::Field { base: Box::new(E::Variable(it.clone())), field: "pos".to_string() }),
+                        right: Box::new(E::Variable(offset.clone())),
+                    },
+                ),
+                ("idx".to_string(), E::Field { base: Box::new(E::Variable(it.clone())), field: "idx".to_string() }),
+            ],
+        }
+    } else {
+        E::Variable(it.clone())
+    };
     let call = E::LateBoundCall {
-        function_name: naming.density_fn(inst.cu, inst.dimensions).to_string(),
+        function_name: naming.density_fn(unit, inst.dimensions).to_string(),
         argument_types: uniform.iter().map(|p| p.t.clone()).collect(),
         return_type: return_type.clone(),
         arguments: [
-            E::Variable(it.clone()),
+            position,
             E::Ref(Box::new(E::Variable(config.clone()))),
             E::Ref(Box::new(E::Deref(Box::new(E::Variable(buffers.clone()))))),
             E::Variable(auto_consts.clone()),
@@ -236,7 +288,7 @@ pub fn build_kernel<'m>(
     // In range by construction, so never the `PerBuffer` form.
     let pool = E::Field {
         base: Box::new(E::Variable(buffers.clone())),
-        field: pools.field(&program.functions[*function].return_type).to_string(),
+        field: pools.field(&program.functions[*target_function].return_type).to_string(),
     };
     let at = E::BinaryOp {
         op: rcl::BinaryOperator::Add,

@@ -1,6 +1,5 @@
 // Mappings: `@lerp` along the march across a frozen coarse grid gives, slice by slice, what the same grid read
 // at full resolution gives (`full`: 0, 5, 10, 15).
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

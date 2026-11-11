@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1 and 2A and steps 6.1 and 6.2 of 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1, 2A and 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -200,12 +200,12 @@ Three separate steps, each green before the next.
 
 ### 6.3 Refinement (M3)
 
-- [ ] `Interface` (§6.1): discovery ignoring `previous`, rerun-only instances, the extended `worker_schedule` and
+- [x] `Interface` (§6.1): discovery ignoring `previous`, rerun-only instances, the extended `worker_schedule` and
       `entry_hosts`, `refine_waves`, `refine_kernel`, `refinement_names`, `lerp_helpers` covering refined units
-- [ ] Rust refine kernels, the stored origin and `refine_<name>` (§6.2)
-- [ ] Protocol and driver, as in §3.3 above
-- [ ] Drop the guard's refinement check for Rust and remove its §3.2 notes
-- [ ] Mutation checks (§9), the marched-slices check and worker isolation on Rust. Interface tests of §9
+- [x] Rust refine kernels, the stored origin and `refine_<name>` (§6.2)
+- [x] Protocol and driver, as in §3.3 above
+- [x] Drop the guard's refinement check for Rust and remove its §3.2 notes
+- [x] Mutation checks (§9), the marched-slices check and worker isolation on Rust. Interface tests of §9
 
 **Exit.** `cargo test --workspace` is green with no Rust `pending` notes left.
 
@@ -279,8 +279,8 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   `tests/snapshots/density__dims_different.snap` is no longer referenced, since that file is now a reject file.
 - **Vanilla shapes** are two `@tier(large)` files in `large/`, not `density/`: backend trials build one batch per
   directory and run the interpreter on all its files, so a slow file slows the whole directory. The lerp file
-  (`(5,49,5)` to `(16,384,16)`) takes about 12 minutes in a release build with memo off, as density-mappings §5.1
-  predicts.
+  (`(5,49,5)` to `(16,384,16)`) was estimated at about 12 minutes in a release build with memo off, as density-mappings §5.1
+  predicts. It takes much longer (see the step 6.2 notes).
 - **Interpreter API.** `Lowered` has `instances`, `visible` and `steps` (`LoweredStep`, one per refinement).
   Hidden entries come after the program's entries in the orchestrate program. `Prepared::eval_sequence` takes a
   `SequenceCase` (complete hosts per call) and returns a `SequenceResult`. A step in which any cell fails, hidden
@@ -293,6 +293,7 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   keyword. The corpus uses other labels.
 - **Left for 2B.** The rule that a case with `OutOfFuel` at any refine step isn't sent to a backend (§8.3) only
   checks orchestrate today. The guard makes every refinement program a `GenFailed`, so it can't matter yet.
+  (Done in step 6.3: `oracle::case_skipped`.)
 
 **Phase 2B, step 6.1 (Rust workers).**
 
@@ -330,9 +331,55 @@ Add deviations here as phases land, and in the relevant spec if they change its 
 - **Helper discovery.** `lerp_helpers()` lists a `Lerp` input only when a reachable unit lists it and its main
   function, or a helper it calls, reads it **without an index**. An input read only with explicit indices gets none,
   so no dead helper is generated. The rest follows density §10, "Milestone 3".
+- **Large tier not run on Rust.** The Rust notes are gone from `large/map_vanilla_expand.tw` and
+  `large/map_vanilla_lerp.tw`, but `TW_LARGE=1` was never completed for them. The interpreter takes much longer than the
+  12 minutes estimated in 2A: a release run was stopped after a long wait, with the Rust trials not yet started, because
+  the batch runs the interpreter on every file of the directory first. Only the interpreter and inline trials of
+  `map_vanilla_expand` passed. The same code passes all 56 small `density/map_*` Rust trials. If either large file
+  fails on Rust, fix the cause, or give it its own narrow note under `docs/testing-policy.md`.
 - **Mutation checks** (density §10 has the details). Reversing the lerp axis order turns `map_lerp_3axis`,
   `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red on Rust. A shortcut at `t == 0` turns
   `map_lerp_neg_zero` and `map_lerp_inf_nan` red. Both were reverted.
 - **Tests.** Interface naming, sharing and discovery are in `tungsten-interface/workers.rs`. Generated text and the two
   refusals are in `tungsten-rust/src/tests.rs`. `lerp_follows_bounds_modes` in `tests/rust_workers.rs` builds and runs
   all three modes: the high corner past the input fails under `PerBuffer`, and reads the neighbour under `Slab`.
+
+**Phase 2B, step 6.3 (Rust refinement).**
+
+- **`worker_schedule` is the schedule of `run` only** (§4.5), not "plus the rerun-only instances" as
+  `specs/refinement.md` §6.1 words it, because `run` iterates it and must not compute a stateless rerun-only
+  instance. Those instances get a slot (`worker(e).slots` has them) and a buffer field, and aren't in `waves()` or
+  `worker_schedule`. `entry_hosts` covers the units of the schedule, the `with` units, and the units rerun-only
+  instances run.
+- **Discovery** appends, after the entry pass, every rerun instance and the non-`@previous` inputs of every `with`
+  unit, each followed by its own closure. `@previous` inputs never add a dependency, so a self-read doesn't reach
+  `arrange_waves`. A refined unit gets a density function at its target's dims (`Interface::density_fn`,
+  `dimensions_of`), but no buffer and no instance (`instances_of` is empty for it).
+- **Refine kernels** are `<unit fn>_<target base>_refine_kernel`, e.g. `acc_main_d2x1x1_seed_main_refine_kernel`, unique
+  in the module and shared by every refinement running the same (unit, target). Their parameters are
+  `origin, offset, buffers, out_off, off_.., auto_constants, host_consts`: the offset follows the origin.
+  `Interface::refine_method(r)` is the worker method name, `refinement_names()` the module-unique names. Nothing reads
+  the latter yet.
+- **`DeviceCodegen::generate_refine_kernel`** has a default that panics. Only Rust overrides it, and the guard keeps
+  refinement programs away from Java and CUDA until their phases.
+- **Worker.** `origin: Vec3` exists only on workers of entries with refinements, starts at zero, and is set by `run`.
+  A refine call copies the entry's hosts exactly as `run` does, then runs `refine_waves(r)` with `self.origin`.
+- **Protocol** as in §3.3, plus `run_cases_lens` in `process.rs` (a response size per request, set through a shared atomic
+  before each write), `serve(request_len, step_len, run)` and `STEP_LEN` in the Rust runtime, and `StepRequest`,
+  `Decoded` and `TestIo::refine_entries` in `protocol.rs`. The golden file keeps its `request` and `response` lines
+  (with `steps = 0`) for the Java and CUDA stubs, and adds `step_request` and `step_response`. Java and CUDA drivers
+  read `REQUEST_LEN + 4` and ignore the count. The stubs of the selftests and of `rust_workers.rs` use 28 bytes.
+- **Skipping.** `oracle::case_skipped` skips a case if the orchestrate step or any refine step is skipped for that
+  backend (`OutOfFuel`, and on CUDA any cell error). Scoring fails a case if the interpreter errors at any step and the
+  backend returns a value.
+- **Mutation checks** (each reverted afterwards). Each turned the Rust `refine/` trials red: dropping the offset (18
+  trials), rerunning a frozen instance (20), reading `@previous` from the cell after (18). **Adding the offset to
+  the index first survived**, because every `@previous` or frozen read in the corpus was either at offset 0 or on a
+  `(1,1,1)` input, which never reads the index. The new `refine/march_identity_reads.tw` reads both kinds of buffer on
+  a 3-wide grid at offsets 1 and 4, and turns red under that mutation.
+- **Tests.** Interface (`workers.rs`): discovery order, §4.5 schedule, slots of rerun-only instances, `refine_waves`,
+  `entry_hosts`, names, lerp helpers of refined units and broken declarations. Text (`tungsten-rust/src/tests.rs`).
+  `rust_workers.rs` has the marched-slices check on generated Rust (by bits, against `full`) and worker isolation,
+  where a second entry's worker runs between `run` and `refine_*`. The isolation test turns red when a refine call
+  forgets the stored origin.
+- **Large tier** still not run on Rust, as in step 6.2.

@@ -54,11 +54,21 @@ impl Workers {
                 .collect(),
             ..Default::default()
         };
-        for entry in &program.entry_points {
+        for (e, entry) in program.entry_points.iter().enumerate() {
             let target = Instance::from_entry(entry);
-            let schedule = interface.waves_for(&target);
-            workers.layouts.push(layout(program, interface.instances(), &schedule, target));
-            workers.entry_hosts.push(entry_hosts(program, &schedule, &uses));
+            let seeds = crate::refine::schedule_seeds(program, &interface.walks, e);
+            let schedule = interface.waves_for_all(&seeds);
+            // Refinements add buffers (every rerun) and hosts (every running unit, `with` included).
+            let mut members: HashSet<Instance> = schedule.iter().flatten().copied().collect();
+            let mut units: Vec<Ref<ComputeUnit>> = schedule.iter().flatten().map(|i| i.cu).collect();
+            for (r, w) in program.refinements.iter().zip(&interface.walks) {
+                if r.entry == e {
+                    members.extend(r.reruns.iter().map(crate::refine::rerun_instance));
+                    units.extend(w.running.iter().map(|run| run.unit));
+                }
+            }
+            workers.layouts.push(layout(program, interface.instances(), &members, target));
+            workers.entry_hosts.push(entry_hosts(program, &units, &uses));
             workers.schedules.push(schedule);
         }
         workers
@@ -88,10 +98,9 @@ fn cells((x, y, z): (i32, i32, i32)) -> usize {
 fn layout(
     program: &OptimizedProgram,
     instances: &[Instance],
-    schedule: &[Vec<Instance>],
+    members: &HashSet<Instance>,
     target: Instance,
 ) -> WorkerLayout {
-    let members: HashSet<Instance> = schedule.iter().flatten().copied().collect();
     let mut pools: Vec<Pool> = vec![];
     let mut place = |inst: Instance| {
         let element = &program.functions[main_function(program, inst.cu)].return_type;
@@ -115,12 +124,12 @@ fn layout(
 
 fn entry_hosts(
     program: &OptimizedProgram,
-    schedule: &[Vec<Instance>],
+    units: &[Ref<ComputeUnit>],
     uses: &HashMap<Ref<Function>, Uses>,
 ) -> Vec<Ref<HostInput>> {
     let mut read = HashSet::new();
-    for inst in schedule.iter().flatten() {
-        if let Some(u) = uses.get(&main_function(program, inst.cu)) {
+    for &cu in units {
+        if let Some(u) = uses.get(&main_function(program, cu)) {
             read.extend(u.hosts.iter().copied());
         }
     }
@@ -666,5 +675,211 @@ mod tests {
             names,
             [(VariableType::Extern("Pair"), 3), (VariableType::Extern("Other"), 2)]
         );
+    }
+
+    // Refinements (`specs/refinement.md` §6.1).
+
+    use tungsten_ir::model::{Refinement, Rerun};
+
+    fn rerun(inst: Instance, with: Option<Ref<ComputeUnit>>) -> Rerun {
+        Rerun {
+            cu: inst.cu,
+            dimensions: inst.dimensions,
+            scaled_origin: inst.scaled_origin(),
+            scaled_position: inst.scaled_position(),
+            with,
+        }
+    }
+
+    /// The example of §2: entry `seed` reruns `with surface` and `detail`. `surface` reads its target
+    /// as `@previous`, `detail`, and two frozen inputs (`column`, `coarse`). A `leaf` instance is only
+    /// read by `coarse`, so it must be computed by `run`, too. Each unit reads one host of its own.
+    struct Example {
+        p: OptimizedProgram,
+        seed: Ref<ComputeUnit>,
+        surface: Ref<ComputeUnit>,
+        detail: Ref<ComputeUnit>,
+        column: Ref<ComputeUnit>,
+        coarse: Ref<ComputeUnit>,
+        leaf: Ref<ComputeUnit>,
+        hosts: Vec<Ref<HostInput>>,
+    }
+
+    fn example() -> Example {
+        use VariableType::F64;
+        let mut p = empty();
+        let hosts: Vec<_> = ["h_seed", "h_surface", "h_detail", "h_column", "h_coarse", "h_leaf"]
+            .iter()
+            .map(|n| host(&mut p, n))
+            .collect();
+        let unit_reading = |p: &mut OptimizedProgram, h: Ref<HostInput>, inputs: Vec<Ref<DensityInput>>| {
+            let mut body: Vec<Statement> = inputs
+                .iter()
+                .map(|&d| Statement::Assign { target: dangling_var(), value: read(d) })
+                .collect();
+            body.push(Statement::Return(Expression::HostInput(h)));
+            let f = function(p, F64, body);
+            unit(p, f, inputs)
+        };
+        let dims = (4, 1, 1);
+        let leaf = unit_reading(&mut p, hosts[5], vec![]);
+        let leaf_in = input(&mut p, leaf, dims);
+        let coarse = unit_reading(&mut p, hosts[4], vec![leaf_in]);
+        let column = unit_reading(&mut p, hosts[3], vec![]);
+        let detail = unit_reading(&mut p, hosts[2], vec![]);
+        let seed = unit_reading(&mut p, hosts[0], vec![]);
+        let (prev, d, col, grid) = (
+            input(&mut p, seed, dims),
+            input(&mut p, detail, dims),
+            input(&mut p, column, dims),
+            input(&mut p, coarse, dims),
+        );
+        p.density_inputs[prev].previous = true;
+        let surface = unit_reading(&mut p, hosts[1], vec![prev, d, col, grid]);
+        entry(&mut p, seed, dims);
+        p.refinements.push(Refinement {
+            name: "step".into(),
+            entry: 0,
+            march: (0, 3, 0),
+            reruns: vec![rerun(inst(seed, dims), Some(surface)), rerun(inst(detail, dims), None)],
+        });
+        Example { p, seed, surface, detail, column, coarse, leaf, hosts }
+    }
+
+    fn flat(waves: &[Vec<Instance>]) -> Vec<Instance> {
+        waves.iter().flatten().copied().collect()
+    }
+
+    /// `@previous` adds no dependency, so a self-read doesn't trip the cycle panic, and instances
+    /// only refinements need come after the others.
+    #[test]
+    fn refinement_instances_are_discovered_after_the_rest() {
+        let e = example();
+        let i = build(&e.p);
+        let d = (4, 1, 1);
+        let order: Vec<_> = i.instances().iter().map(|x| x.cu).collect();
+        assert_eq!(order, [e.seed, e.detail, e.column, e.coarse, e.leaf]);
+        // `detail` is rerun-only: it has a buffer and no wave.
+        assert!(!flat(i.waves()).contains(&inst(e.detail, d)));
+        assert_eq!(i.waves().iter().map(Vec::len).sum::<usize>(), 4);
+    }
+
+    /// §4.5: the entry, the frozen instances a running unit reads (with their closure) and every
+    /// `with` target. The rerun-only `detail` isn't computed, but has a slot.
+    #[test]
+    fn run_schedule_holds_frozen_reads_and_not_rerun_only_instances() {
+        let e = example();
+        let i = build(&e.p);
+        let d = (4, 1, 1);
+        let scheduled: Vec<Ref<ComputeUnit>> = flat(i.worker_schedule(0)).iter().map(|x| x.cu).collect();
+        assert_eq!(scheduled.len(), 4);
+        for cu in [e.seed, e.column, e.coarse, e.leaf] {
+            assert!(scheduled.contains(&cu));
+        }
+        assert!(!scheduled.contains(&e.detail));
+        let detail = inst(e.detail, d);
+        assert!(i.slot(0, &detail).is_some());
+        assert_eq!(i.worker(0).slots.len(), 5);
+        // The entry stays first in pool 0.
+        assert_eq!(i.slot(0, &inst(e.seed, d)), Some(Slot { pool: 0, offset: 0, len: 4 }));
+    }
+
+    /// A program without refinements schedules exactly what `waves_for` gives.
+    #[test]
+    fn without_refinements_the_schedule_is_the_closure() {
+        let mut e = example();
+        e.p.refinements.clear();
+        e.p.density_inputs.values_mut().for_each(|d| d.previous = false);
+        let i = build(&e.p);
+        assert_eq!(i.worker_schedule(0), i.waves_for(&inst(e.seed, (4, 1, 1))));
+        assert_eq!(i.worker(0).slots.len(), 1);
+    }
+
+    /// Dependency order, frozen instances left out, one kernel per run.
+    #[test]
+    fn refine_waves_follow_dependencies_and_skip_frozen_instances() {
+        let e = example();
+        let i = build(&e.p);
+        let d = (4, 1, 1);
+        let waves = i.refine_waves(0);
+        assert_eq!(waves.len(), 2);
+        assert_eq!(waves[0].len(), 1);
+        assert_eq!(waves[0][0].target, inst(e.detail, d));
+        assert_eq!(waves[0][0].unit, e.detail);
+        assert_eq!(waves[1].len(), 1);
+        assert_eq!(waves[1][0].target, inst(e.seed, d));
+        assert_eq!(waves[1][0].unit, e.surface, "`with` runs instead of the target's unit");
+        let all: Vec<_> = waves.iter().flatten().collect();
+        assert!(all.iter().all(|r| r.target.cu != e.column && r.target.cu != e.coarse));
+
+        let (a, b) = (i.refine_kernel(&waves[0][0]), i.refine_kernel(&waves[1][0]));
+        assert_ne!(a, b);
+        assert!(a.ends_with("_refine_kernel") && b.ends_with("_refine_kernel"));
+        // `with` units have no buffer, but a density function at the target's dims.
+        assert!(i.density_fn(e.surface, d).contains("_d4x1x1"));
+        assert_eq!(i.dimensions_of(e.surface), [d]);
+        assert_eq!(i.instances_of(e.surface), []);
+    }
+
+    /// Hosts of `with` units and of rerun-only units come with the worker, next to the schedule's.
+    #[test]
+    fn entry_hosts_cover_with_units_and_rerun_only_units() {
+        let e = example();
+        let i = build(&e.p);
+        // All six hosts: seed, column, coarse and leaf through the schedule, surface and detail
+        // through the refinement.
+        assert_eq!(i.entry_hosts(0), e.hosts.as_slice());
+    }
+
+    #[test]
+    fn refinement_names_are_unique_and_deterministic() {
+        let mut e = example();
+        let r = e.p.refinements[0].clone();
+        e.p.refinements.push(Refinement { name: "step".into(), entry: 0, ..r.clone() });
+        e.p.refinements[1].entry = 0;
+        let (a, b) = (build(&e.p), build(&e.p));
+        assert_eq!(a.refinement_names(), b.refinement_names());
+        assert_eq!(a.refinement_names(), ["step", "step_1"]);
+        // Same entry: `refine_<name>`, unique, and never `run`.
+        assert_eq!((a.refine_method(0), a.refine_method(1)), ("refine_step", "refine_step_1"));
+        // Another entry may reuse a method name, since it's another worker.
+        e.p.refinements[1].entry = 1;
+        let f = function(&mut e.p, VariableType::F64, ret(Expression::Double(1.0)));
+        let u = unit(&mut e.p, f, vec![]);
+        entry(&mut e.p, u, (1, 1, 1));
+        e.p.refinements[1].reruns = vec![rerun(inst(u, (1, 1, 1)), None)];
+        let c = build(&e.p);
+        assert_eq!((c.refine_method(0), c.refine_method(1)), ("refine_step", "refine_step"));
+        e.p.refinements[1].name = "run".into();
+        let c = build(&e.p);
+        assert_eq!(c.refine_method(1), "refine_run");
+    }
+
+    /// An un-indexed `Lerp` read in a `with` unit gets a helper, whichever instance reads it.
+    #[test]
+    fn lerp_helpers_cover_refined_units() {
+        use AxisFactor::Factor;
+        let mut e = example();
+        let f = function(&mut e.p, VariableType::F64, ret(Expression::Double(1.0)));
+        let coarse = unit(&mut e.p, f, vec![]);
+        let lerp = lerp_input(&mut e.p, coarse, (2, 2, 2), [Factor(2); 3]);
+        let ComputeUnit::DensityFunction { density_inputs, function, .. } = &mut e.p.compute_units[e.surface];
+        density_inputs.push(lerp);
+        e.p.functions[*function].body.insert(0, Statement::Assign { target: dangling_var(), value: read(lerp) });
+        let i = build(&e.p);
+        assert_eq!(names(&i), ["lerp_2x2x2_by_2x2x2_f64"]);
+    }
+
+    /// Bad declarations must not panic the interface: an unknown entry, no entry rerun.
+    #[test]
+    fn broken_refinements_do_not_panic() {
+        let mut e = example();
+        e.p.refinements[0].entry = 9;
+        let i = build(&e.p);
+        assert_eq!(i.refine_waves(0).len(), 0);
+        e.p.refinements[0].entry = 0;
+        e.p.refinements[0].reruns.remove(0);
+        let i = build(&e.p);
+        assert_eq!(i.refine_waves(0).len(), 0);
     }
 }

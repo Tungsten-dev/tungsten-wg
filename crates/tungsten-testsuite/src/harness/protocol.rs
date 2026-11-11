@@ -1,7 +1,9 @@
 //! Wire format between the harness and a generated driver (crate README, "Rules and contracts, Protocol").
 //!
-//! Little-endian. A request is `origin:[u64;3] param* host*`. A response is `0x00 value*` or
-//! `0x01 kind:u8 len:u32 utf8[len]`. Values are positional and typed by the program, with no tags.
+//! Little-endian. A request is `origin:[u64;3] param* host* steps:u32 step*`, where a step is
+//! `refinement:u32 offset:[i32;3] host*` with every host. A response is `0x00 value* step_value*`
+//! (the entries' buffers, then the buffer of each step's entry) or `0x01 kind:u8 len:u32 utf8[len]`.
+//! Values are positional and typed by the program, with no tags.
 
 use tungsten_check::Value;
 use tungsten_core::{F64x3, I32x3};
@@ -162,6 +164,25 @@ pub struct TestIo {
     /// Name and type of every static host, in `host_inputs` arena order.
     pub hosts: Vec<(String, VariableType)>,
     pub entries: Vec<EntryIo>,
+    /// The entry of each refinement, in `refinements` order.
+    pub refine_entries: Vec<usize>,
+}
+
+/// One `@refine` call on the wire: the host values are complete.
+#[derive(Debug, Clone)]
+pub struct StepRequest {
+    pub refinement: usize,
+    pub offset: [i32; 3],
+    pub hosts: Vec<(String, Value)>,
+}
+
+/// A decoded `Ok` response.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decoded {
+    /// Per entry, per cell in flat order.
+    pub entries: Vec<Vec<Value>>,
+    /// Per step, the cells of its refinement's entry.
+    pub steps: Vec<Vec<Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,7 +215,8 @@ impl TestIo {
                 EntryIo { ty: p.functions[*function].return_type.clone(), dims: e.dimensions }
             })
             .collect();
-        Ok(TestIo { params, hosts, entries })
+        let refine_entries = p.refinements.iter().map(|r| r.entry).collect();
+        Ok(TestIo { params, hosts, entries, refine_entries })
     }
 
     /// Entries that return tables can't be encoded (crate README, "Rules and contracts").
@@ -219,13 +241,29 @@ impl TestIo {
         self.hosts.iter().map(|(_, t)| size_of(t, env)).sum()
     }
 
-    /// Bytes of the value part of an `Ok` response.
-    pub fn response_bytes(&self, env: &TestEnv) -> Result<usize, String> {
+    /// Bytes of one step of a request: refinement, offset, and every host.
+    pub fn step_bytes(&self, env: &TestEnv) -> Result<usize, String> {
+        Ok(4 + 12 + self.host_bytes(env)?)
+    }
+
+    /// Bytes of the value part of an `Ok` response for a case whose steps run `refinements` (indices
+    /// into the program's refinements, one per step).
+    pub fn response_bytes(&self, env: &TestEnv, refinements: &[usize]) -> Result<usize, String> {
         let mut s = 0;
         for e in &self.entries {
             s += size_of(&e.ty, env)? * e.cells();
         }
+        for &r in refinements {
+            let e = self.step_entry(r)?;
+            s += size_of(&e.ty, env)? * e.cells();
+        }
         Ok(s)
+    }
+
+    /// The entry a step of refinement `r` returns.
+    fn step_entry(&self, r: usize) -> Result<&EntryIo, String> {
+        let e = *self.refine_entries.get(r).ok_or_else(|| format!("no refinement {r}"))?;
+        self.entries.get(e).ok_or_else(|| format!("refinement {r} names entry {e}, which doesn't exist"))
     }
 
     /// `hosts` are matched by name, so the same case works on an inlined program.
@@ -235,6 +273,7 @@ impl TestIo {
         origin: [f64; 3],
         params: &[(String, Value)],
         hosts: &[(String, Value)],
+        steps: &[StepRequest],
     ) -> Result<Vec<u8>, String> {
         let mut out = vec![];
         for o in origin {
@@ -247,33 +286,63 @@ impl TestIo {
                 .ok_or_else(|| format!("the case gives no value for param `{name}`"))?;
             encode_value(v, t, env, &mut out)?;
         }
+        self.encode_hosts(env, hosts, &mut out)?;
+        out.extend((steps.len() as u32).to_le_bytes());
+        for step in steps {
+            out.extend((step.refinement as u32).to_le_bytes());
+            for o in step.offset {
+                out.extend(o.to_le_bytes());
+            }
+            self.encode_hosts(env, &step.hosts, &mut out)?;
+        }
+        Ok(out)
+    }
+
+    fn encode_hosts(&self, env: &TestEnv, hosts: &[(String, Value)], out: &mut Vec<u8>) -> Result<(), String> {
         for (name, t) in &self.hosts {
             let (_, v) = hosts
                 .iter()
                 .find(|(n, _)| n == name)
                 .ok_or_else(|| format!("the case gives no value for host `{name}`"))?;
-            encode_value(v, t, env, &mut out)?;
+            encode_value(v, t, env, out)?;
         }
-        Ok(out)
+        Ok(())
     }
 
-    /// Decodes the body of an `Ok` response: per entry, per cell in flat order.
-    pub fn decode_response(&self, env: &TestEnv, body: &[u8]) -> Result<Vec<Vec<Value>>, String> {
+    /// Decodes the body of an `Ok` response whose steps ran `refinements`.
+    pub fn decode_response(&self, env: &TestEnv, body: &[u8], refinements: &[usize]) -> Result<Decoded, String> {
         let mut r = Reader::new(body);
-        let mut out = vec![];
+        let mut entries = vec![];
         for e in &self.entries {
-            out.push((0..e.cells()).map(|_| decode_value(&mut r, &e.ty, env)).collect::<Result<_, _>>()?);
+            entries.push((0..e.cells()).map(|_| decode_value(&mut r, &e.ty, env)).collect::<Result<_, _>>()?);
+        }
+        let mut steps = vec![];
+        for &k in refinements {
+            let e = self.step_entry(k)?;
+            steps.push((0..e.cells()).map(|_| decode_value(&mut r, &e.ty, env)).collect::<Result<_, _>>()?);
         }
         if r.rest() != 0 {
             return Err(format!("response is longer than its types predict ({} extra bytes)", r.rest()));
         }
-        Ok(out)
+        Ok(Decoded { entries, steps })
     }
 
-    /// Encodes a response body (used by golden bytes and stub drivers in tests).
-    pub fn encode_response(&self, env: &TestEnv, cells: &[Vec<Value>]) -> Result<Vec<u8>, String> {
+    /// Encodes a response body (used by golden bytes and stub drivers in tests). `steps` holds the
+    /// cells of each step's entry.
+    pub fn encode_response(
+        &self,
+        env: &TestEnv,
+        cells: &[Vec<Value>],
+        steps: &[(usize, Vec<Value>)],
+    ) -> Result<Vec<u8>, String> {
         let mut out = vec![0u8];
         for (e, vs) in self.entries.iter().zip(cells) {
+            for v in vs {
+                encode_value(v, &e.ty, env, &mut out)?;
+            }
+        }
+        for (k, vs) in steps {
+            let e = self.step_entry(*k)?;
             for v in vs {
                 encode_value(v, &e.ty, env, &mut out)?;
             }
@@ -376,6 +445,7 @@ mod tests {
                 EntryIo { ty: VariableType::Array(Box::new(VariableType::I32), 2), dims: (1, 1, 1) },
                 EntryIo { ty: VariableType::Pos3, dims: (2, 1, 1) },
             ],
+            refine_entries: vec![1],
         };
         let wrap = Value::Record(
             env.registry.record_id("Wrap").unwrap(),
@@ -387,26 +457,43 @@ mod tests {
                 Value::Vec3(F64x3 { x: 1.5f64.to_bits(), y: f64::NAN.to_bits(), z: 0 }),
             ],
         );
-        let req = io
-            .encode_request(&env, [1.5, -0.0, 2.0], &[("seed".into(), Value::I64(0x0102_0304_0506_0708))], &[("n".into(), Value::I8(-3)), ("w".into(), wrap)])
-            .unwrap();
-        let resp = io
-            .encode_response(
-                &env,
-                &[
-                    vec![Value::Array(vec![Value::I32(1), Value::I32(-1)])],
-                    vec![Value::Pos3(I32x3 { x: 1, y: 2, z: 3 }), Value::Pos3(I32x3 { x: -1, y: 0, z: 7 })],
-                ],
-            )
+        let params = [("seed".to_string(), Value::I64(0x0102_0304_0506_0708))];
+        let hosts = [("n".to_string(), Value::I8(-3)), ("w".to_string(), wrap)];
+        let cells = [
+            vec![Value::Array(vec![Value::I32(1), Value::I32(-1)])],
+            vec![Value::Pos3(I32x3 { x: 1, y: 2, z: 3 }), Value::Pos3(I32x3 { x: -1, y: 0, z: 7 })],
+        ];
+        // Java and CUDA read the first two lines, with `steps` always 0.
+        let req = io.encode_request(&env, [1.5, -0.0, 2.0], &params, &hosts, &[]).unwrap();
+        let resp = io.encode_response(&env, &cells, &[])
             .unwrap();
         let fail = encode_failure(KIND_DIV_BY_ZERO, "boom");
-        let got = format!("request {}\nresponse {}\nfailure {}\n", hex(&req), hex(&resp), hex(&fail));
+        // One step on refinement 0 (entry 1), with the host `n` changed.
+        let step_hosts = [("n".to_string(), Value::I8(5)), hosts[1].clone()];
+        let step = StepRequest { refinement: 0, offset: [-1, 383, 2], hosts: step_hosts.to_vec() };
+        let step_req = io.encode_request(&env, [1.5, -0.0, 2.0], &params, &hosts, &[step]).unwrap();
+        let step_values = vec![Value::Pos3(I32x3 { x: 0, y: 0, z: 1 }), Value::Pos3(I32x3 { x: 2, y: 0, z: 0 })];
+        let step_resp = io.encode_response(&env, &cells, &[(0, step_values)]).unwrap();
+        let got = format!(
+            "request {}\nresponse {}\nfailure {}\nstep_request {}\nstep_response {}\n",
+            hex(&req),
+            hex(&resp),
+            hex(&fail),
+            hex(&step_req),
+            hex(&step_resp)
+        );
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/protocol.txt");
         let want = std::fs::read_to_string(path).unwrap_or_default();
         assert_eq!(got, want, "golden bytes changed; if intended, write this to {path}:\n{got}");
         // The response part decodes back.
-        let cells = io.decode_response(&env, &resp[1..]).unwrap();
-        assert_eq!(cells[1][1], Value::Pos3(I32x3 { x: -1, y: 0, z: 7 }));
+        let decoded = io.decode_response(&env, &resp[1..], &[]).unwrap();
+        assert_eq!(decoded.entries[1][1], Value::Pos3(I32x3 { x: -1, y: 0, z: 7 }));
+        assert!(decoded.steps.is_empty());
+        let decoded = io.decode_response(&env, &step_resp[1..], &[0]).unwrap();
+        assert_eq!(decoded.steps[0][1], Value::Pos3(I32x3 { x: 2, y: 0, z: 0 }));
+        assert_eq!(io.response_bytes(&env, &[0, 0]).unwrap(), io.response_bytes(&env, &[]).unwrap() + 2 * 24);
+        // A request is its fixed part, then each step's refinement, offset and hosts.
+        assert_eq!(step_req.len(), req.len() + io.step_bytes(&env).unwrap());
     }
 
     /// An entry returning a table can't be encoded: a test error on every backend (crate README, "Rules and contracts").
@@ -428,7 +515,12 @@ program {
         let err = io.check_encodable().unwrap_err();
         assert!(err.contains("holds a table"), "{err}");
         // And a plain program is fine.
-        let ok = TestIo { params: vec![], hosts: vec![], entries: vec![EntryIo { ty: VariableType::F64, dims: (1, 1, 1) }] };
+        let ok = TestIo {
+            params: vec![],
+            hosts: vec![],
+            entries: vec![EntryIo { ty: VariableType::F64, dims: (1, 1, 1) }],
+            refine_entries: vec![],
+        };
         ok.check_encodable().unwrap();
     }
 

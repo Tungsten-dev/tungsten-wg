@@ -42,7 +42,7 @@ fn stub(id: &str, body: &str) -> TestSource {
         name: id.to_string(),
         id: id.to_string(),
         source: format!(
-            "pub mod driver {{\n    pub const REQUEST_LEN: usize = 24;\n    \
+            "pub mod driver {{\n    pub const REQUEST_LEN: usize = 28;\n    pub const STEP_LEN: usize = 16;\n    \
              pub fn run_case(r: &mut crate::proto::Reader) -> Vec<u8> {{ {body} }}\n}}\n"
         ),
     }
@@ -80,7 +80,7 @@ fn run_stub_with(
     for i in 0..tf.cases.len() {
         let (named, params) = oracle::named_case(&tf, i, &env)?;
         let c = &tf.cases[i];
-        requests.push(io.encode_request(&env, c.origin, &params, &named.hosts)?);
+        requests.push(io.encode_request(&env, c.origin, &params, &named.hosts, &[])?);
     }
     let make = || h.command(path, id);
     let startup = match h.lang {
@@ -88,11 +88,11 @@ fn run_stub_with(
         _ => NO_STARTUP,
     };
     let outcomes =
-        run_cases_opts(&make, &requests, io.response_bytes(&env)?, timeout, startup, h.restart_after_failure());
+        run_cases_opts(&make, &requests, io.response_bytes(&env, &[])?, timeout, startup, h.restart_after_failure());
     let verdicts = outcomes
         .iter()
         .enumerate()
-        .map(|(i, o)| score_case(&tf, &env, &io, i, &run.results[i], o))
+        .map(|(i, o)| score_case(&tf, &env, &io, i, &run.results[i], &run.steps[i], o))
         .collect();
     Ok((outcomes, verdicts))
 }

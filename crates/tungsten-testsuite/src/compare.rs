@@ -1,11 +1,11 @@
 //! Scoring of one backend case against the interpreter (crate README, "Rules and contracts").
 
-use tungsten_check::{CaseResult, Value};
+use tungsten_check::{CaseResult, EvalError, Value};
 use tungsten_parse::{CellSample, TestFile};
 
 use crate::env::TestEnv;
 use crate::harness::process::CaseOutcome;
-use crate::harness::protocol::{TestIo, kind_name};
+use crate::harness::protocol::{Decoded, TestIo, kind_name};
 use crate::oracle::{self, error_kind_name};
 use crate::values::{core_eq, show};
 
@@ -27,6 +27,11 @@ impl Verdict {
 /// An interpreter result without any cell error or const/input failure.
 pub fn interpreter_clean(r: &CaseResult) -> bool {
     r.failures.is_empty() && r.entries.iter().flatten().all(|c| c.is_ok())
+}
+
+/// The orchestrate step and every refine step of a case are clean.
+fn sequence_clean(run: &CaseResult, steps: &[CaseResult]) -> bool {
+    interpreter_clean(run) && steps.iter().all(interpreter_clean)
 }
 
 /// Whether cell `k` of entry `e` takes part in the comparison (crate README, "Rules and contracts"). Deterministic: the
@@ -59,39 +64,43 @@ fn describe(o: &CaseOutcome) -> String {
 }
 
 /// The scoring table of crate README, "Rules and contracts" for one case that reached the backend.
+/// `steps` are the interpreter's results of its refine calls: a failure at any step fails the case.
 pub fn score_case(
     tf: &TestFile,
     env: &TestEnv,
     io: &TestIo,
     case: usize,
     oracle_result: &CaseResult,
+    steps: &[CaseResult],
     outcome: &CaseOutcome,
 ) -> Verdict {
     let name = &tf.cases[case].name;
-    if oracle::skipped_for_backends(oracle_result) {
+    if oracle::skipped_for_backends(oracle_result) || steps.iter().any(oracle::skipped_for_backends) {
         return Verdict::Skipped;
     }
     // A malformed response is the harness's fault, never a pass.
     if let CaseOutcome::Malformed(_) = outcome {
         return Verdict::Fail(format!("case `{name}`: {}", describe(outcome)));
     }
-    let clean = interpreter_clean(oracle_result);
+    let clean = sequence_clean(oracle_result, steps);
     match (clean, outcome) {
         (false, CaseOutcome::Returned(_)) => {
-            let first = oracle::first_failure(oracle_result)
+            let bad = std::iter::once(oracle_result).chain(steps).find(|r| !interpreter_clean(r)).unwrap();
+            let first = oracle::first_failure(bad)
                 .map(|(e, k, err)| format!("entry {e} cell {k}: {}", error_kind_name(&err)))
-                .unwrap_or_else(|| format!("{} const/input failures", oracle_result.failures.len()));
+                .unwrap_or_else(|| format!("{} const/input failures", bad.failures.len()));
             Verdict::Fail(format!(
                 "case `{name}`: the interpreter errors ({first}) but the backend returned a value"
             ))
         }
         (false, other) => Verdict::Pass(Some(format!("both fail; backend {}", describe(other).lines().next().unwrap()))),
         (true, CaseOutcome::Returned(body)) => {
-            let cells = match io.decode_response(env, body) {
+            let refinements: Vec<usize> = tf.cases[case].refines.iter().map(|c| c.refinement).collect();
+            let decoded = match io.decode_response(env, body, &refinements) {
                 Ok(c) => c,
                 Err(m) => return Verdict::Fail(format!("case `{name}`: harness error: {m}")),
             };
-            compare_cells(tf, io, case, oracle_result, &cells)
+            compare_cells(tf, io, case, oracle_result, steps, &decoded)
         }
         (true, other) => Verdict::Fail(format!(
             "case `{name}`: the interpreter returns values but the backend {}",
@@ -100,10 +109,18 @@ pub fn score_case(
     }
 }
 
-fn compare_cells(tf: &TestFile, io: &TestIo, case: usize, want: &CaseResult, got: &[Vec<Value>]) -> Verdict {
+/// Entries after orchestrate, then each step's entry buffer after that step.
+fn compare_cells(
+    tf: &TestFile,
+    io: &TestIo,
+    case: usize,
+    want: &CaseResult,
+    want_steps: &[CaseResult],
+    got: &Decoded,
+) -> Verdict {
     let name = &tf.cases[case].name;
     let mut diffs: Vec<String> = vec![];
-    for (e, (w, g)) in want.entries.iter().zip(got).enumerate() {
+    let mut compare = |when: &str, e: usize, w: &[Result<Value, EvalError>], g: &[Value]| {
         for (k, (wc, gc)) in w.iter().zip(g).enumerate() {
             if !cell_selected(tf.cells, e, k, w.len()) {
                 continue;
@@ -112,13 +129,22 @@ fn compare_cells(tf: &TestFile, io: &TestIo, case: usize, want: &CaseResult, got
             if !core_eq(wv, gc) {
                 let (x, y, z) = xyz(k, io.entries[e].dims);
                 diffs.push(format!(
-                    "entry `{}` cell ({x}, {y}, {z}) [flat {k}]:\n    interpreter: {}\n    backend:     {}",
+                    "{when}entry `{}` cell ({x}, {y}, {z}) [flat {k}]:\n    interpreter: {}\n    backend:     {}",
                     tf.entry_labels[e],
                     show(wv),
                     show(gc)
                 ));
             }
         }
+    };
+    for (e, (w, g)) in want.entries.iter().zip(&got.entries).enumerate() {
+        compare("", e, w, g);
+    }
+    // A refine step's result has the step's entry only.
+    let calls = &tf.cases[case].refines;
+    for (n, ((w, g), call)) in want_steps.iter().zip(&got.steps).zip(calls).enumerate() {
+        let e = io.refine_entries[call.refinement];
+        compare(&format!("after refine {}: ", n + 1), e, &w.entries[0], g);
     }
     match diffs.split_first() {
         None => Verdict::Pass(None),
@@ -130,8 +156,14 @@ fn compare_cells(tf: &TestFile, io: &TestIo, case: usize, want: &CaseResult, got
 }
 
 /// A build or generation failure fails every case that would have run (crate README, "Rules and contracts").
-pub fn score_unbuilt(tf: &TestFile, oracle_result: &CaseResult, case: usize, why: &str) -> Verdict {
-    if oracle::skipped_for_backends(oracle_result) {
+pub fn score_unbuilt(
+    tf: &TestFile,
+    oracle_result: &CaseResult,
+    steps: &[CaseResult],
+    case: usize,
+    why: &str,
+) -> Verdict {
+    if oracle::skipped_for_backends(oracle_result) || steps.iter().any(oracle::skipped_for_backends) {
         Verdict::Skipped
     } else {
         Verdict::Fail(format!("case `{}`: {why}", tf.cases[case].name))

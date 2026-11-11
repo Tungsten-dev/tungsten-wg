@@ -226,11 +226,19 @@ clean; one global lock serializes the GPU phase, while builds are CPU-only and r
 **Protocol.** Little-endian on stdin/stdout, flushed per message, driver logs to stderr only.
 
 ```
-request  := origin:[u64;3] (f64 bits)  seed:u64  host*        (host arena order); EOF ends the process
-response := 0x00 value* (entry order, flat cell order)
+request  := origin:[u64;3] (f64 bits)  param* host*  steps:u32  step*      (host arena order); EOF ends the process
+step     := refinement:u32  offset:[i32;3]  host*                          (every host, resolved by the harness)
+response := 0x00 value* (entry order, flat cell order) step_value*         (the step entry's buffer per step)
           | 0x01 kind:u8 len:u32 utf8[len]
 kind     := 0 DivByZero | 1 OutOfBounds | 2 ExternDomain | 3 other
 ```
+
+`steps` is always present and 0 for a program without refinements. The size of an `Ok` response depends on
+the case's steps, so `run_cases_lens` takes one per request. The Rust driver reads the `steps` count, then
+`STEP_LEN` bytes per step (`serve(request_len, step_len, run)`). Java and CUDA drivers only read the fixed part and
+ignore `steps`, because the backends' guard refuses refinement programs until their own phase
+(`specs/combined-rollout.md` §3.3). `tests/golden/protocol.txt` also holds a `step_request` and
+`step_response`, which only the host side checks (the Rust driver is exercised by the `refine/` corpus).
 
 Values are positional and typed by the program, with no tags: `Bool` and `I8` 1 byte, `I32` and `F32` 4,
 `I64` and `F64` 8 (raw bits), `Vec3`, `Pos3`, arrays and records are their elements in order. A response of the

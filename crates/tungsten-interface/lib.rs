@@ -15,11 +15,13 @@ use tungsten_ir::model::{AutoConst, AutoParam, AxisFactor,
 pub mod compiler;
 mod guard;
 pub mod naming;
+mod refine;
 pub mod scale;
 mod workers;
 
 pub use compiler::{CompileError, Compiler, Inline, Passes};
 pub use guard::{Feature, check_implemented};
+pub use refine::RefineRun;
 pub use scale::Scale;
 pub use workers::{Pool, Slot, WorkerLayout};
 
@@ -96,6 +98,13 @@ pub trait DeviceCodegen {
     fn generate_compute_unit(&mut self, cu: Ref<ComputeUnit>);
     /// Generates the kernels running `cus` (implies `generate_compute_unit`).
     fn generate_kernel_of(&mut self, cus: Vec<Ref<ComputeUnit>>); // currently only 1 at a time
+    /// Generates the refine kernel of one run (`specs/refinement.md` §6.2), and its unit at the
+    /// target's dims. Only called for programs with refinements, which backends refuse until
+    /// they implement them (`check_implemented`).
+    fn generate_refine_kernel(&mut self, run: &RefineRun) {
+        let _ = run;
+        panic!("{} does not implement refinement yet", self.codegen_language());
+    }
     fn codegen_language(&self) -> &str;
     /// Everything generated so far as source text, wrapped in `module_name` and importing `imports`.
     fn render(&self, module_name: &str, imports: &[String]) -> String;
@@ -204,14 +213,36 @@ pub struct Interface {
     lerp_helpers: Vec<LerpHelper>,
     /// Element type of each unit's buffer, to find the helper of an input.
     unit_elements: HashMap<Ref<ComputeUnit>, VariableType>,
+    /// Per refinement of the program, in order.
+    refinement_names: Vec<String>,
+    refine_methods: Vec<String>,
+    refine_waves: Vec<Vec<Vec<RefineRun>>>,
+    refine_kernels: HashMap<RefineRun, String>,
+    /// Refined units, at the dims of the targets they replace.
+    with_dims: Vec<(Ref<ComputeUnit>, (i32, i32, i32))>,
+    walks: Vec<refine::Walk>,
     workers: workers::Workers,
 }
 
 impl Interface {
     /// Fixes every name with `rules`; reserved names are never produced.
     pub fn build(program: &OptimizedProgram, rules: &NamingRules) -> Self {
+        let walks: Vec<refine::Walk> = program.refinements.iter().map(|r| refine::walk(program, r)).collect();
         let (instances, dependencies) = discover_instances(program);
-        let waves = arrange_waves(&instances, dependencies.clone());
+        // Instances only a refinement reruns have buffers, but no wave: `run` doesn't compute them.
+        let scheduled = scheduled_instances(program, &walks, &dependencies);
+        let in_waves: Vec<Instance> = instances.iter().filter(|i| scheduled.contains(i)).copied().collect();
+        let wave_deps = dependencies.iter().filter(|(i, _)| scheduled.contains(i)).map(|(i, d)| (*i, d.clone()));
+        let waves = arrange_waves(&in_waves, wave_deps.collect());
+        let refine_waves: Vec<Vec<Vec<RefineRun>>> =
+            walks.iter().map(|w| refine::refine_waves(program, &w.running)).collect();
+        let mut with_dims: Vec<(Ref<ComputeUnit>, (i32, i32, i32))> = vec![];
+        for run in walks.iter().flat_map(|w| &w.running) {
+            let key = (run.unit, run.target.dimensions);
+            if run.unit != run.target.cu && !with_dims.contains(&key) {
+                with_dims.push(key);
+            }
+        }
 
         // One namespace for module-level items (functions, constants, kernels).
         let mut used = rules.used_set();
@@ -236,6 +267,25 @@ impl Interface {
             let base = density_fns[&key].clone();
             buffers.insert(*inst, unique(&mut used_fields, format!("{}_output", base)));
             kernels.insert(*inst, unique(&mut used, format!("{}_kernel", base)));
+        }
+
+        // Refined units have a density function at the dims of their targets, and no buffer.
+        for &(cu, (x, y, z)) in &with_dims {
+            density_fns.entry((cu, (x, y, z))).or_insert_with(|| {
+                let base = format!("{}_d{}x{}x{}", unit_base_name(rules, program, cu), x, y, z);
+                unique(&mut used, base)
+            });
+        }
+        let mut refine_kernels = HashMap::new();
+        for run in refine_waves.iter().flatten().flatten() {
+            if !refine_kernels.contains_key(run) {
+                let base = format!(
+                    "{}_{}_refine_kernel",
+                    density_fns[&(run.unit, run.target.dimensions)],
+                    unit_base_name(rules, program, run.target.cu)
+                );
+                refine_kernels.insert(*run, unique(&mut used, base));
+            }
         }
 
         let main_functions: HashSet<_> = program
@@ -320,6 +370,15 @@ impl Interface {
                     (r, program.functions[*function].return_type.clone())
                 })
                 .collect(),
+            refinement_names: {
+                let mut used = HashSet::new();
+                program.refinements.iter().map(|r| unique(&mut used, (rules.sanitize)(&r.name))).collect()
+            },
+            refine_methods: naming::refinement_method_names(program, rules, &HashSet::new()),
+            refine_waves,
+            refine_kernels,
+            with_dims,
+            walks,
             workers: workers::Workers::default(),
         };
         interface.workers = workers::Workers::build(program, &interface);
@@ -337,13 +396,12 @@ impl Interface {
 
     /// The waves restricted to `target` and everything it transitively depends on.
     pub fn waves_for(&self, target: &Instance) -> Vec<Vec<Instance>> {
-        let mut needed = HashSet::new();
-        let mut stack = vec![*target];
-        while let Some(i) = stack.pop() {
-            if needed.insert(i) {
-                stack.extend(self.dependencies[&i].iter().copied());
-            }
-        }
+        self.waves_for_all(&[*target])
+    }
+
+    /// The waves restricted to `targets` and everything they transitively depend on.
+    pub fn waves_for_all(&self, targets: &[Instance]) -> Vec<Vec<Instance>> {
+        let needed = closure(&self.dependencies, targets);
         self.waves
             .iter()
             .map(|w| {
@@ -356,7 +414,9 @@ impl Interface {
             .collect()
     }
 
-    /// The waves that entry `entry`'s worker runs.
+    /// The waves that entry `entry`'s worker runs in `run` (`specs/refinement.md` §4.5): the entry's
+    /// closure, the frozen instances its refinements read, and the instances their `with` units
+    /// replace. Instances only a refinement reruns aren't in it, but have a slot (`worker`).
     pub fn worker_schedule(&self, entry: usize) -> &[Vec<Instance>] {
         &self.workers.schedules[entry]
     }
@@ -409,6 +469,28 @@ impl Interface {
         &self.workers.entry_hosts[entry]
     }
 
+    /// Names of the program's refinements, one per `program.refinements` entry, unique in the module.
+    pub fn refinement_names(&self) -> &[String] {
+        &self.refinement_names
+    }
+
+    /// The worker method of refinement `refinement` (`refine_<name>`), unique within its worker.
+    pub fn refine_method(&self, refinement: usize) -> &str {
+        &self.refine_methods[refinement]
+    }
+
+    /// What refinement `refinement` runs per call, in dependency order, one wave at a time
+    /// (`specs/refinement.md` §4.1). Frozen instances aren't in it.
+    pub fn refine_waves(&self, refinement: usize) -> &[Vec<RefineRun>] {
+        &self.refine_waves[refinement]
+    }
+
+    /// The refine kernel of `run`. Shared by every refinement that runs the same unit on the same
+    /// buffer.
+    pub fn refine_kernel(&self, run: &RefineRun) -> &str {
+        &self.refine_kernels[run]
+    }
+
     pub fn instances_of(&self, cu: Ref<ComputeUnit>) -> Vec<Instance> {
         self.instances
             .iter()
@@ -417,12 +499,14 @@ impl Interface {
             .collect()
     }
 
-    /// Distinct dimensions the unit is used at, in discovery order.
+    /// Distinct dimensions the unit is used at, in discovery order. A refined unit is used at the
+    /// dims of the targets it replaces.
     pub fn dimensions_of(&self, cu: Ref<ComputeUnit>) -> Vec<(i32, i32, i32)> {
         let mut dims = Vec::new();
-        for i in self.instances.iter().filter(|i| i.cu == cu) {
-            if !dims.contains(&i.dimensions) {
-                dims.push(i.dimensions);
+        let refined = self.with_dims.iter().filter(|(c, _)| *c == cu).map(|(_, d)| *d);
+        for d in self.instances.iter().filter(|i| i.cu == cu).map(|i| i.dimensions).chain(refined) {
+            if !dims.contains(&d) {
+                dims.push(d);
             }
         }
         dims
@@ -472,9 +556,9 @@ fn collect_lerp_helpers(
     used: &mut HashSet<String>,
 ) -> Vec<LerpHelper> {
     let mut helpers: Vec<LerpHelper> = vec![];
-    for inst in &interface.instances {
-        let ComputeUnit::DensityFunction { function, density_inputs, .. } =
-            &program.compute_units[inst.cu];
+    let refined = interface.with_dims.iter().map(|(cu, _)| *cu);
+    for cu in interface.instances.iter().map(|i| i.cu).chain(refined) {
+        let ComputeUnit::DensityFunction { function, density_inputs, .. } = &program.compute_units[cu];
         let read = &interface.workers.unindexed_reads[function];
         for &r in density_inputs {
             let d = &program.density_inputs[r];
@@ -511,7 +595,8 @@ fn collect_lerp_helpers(
     helpers
 }
 
-/// Everything reachable from the entry points (breadth-first), with each instance's direct inputs.
+/// Everything reachable from the entry points (breadth-first), then what only refinements need,
+/// with each instance's direct inputs. `@previous` inputs add no dependency.
 fn discover_instances(
     program: &OptimizedProgram,
 ) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
@@ -523,25 +608,59 @@ fn discover_instances(
         .map(Instance::from_entry)
         .collect();
     let mut i = 0;
-    while i < queue.len() {
-        let inst = queue[i];
-        i += 1;
-        if dependencies.contains_key(&inst) {
-            continue;
+    let mut refinements_seeded = false;
+    loop {
+        while i < queue.len() {
+            let inst = queue[i];
+            i += 1;
+            if dependencies.contains_key(&inst) {
+                continue;
+            }
+            instances.push(inst);
+            let deps = refine::normal_inputs(program, inst.cu);
+            queue.extend(deps.iter().copied());
+            dependencies.insert(inst, deps);
         }
-        instances.push(inst);
-        let ComputeUnit::DensityFunction { density_inputs, .. } = &program.compute_units[inst.cu];
-        let mut deps: Vec<Instance> = Vec::new();
-        for &r in density_inputs {
-            let dep = Instance::from_input(&program.density_inputs[r]);
-            if !deps.contains(&dep) {
-                deps.push(dep);
+        if refinements_seeded {
+            return (instances, dependencies);
+        }
+        refinements_seeded = true;
+        // Instances needed only by refinements come after the others: every rerun, and whatever
+        // a `with` unit reads.
+        for r in &program.refinements {
+            for x in &r.reruns {
+                queue.push(refine::rerun_instance(x));
+                if let Some(w) = x.with {
+                    queue.extend(refine::normal_inputs(program, w));
+                }
             }
         }
-        queue.extend(deps.iter().copied());
-        dependencies.insert(inst, deps);
     }
-    (instances, dependencies)
+}
+
+/// Instances some entry's `run` computes: its seeds (`refine::schedule_seeds`) and everything they
+/// depend on.
+fn scheduled_instances(
+    program: &OptimizedProgram,
+    walks: &[refine::Walk],
+    dependencies: &HashMap<Instance, Vec<Instance>>,
+) -> HashSet<Instance> {
+    let seeds: Vec<Instance> = (0..program.entry_points.len())
+        .flat_map(|e| refine::schedule_seeds(program, walks, e))
+        .collect();
+    closure(dependencies, &seeds)
+}
+
+/// `seeds` and everything they transitively depend on.
+fn closure(dependencies: &HashMap<Instance, Vec<Instance>>, seeds: &[Instance]) -> HashSet<Instance> {
+    let mut needed = HashSet::new();
+    let mut stack = seeds.to_vec();
+    while let Some(i) = stack.pop() {
+        if needed.insert(i) {
+            stack.extend(dependencies[&i].iter().copied());
+        }
+    }
+    needed
 }
 
 /// Wave algorithm: repeatedly peel off every instance whose dependencies are already scheduled.

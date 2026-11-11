@@ -1,0 +1,24 @@
+// March: un-indexed reads of same-dims buffers use the buffer index, not the marched `Pos3`. A frozen
+// buffer and a `@previous` one are read at a non-zero offset, on a grid wider than one cell.
+@knownfail(java, "pending: combined-rollout phase 3")
+@knownfail(cuda, "pending: combined-rollout phase 4")
+program {
+    fn base_main() -> i32 { return (ambient(pos3).x * 100); }
+    unit base { main base_main; }
+    input frozen = base @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn seed_main() -> i32 { return 0; }
+    unit seed { main seed_main; }
+    input prev = seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn step_main() -> i32 { return ((density(prev) + density(frozen)) + ambient(pos3).y); }
+    unit step { main step_main; inputs [prev, frozen]; }
+    entry seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement go of seed @march(0, 4, 0) {
+        rerun seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with step;
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" go offset(0, 1, 0)
+@refine "c" go offset(0, 4, 0)
+@expect "c" seed = [0, 0, 0]
+@expect "c" after(1) seed = [1, 101, 201]
+@expect "c" after(2) seed = [5, 205, 405]
