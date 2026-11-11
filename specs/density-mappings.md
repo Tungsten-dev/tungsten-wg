@@ -417,3 +417,27 @@ to decide.
   and it names the reading unit by its main function, as other lowering errors do.
 - The formula agreement test is `tungsten-check/src/tests/mapping.rs`. It checks every cell of an `(8,16,8)` reader
   of a `(3,3,3)` `@lerp(4, 8, 4)` input with edge values against a copy of `tungsten-mc`'s `interpolate`.
+
+### Milestone 3 (Rust)
+
+- **Helper discovery.** `Interface::lerp_helpers()` has one entry per distinct (input dims, factors, element type) of a
+  `Lerp` input that a reachable unit reads without an index, directly or through helper functions. A listed input read
+  only through explicit indices gets none. An input a backend can't emit (non-float element, factor below 1) also gets
+  none, and `Interface::build` doesn't panic on it. A `lerp_helper` call for such an input does.
+- **Names** are `lerp_<sx>x<sy>x<sz>_by_<fx>x<fy>x<fz>_<f32|f64>`, with `r` for `Repeat`: `lerp_5x1x5_by_4xrx4_f64`. They
+  join the module namespace after constants, so a clash with another item moves the helper to `_1`, and nothing else.
+  `lerp_helper` takes the `DensityInput`, as §5.2 says, and finds the element type through the input's unit.
+- **Rust helper.** `#[inline(always)] fn <name>(pool: &[T], off: usize, p: Pos3) -> T`. The caller passes
+  `&buffers.<pool>`, its `off_<input>` and `p.pos`. Fractions use `T(p & (n-1)) / T(n)` for a power of two and
+  `T(p % n) / T(n)` otherwise, and the low coordinate is a shift or a division. The loads use the same `read_pool` as
+  every other read, so `PerBuffer` is `rd(&*pool, off, LEN, i)`, `Slab` indexes the slice, and `Unchecked` uses
+  `get_unchecked`. Each interpolation is `a + t * (b - a)` with no fused multiply-add and no case for `t == 0`.
+- **Expand** is an inline `usize` index: `Repeat` has no term, `Factor(1)` reads `p.pos.<axis>`, and `Factor(n)` shifts
+  (power of two) or divides. All `Repeat` reads cell 0, as before.
+- **Refusals** (`BackendError::Codegen`, checked before anything is generated, for every input of the program): a factor
+  below 1 on an `Expand` or `Lerp`, and a `Lerp` over an element type other than `f32` and `f64`.
+- **Mutation checks**, run on the real path against `density/map_*` on Rust and reverted. Reversing the axis order (z, y,
+  x) turned `map_lerp_3axis`, `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red, each on both
+  stages. Replacing the interpolation with `if t == 0.0 { a } else { a + t * (b - a) }` turned `map_lerp_neg_zero` and
+  `map_lerp_inf_nan` red, each on both stages. The same two checks are still to be done on Java and CUDA.
+

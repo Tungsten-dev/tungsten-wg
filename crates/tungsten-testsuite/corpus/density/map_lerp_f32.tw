@@ -1,5 +1,4 @@
 // Lerp: an f32 input interpolates in f32, rounding after each step.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

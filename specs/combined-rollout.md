@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1 and 2A and step 6.1 of 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1 and 2A and steps 6.1 and 6.2 of 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -192,11 +192,11 @@ Three separate steps, each green before the next.
 
 ### 6.2 Mappings (M3)
 
-- [ ] `lerp_helper` and `lerp_helpers` in `Interface`, with naming (§5.2)
-- [ ] Expand as an inline index and lerp helpers on pools (§5.2), following `BufferBounds`
-- [ ] `BackendError::Codegen` for what can't be emitted (§5.3)
-- [ ] Drop the guard's mapping check for Rust and remove its §3.2 notes
-- [ ] Mutation checks, done once and recorded: swapped lerp axes, and a `t == 0` shortcut (§8)
+- [x] `lerp_helper` and `lerp_helpers` in `Interface`, with naming (§5.2)
+- [x] Expand as an inline index and lerp helpers on pools (§5.2), following `BufferBounds`
+- [x] `BackendError::Codegen` for what can't be emitted (§5.3)
+- [x] Drop the guard's mapping check for Rust and remove its §3.2 notes
+- [x] Mutation checks, done once and recorded: swapped lerp axes, and a `t == 0` shortcut (§8)
 
 ### 6.3 Refinement (M3)
 
@@ -322,3 +322,17 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   contract are in `tungsten-testsuite/tests/rust_workers.rs`. They build generated code with hand-written
   drivers, and are skipped without `rustc` unless `TW_REQUIRE` lists `rust`. Under `Slab`, the out-of-range
   read there returns the neighbouring input's value, which shows that `PerBuffer` really checks each input.
+
+**Phase 2B, step 6.2 (Rust mappings).**
+
+- **Notes removed** from the 26 mapping-only files: `density/map_*` and the two `large/map_vanilla_*`. The Rust notes of
+  the `refine/*` files stay for 6.3, including `refine/map_*`, which use `@march`.
+- **Helper discovery.** `lerp_helpers()` lists a `Lerp` input only when a reachable unit lists it and its main
+  function, or a helper it calls, reads it **without an index**. An input read only with explicit indices gets none,
+  so no dead helper is generated. The rest follows density §10, "Milestone 3".
+- **Mutation checks** (density §10 has the details). Reversing the lerp axis order turns `map_lerp_3axis`,
+  `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red on Rust. A shortcut at `t == 0` turns
+  `map_lerp_neg_zero` and `map_lerp_inf_nan` red. Both were reverted.
+- **Tests.** Interface naming, sharing and discovery are in `tungsten-interface/workers.rs`. Generated text and the two
+  refusals are in `tungsten-rust/src/tests.rs`. `lerp_follows_bounds_modes` in `tests/rust_workers.rs` builds and runs
+  all three modes: the high corner past the input fails under `PerBuffer`, and reads the neighbour under `Slab`.

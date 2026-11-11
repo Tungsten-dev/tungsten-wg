@@ -1,5 +1,4 @@
 // Expand: a reader smaller than the mapping allows is legal and reads the start of the input.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

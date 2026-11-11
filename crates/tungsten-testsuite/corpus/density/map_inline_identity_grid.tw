@@ -1,5 +1,4 @@
 // Inlining: factor 1 and `*` on size-1 axes are identity on the grid, so the read is inlined.
-@knownfail(rust, "pending: combined-rollout phase 2B", stage=original)
 @knownfail(java, "pending: combined-rollout phase 3", stage=original)
 @knownfail(cuda, "pending: combined-rollout phase 4", stage=original)
 program {

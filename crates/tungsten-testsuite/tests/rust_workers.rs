@@ -180,6 +180,61 @@ fn bounds_modes() {
     h.build(&records(), &[&unchecked]).unwrap_or_else(|(out, _)| panic!("Unchecked didn't build:\n{out}"));
 }
 
+/// A reader three cells wide over a two-cell lerp input `a`, so the last cell reads `a[2]`, the
+/// high corner at weight 0. It lies past `a` and on the first cell of `b`, which is `inf`: a read
+/// that reaches it gives `1.5 + 0 * (inf - 1.5) = NaN`.
+const LERP_PAST_END: &str = r#"
+program {
+    fn a_main() -> f64 { return 1.5; }
+    unit ua { main a_main; }
+    input a = ua @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, *);
+    fn b_main() -> f64 { return inf; }
+    unit ub { main b_main; }
+    input b = ub @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn top_main() -> f64 { return density(a); }
+    unit top { main top_main; inputs [a, b]; }
+    entry top @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// Reads cell `cell` of the entry.
+fn lerp_driver(cell: usize) -> String {
+    format!(
+        r#"
+        let _ = (r.f64(), r.f64(), r.f64());
+        let orch = Orchestration::new();
+        let mut w = crate::proto::Writer::new();
+        w.f64(orch.top_main_worker().run(Vec3::new(0.0, 0.0, 0.0), &TopMainHostConsts::default())[{cell}]);
+        w.finish()"#
+    )
+}
+
+/// The lerp helper follows `BufferBounds` like every other read (`specs/density-mappings.md`
+/// §5.2). `PerBuffer` fails the high corner past the input, `Slab` reads the neighbour (cell 2 is NaN,
+/// cell 0 is untouched), and `Unchecked` builds.
+#[test]
+fn lerp_follows_bounds_modes() {
+    let Some(h) = harness() else { return };
+    let nan = |o: CaseOutcome| match o {
+        CaseOutcome::Returned(b) => f64::from_le_bytes(b.try_into().unwrap()).is_nan(),
+        other => panic!("expected a value, got {other:?}"),
+    };
+    let build = |id: &str, bounds, cell| module(id, "", &generate(LERP_PAST_END, bounds).0, &lerp_driver(cell));
+
+    // The run computes every cell, so `PerBuffer` fails it whichever cell is read.
+    match run_one(&h, &build("t_rw_lerp_per", BufferBounds::PerBuffer, 0), 8) {
+        CaseOutcome::Failed { kind: 1, message } => assert!(message.contains("out of bounds"), "{message}"),
+        other => panic!("expected an OutOfBounds failure, got {other:?}"),
+    }
+    let slab_first = build("t_rw_lerp_slab_0", BufferBounds::Slab, 0);
+    assert_eq!(run_one(&h, &slab_first, 8), CaseOutcome::Returned(1.5f64.to_bits().to_le_bytes().to_vec()));
+    assert!(nan(run_one(&h, &build("t_rw_lerp_slab_2", BufferBounds::Slab, 2), 8)));
+
+    let unchecked = build("t_rw_lerp_unchecked", BufferBounds::Unchecked, 0);
+    assert!(unchecked.source.contains("unsafe {"));
+    h.build(&records(), &[&unchecked]).unwrap_or_else(|(out, _)| panic!("Unchecked didn't build:\n{out}"));
+}
+
 /// A handle type the program names, and the extern that reads it.
 fn table_items(cell: bool) -> String {
     let field = if cell { "std::cell::Cell<i64>" } else { "i64" };

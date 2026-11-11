@@ -31,7 +31,7 @@
 
 use std::collections::HashSet;
 
-use tungsten_interface::{DeviceCodegen, Instance, Interface};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper};
 use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
 
 use crate::interned::Interned;
@@ -44,6 +44,7 @@ pub mod converter;
 pub mod expression;
 pub mod function;
 pub mod interned;
+pub mod mapping;
 pub mod model;
 pub mod orchestration;
 pub mod pools;
@@ -150,6 +151,7 @@ pub struct RCLCodegen<'a, 'm> {
     done_functions: HashSet<Ref<Function>>,
     done_constants: HashSet<Ref<Constant>>,
     done_kernels: HashSet<Instance>,
+    done_lerps: HashSet<String>,
 } // TODO add config parameters (if necessary)
 
 impl<'a, 'm> RCLCodegen<'a, 'm> {
@@ -173,6 +175,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
             done_functions: HashSet::new(),
             done_constants: HashSet::new(),
             done_kernels: HashSet::new(),
+            done_lerps: HashSet::new(),
         }
     }
 
@@ -205,8 +208,19 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
             let func = self.intern(converted.function);
             self.model.functions.push(func);
             pending.extend(converted.called);
+            self.generate_lerps(converted.lerps);
             for c in converted.constants {
                 self.generate_constant(c);
+            }
+        }
+    }
+
+    /// Generates the lerp helpers a converted function calls, once each.
+    fn generate_lerps(&mut self, lerps: Vec<LerpHelper>) {
+        for h in lerps {
+            if self.done_lerps.insert(h.name.clone()) {
+                let f = self.intern(mapping::lerp_helper(&h, self.pools.bounds));
+                self.model.functions.push(f);
             }
         }
     }
@@ -255,6 +269,7 @@ impl DeviceCodegen for RCLCodegen<'_, '_> {
             for h in converted.called {
                 self.generate_helper(h);
             }
+            self.generate_lerps(converted.lerps);
             for c in converted.constants {
                 self.generate_constant(c);
             }

@@ -7,9 +7,9 @@ host inputs and auto consts. Computed once so callers and callees agree.
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use tungsten_ir::model::{AutoConst, AutoParam,
-    ComputeUnit, Constant, DensityInput, EntryPoint, Function, HostInput, Name, OptimizedProgram,
-    Ref,
+use tungsten_ir::model::{AutoConst, AutoParam, AxisFactor,
+    ComputeUnit, Constant, DensityInput, DensityMapping, EntryPoint, Function, HostInput, Name,
+    OptimizedProgram, Ref, VariableType,
 };
 
 pub mod compiler;
@@ -173,6 +173,19 @@ pub enum BackendError {
     InvalidConfig(String),
 }
 
+/// One generated lerp helper: a distinct (input dims, factors, element type) of a `Lerp` input
+/// that some reachable unit reads without an index (`specs/density-mappings.md` §5.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LerpHelper {
+    /// Fixed in the module namespace, e.g. `lerp_5x49x5_by_4x8x4_f64`. `r` stands for `Repeat`.
+    pub name: String,
+    /// Dims of the input being read.
+    pub dimensions: (i32, i32, i32),
+    pub factors: [AxisFactor; 3],
+    /// The input's element type, `f32` or `f64`.
+    pub element: VariableType,
+}
+
 /// Schedule and names shared by the device and orchestration sides of a code generator.
 pub struct Interface {
     instances: Vec<Instance>,
@@ -188,6 +201,9 @@ pub struct Interface {
     auto_params: HashMap<Ref<AutoParam>, String>,
     host_fields: HashMap<Ref<HostInput>, String>,
     offset_params: HashMap<Ref<DensityInput>, String>,
+    lerp_helpers: Vec<LerpHelper>,
+    /// Element type of each unit's buffer, to find the helper of an input.
+    unit_elements: HashMap<Ref<ComputeUnit>, VariableType>,
     workers: workers::Workers,
 }
 
@@ -295,9 +311,19 @@ impl Interface {
             auto_params,
             host_fields,
             offset_params,
+            lerp_helpers: vec![],
+            unit_elements: program
+                .compute_units
+                .iter()
+                .map(|(r, cu)| {
+                    let ComputeUnit::DensityFunction { function, .. } = cu;
+                    (r, program.functions[*function].return_type.clone())
+                })
+                .collect(),
             workers: workers::Workers::default(),
         };
         interface.workers = workers::Workers::build(program, &interface);
+        interface.lerp_helpers = collect_lerp_helpers(program, &interface, rules, &mut used);
         interface
     }
 
@@ -358,6 +384,26 @@ impl Interface {
         &self.offset_params[&d]
     }
 
+    /// The lerp helper that reads `input`, which must be a `Lerp` input read without an index by
+    /// a reachable unit.
+    pub fn lerp_helper(&self, input: &DensityInput) -> &str {
+        let DensityMapping::Lerp(factors) = input.mapping else {
+            panic!("input has no lerp mapping");
+        };
+        let element = &self.unit_elements[&input.density_function];
+        self.lerp_helpers
+            .iter()
+            .find(|h| h.dimensions == input.dimensions && h.factors == factors && h.element == *element)
+            .map(|h| h.name.as_str())
+            .unwrap_or_else(|| panic!("no lerp helper for {:?} of {:?}", factors, input.dimensions))
+    }
+
+    /// Every lerp helper, in discovery order and shared by all readers. Inputs a backend can't emit
+    /// (a non-float element, a factor below 1) get none: backends refuse those first.
+    pub fn lerp_helpers(&self) -> &[LerpHelper] {
+        &self.lerp_helpers
+    }
+
     /// Static hosts read by any unit in entry `entry`'s worker schedule, in arena order.
     pub fn entry_hosts(&self, entry: usize) -> &[Ref<HostInput>] {
         &self.workers.entry_hosts[entry]
@@ -416,6 +462,53 @@ impl Interface {
     pub fn host_field(&self, h: Ref<HostInput>) -> &str {
         &self.host_fields[&h]
     }
+}
+
+/// Helpers for the `Lerp` inputs that reachable units read without an index, in discovery order.
+fn collect_lerp_helpers(
+    program: &OptimizedProgram,
+    interface: &Interface,
+    rules: &NamingRules,
+    used: &mut HashSet<String>,
+) -> Vec<LerpHelper> {
+    let mut helpers: Vec<LerpHelper> = vec![];
+    for inst in &interface.instances {
+        let ComputeUnit::DensityFunction { function, density_inputs, .. } =
+            &program.compute_units[inst.cu];
+        let read = &interface.workers.unindexed_reads[function];
+        for &r in density_inputs {
+            let d = &program.density_inputs[r];
+            let DensityMapping::Lerp(factors) = d.mapping else { continue };
+            let element = &interface.unit_elements[&d.density_function];
+            let valid = matches!(element, VariableType::F32 | VariableType::F64)
+                && factors.iter().all(|f| !matches!(f, AxisFactor::Factor(n) if *n < 1));
+            let known = helpers
+                .iter()
+                .any(|h| h.dimensions == d.dimensions && h.factors == factors && h.element == *element);
+            if !read.contains(&r) || !valid || known {
+                continue;
+            }
+            let (sx, sy, sz) = d.dimensions;
+            let factor = |f: AxisFactor| match f {
+                AxisFactor::Repeat => "r".to_string(),
+                AxisFactor::Factor(n) => n.to_string(),
+            };
+            let name = format!(
+                "lerp_{sx}x{sy}x{sz}_by_{}x{}x{}_{}",
+                factor(factors[0]),
+                factor(factors[1]),
+                factor(factors[2]),
+                if *element == VariableType::F32 { "f32" } else { "f64" },
+            );
+            helpers.push(LerpHelper {
+                name: unique(used, (rules.sanitize)(&name)),
+                dimensions: d.dimensions,
+                factors,
+                element: element.clone(),
+            });
+        }
+    }
+    helpers
 }
 
 /// Everything reachable from the entry points (breadth-first), with each instance's direct inputs.

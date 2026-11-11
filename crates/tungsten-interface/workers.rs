@@ -35,6 +35,8 @@ pub struct Slot {
 /// Per-entry and per-function facts, computed once in `Interface::build`.
 #[derive(Default)]
 pub(crate) struct Workers {
+    /// For each function: the inputs it reads without an index, directly or through helpers.
+    pub unindexed_reads: HashMap<Ref<Function>, HashSet<Ref<DensityInput>>>,
     pub schedules: Vec<Vec<Vec<Instance>>>,
     pub layouts: Vec<WorkerLayout>,
     pub input_params: HashMap<Ref<Function>, Vec<Ref<DensityInput>>>,
@@ -45,6 +47,7 @@ impl Workers {
     pub fn build(program: &OptimizedProgram, interface: &Interface) -> Self {
         let uses = transitive_uses(program);
         let mut workers = Workers {
+            unindexed_reads: uses.iter().map(|(f, u)| (*f, u.unindexed.clone())).collect(),
             input_params: uses
                 .iter()
                 .map(|(f, u)| (*f, in_arena_order(program.density_inputs.iter(), &u.inputs)))
@@ -132,6 +135,8 @@ fn entry_hosts(
 #[derive(Default)]
 struct Uses {
     inputs: HashSet<Ref<DensityInput>>,
+    /// The inputs among `inputs` that some read takes without an explicit index.
+    unindexed: HashSet<Ref<DensityInput>>,
     hosts: HashSet<Ref<HostInput>>,
 }
 
@@ -149,6 +154,7 @@ fn transitive_uses(program: &OptimizedProgram) -> HashMap<Ref<Function>, Uses> {
             while let Some(f) = stack.pop() {
                 let Some((uses, calls)) = direct.get(&f) else { continue };
                 total.inputs.extend(uses.inputs.iter().copied());
+                total.unindexed.extend(uses.unindexed.iter().copied());
                 total.hosts.extend(uses.hosts.iter().copied());
                 stack.extend(calls.iter().copied().filter(|c| seen.insert(*c)));
             }
@@ -182,6 +188,9 @@ fn direct_uses(f: &Function) -> (Uses, HashSet<Ref<Function>>) {
         match e {
             Expression::DensityVariable(r, index) => {
                 uses.inputs.insert(*r);
+                if index.is_none() {
+                    uses.unindexed.insert(*r);
+                }
                 exprs.extend(index.as_deref());
             }
             Expression::HostInput(r) => {
@@ -219,7 +228,7 @@ fn direct_uses(f: &Function) -> (Uses, HashSet<Ref<Function>>) {
 mod tests {
     use super::*;
     use crate::naming::NamingRules;
-    use tungsten_ir::model::{Arena, DensityMapping, EntryPoint, Name};
+    use tungsten_ir::model::{Arena, AxisFactor, DensityMapping, EntryPoint, Name};
 
     fn empty() -> OptimizedProgram {
         OptimizedProgram {
@@ -511,6 +520,132 @@ mod tests {
         assert_eq!(i.offset_param(b), "off_x_y_1");
         assert_eq!(i.offset_param(anon), "off_input");
         assert_eq!(i.offset_param(anon2), "off_input_1");
+    }
+
+    fn lerp_input(
+        p: &mut OptimizedProgram,
+        cu: Ref<ComputeUnit>,
+        dims: (i32, i32, i32),
+        factors: [AxisFactor; 3],
+    ) -> Ref<DensityInput> {
+        let d = input(p, cu, dims);
+        p.density_inputs[d].mapping = DensityMapping::Lerp(factors);
+        d
+    }
+
+    /// A unit of element type `t` with no inputs, and a unit reading `reads` (listed, un-indexed)
+    /// that is the only entry.
+    fn lerp_program(
+        t: VariableType,
+        shapes: &[((i32, i32, i32), [AxisFactor; 3])],
+    ) -> (OptimizedProgram, Vec<Ref<DensityInput>>) {
+        let mut p = empty();
+        let f = function(&mut p, t, ret(Expression::Double(1.0)));
+        let leaf = unit(&mut p, f, vec![]);
+        let inputs: Vec<_> = shapes.iter().map(|(dims, fs)| lerp_input(&mut p, leaf, *dims, *fs)).collect();
+        let body = inputs.iter().map(|d| Statement::Return(read(*d))).collect();
+        let f = function(&mut p, VariableType::F64, body);
+        let top = unit(&mut p, f, inputs.clone());
+        entry(&mut p, top, (1, 1, 1));
+        (p, inputs)
+    }
+
+    fn names(i: &Interface) -> Vec<&str> {
+        i.lerp_helpers().iter().map(|h| h.name.as_str()).collect()
+    }
+
+    /// `specs/density-mappings.md` §5.2: names carry dims, factors and element; `r` is `Repeat`.
+    #[test]
+    fn lerp_helpers_are_named_by_shape() {
+        use AxisFactor::{Factor, Repeat};
+        let (p, inputs) = lerp_program(
+            VariableType::F64,
+            &[((5, 49, 5), [Factor(4), Factor(8), Factor(4)]), ((5, 1, 5), [Factor(4), Repeat, Factor(4)])],
+        );
+        let i = build(&p);
+        assert_eq!(names(&i), ["lerp_5x49x5_by_4x8x4_f64", "lerp_5x1x5_by_4xrx4_f64"]);
+        assert_eq!(i.lerp_helper(&p.density_inputs[inputs[0]]), "lerp_5x49x5_by_4x8x4_f64");
+        assert_eq!(i.lerp_helper(&p.density_inputs[inputs[1]]), "lerp_5x1x5_by_4xrx4_f64");
+        let h = &i.lerp_helpers()[0];
+        assert_eq!((h.dimensions, h.element.clone()), ((5, 49, 5), VariableType::F64));
+    }
+
+    /// One helper per (dims, factors, element), whatever the number of inputs and readers.
+    #[test]
+    fn lerp_helpers_are_shared_by_shape() {
+        use AxisFactor::Factor;
+        let shape = [Factor(2); 3];
+        let (mut p, inputs) = lerp_program(
+            VariableType::F64,
+            &[((3, 3, 3), shape), ((3, 3, 3), shape), ((3, 3, 3), [Factor(2), Factor(2), Factor(3)])],
+        );
+        // A second unit lists the first input too.
+        let f = function(&mut p, VariableType::F64, ret(read(inputs[0])));
+        let second = unit(&mut p, f, vec![inputs[0]]);
+        entry(&mut p, second, (1, 1, 1));
+        let i = build(&p);
+        assert_eq!(names(&i), ["lerp_3x3x3_by_2x2x2_f64", "lerp_3x3x3_by_2x2x3_f64"]);
+        for d in &inputs[..2] {
+            assert_eq!(i.lerp_helper(&p.density_inputs[*d]), "lerp_3x3x3_by_2x2x2_f64");
+        }
+
+        // The same shape over an `f32` unit is another helper.
+        let (p, inputs) = lerp_program(VariableType::F32, &[((3, 3, 3), shape)]);
+        let i = build(&p);
+        assert_eq!(names(&i), ["lerp_3x3x3_by_2x2x2_f32"]);
+        assert_eq!(i.lerp_helper(&p.density_inputs[inputs[0]]), "lerp_3x3x3_by_2x2x2_f32");
+    }
+
+    /// An input only read with an explicit index needs no helper, one read inside a helper function
+    /// does, and an unlisted or unreachable one is never discovered.
+    #[test]
+    fn lerp_helpers_follow_unindexed_reads() {
+        use AxisFactor::Factor;
+        let shape = [Factor(2); 3];
+        let mut p = empty();
+        let f = function(&mut p, VariableType::F64, ret(Expression::Double(1.0)));
+        let leaf = unit(&mut p, f, vec![]);
+        let indexed = lerp_input(&mut p, leaf, (2, 2, 2), shape);
+        let in_helper = lerp_input(&mut p, leaf, (3, 3, 3), shape);
+        let unreachable = lerp_input(&mut p, leaf, (4, 4, 4), shape);
+        let explicit = Expression::DensityVariable(indexed, Some(Box::new(Expression::Int(0))));
+        let helper = function(&mut p, VariableType::F64, ret(read(in_helper)));
+        let call = Expression::FunctionCall { function: helper, parameters: vec![] };
+        let f = function(
+            &mut p,
+            VariableType::F64,
+            vec![Statement::Assign { target: dangling_var(), value: explicit }, Statement::Return(call)],
+        );
+        let top = unit(&mut p, f, vec![indexed, in_helper]);
+        entry(&mut p, top, (1, 1, 1));
+        let f = function(&mut p, VariableType::F64, ret(read(unreachable)));
+        unit(&mut p, f, vec![unreachable]);
+        let i = build(&p);
+        assert_eq!(names(&i), ["lerp_3x3x3_by_2x2x2_f64"]);
+    }
+
+    /// What no backend can emit gets no helper and no panic. Backends refuse those programs.
+    #[test]
+    fn lerp_helpers_skip_what_cannot_be_emitted() {
+        use AxisFactor::{Factor, Repeat};
+        let (p, _) = lerp_program(VariableType::I32, &[((2, 2, 2), [Factor(2); 3])]);
+        assert_eq!(names(&build(&p)), Vec::<&str>::new());
+        let (p, _) = lerp_program(VariableType::F64, &[((2, 2, 2), [Factor(0), Repeat, Factor(-3)])]);
+        assert_eq!(names(&build(&p)), Vec::<&str>::new());
+    }
+
+    /// Helper names share the module namespace with everything else, and stay deterministic.
+    #[test]
+    fn lerp_helper_names_are_unique_and_deterministic() {
+        use AxisFactor::Factor;
+        let (mut p, _) = lerp_program(VariableType::F64, &[((2, 2, 2), [Factor(2); 3])]);
+        // A helper function holds the name already, so the lerp helper moves aside.
+        let taken = function(&mut p, VariableType::F64, vec![]);
+        p.functions[taken].canonical_name = Some("lerp_2x2x2_by_2x2x2_f64".into());
+        let (a, b) = (build(&p), build(&p));
+        assert_eq!(names(&a), names(&b));
+        assert_eq!(a.helper(taken), "lerp_2x2x2_by_2x2x2_f64");
+        assert_eq!(names(&a), ["lerp_2x2x2_by_2x2x2_f64_1"]);
     }
 
     /// Record types share a pool exactly when their names are equal.

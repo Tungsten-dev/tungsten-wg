@@ -1,5 +1,4 @@
 // Lerp: factor 1 doesn't interpolate, so x reads the reader's own column.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

@@ -62,6 +62,8 @@ pub struct Function<'m> {
     pub body: Vec<Statement<'m>>,
     pub variables: Vec<Rc<Variable>>,
     pub inline: bool,
+    /// `#[inline(always)]` instead of `#[inline]`, when `inline` is set.
+    pub inline_always: bool,
     /// Set for methods inside an `impl`; printed before `parameters`.
     pub receiver: Option<Receiver>,
 }
@@ -426,6 +428,7 @@ impl<'m> Function<'m> {
             body: Vec::new(),
             variables: Vec::new(),
             inline: false,
+            inline_always: false,
             receiver: None,
         }
     }

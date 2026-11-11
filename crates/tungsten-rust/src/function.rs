@@ -11,7 +11,7 @@ use super::types::convert_type;
 use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
 use crate::pools::Pools;
-use tungsten_interface::{BufferBounds, Instance, Interface};
+use tungsten_interface::{BufferBounds, Instance, Interface, LerpHelper};
 use tungsten_ir::model::{
     ComputeUnit, Constant, Function, OptimizedProgram, Ref,
 };
@@ -26,6 +26,8 @@ pub struct Converted<'m> {
     pub called: Vec<Ref<Function>>,
     /// Module-level constants read by the body that the caller must still generate.
     pub constants: Vec<Ref<Constant>>,
+    /// Lerp helpers called by the body that the caller must still generate.
+    pub lerps: Vec<LerpHelper>,
 }
 
 /// Adds the uniform leading parameters shared by every density and helper function, then one
@@ -74,6 +76,7 @@ pub fn convert_helper<'a, 'm>(
         function: out,
         called: conv.called,
         constants: conv.used_constants,
+        lerps: conv.used_lerps,
     }
 }
 
@@ -110,6 +113,7 @@ pub fn convert_density<'a, 'm>(
         function: out,
         called: conv.called,
         constants: conv.used_constants,
+        lerps: conv.used_lerps,
     }
 }
 

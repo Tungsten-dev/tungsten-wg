@@ -1,5 +1,4 @@
 // One lerp shape (dims, factors, element type) read by two units, over different sources.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

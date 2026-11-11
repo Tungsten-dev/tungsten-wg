@@ -1,5 +1,4 @@
 // Lerp: factor 3, whose fractions 1/3 and 2/3 aren't exact.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

@@ -230,7 +230,9 @@ impl RustCodeGenerator {
     /// Generate Rust code for a function
     fn generate_function(&self, p: &mut Printer, func: &icl::FunctionRef<'_>, public: bool) {
         // Function signature
-        if func.inline {
+        if func.inline && func.inline_always {
+            p.line("#[inline(always)]");
+        } else if func.inline {
             p.line("#[inline]");
         }
 

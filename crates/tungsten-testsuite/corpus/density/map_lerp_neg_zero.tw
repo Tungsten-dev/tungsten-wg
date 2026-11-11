@@ -1,5 +1,4 @@
 // Lerp bits: a -0.0 low corner at t = 0 gives +0.0 (-0.0 + 0 * (b - a)), so `t == 0` can't be skipped.
-@knownfail(rust, "pending: combined-rollout phase 2B")
 @knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {

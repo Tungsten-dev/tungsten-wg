@@ -279,3 +279,166 @@ fn no_entries() {
     assert_contains(&out, &["pub fn new() -> Self", "s::<Orchestration>(); }"]);
     assert!(!out.contains("Worker"), "{out}");
 }
+
+/// Expand and lerp inputs over one leaf, read by one unit (`specs/density-mappings.md` §5.2).
+const MAPPED: &str = r#"
+program {
+    fn leaf() -> f64 { return (ambient(pos3).x as f64); }
+    unit leaf_u { main leaf; }
+    input e = leaf_u @dims(4, 1, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(4, *, 4);
+    input l = leaf_u @dims(5, 49, 5) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(4, 8, 3);
+    input m = leaf_u @dims(3, 1, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, *, 1);
+    fn top() -> f64 { return ((density(e) + density(l)) + density(m)); }
+    unit t { main top; inputs [e, l, m]; }
+    entry t @dims(16, 4, 16) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// An expand read is an index folded from the factors: shifts for powers of two, no term for
+/// `Repeat`, and no helper.
+#[test]
+fn expand_is_an_inline_index() {
+    let density = generate(MAPPED).density_module;
+    assert_contains(&density, &[
+        "rd((&buffers.f64s), off_e, 16_usize, (((p.pos.x >> 2_i32) as usize) + (((p.pos.z >> 2_i32) as usize) * 4_usize)))",
+    ]);
+    let src = r#"
+program {
+    fn leaf() -> f64 { return 1.0; }
+    unit leaf_u { main leaf; }
+    input a = leaf_u @dims(5, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(1, *, 3);
+    input b = leaf_u @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
+    input c = leaf_u @dims(2, 3, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(1, 1, *);
+    fn top() -> f64 { return ((density(a) + density(b)) + density(c)); }
+    unit t { main top; inputs [a, b, c]; }
+    entry t @dims(5, 3, 6) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+    assert_contains(&generate(src).density_module, &[
+        // factor 1 reads the coordinate, factor 3 divides, `Repeat` has no term
+        "rd((&buffers.f64s), off_a, 10_usize, ((p.pos.x as usize) + (((p.pos.z / 3_i32) as usize) * 5_usize)))",
+        // all `Repeat` reads cell 0
+        "rd((&buffers.f64s), off_b, 1_usize, 0_usize)",
+        "rd((&buffers.f64s), off_c, 6_usize, ((p.pos.x as usize) + ((p.pos.y as usize) * 2_usize)))",
+    ]);
+}
+
+/// One `#[inline(always)]` helper per shape, folded from dims and factors, loading and
+/// interpolating in the order of §3.3, with no shortcut and no fused multiply-add.
+#[test]
+fn lerp_is_a_helper_in_canonical_order() {
+    let density = generate(MAPPED).density_module;
+    assert_contains(&density, &[
+        "lerp_5x49x5_by_4x8x3_f64((&buffers.f64s), off_l, p.pos)",
+        "lerp_3x1x3_by_2xrx1_f64((&buffers.f64s), off_m, p.pos)",
+        "#[inline(always)]\n    fn lerp_5x49x5_by_4x8x3_f64(pool: &[f64], off: usize, p: Pos3) -> f64 {",
+        // low coordinates and fractions: shifts and masks for 4 and 8, a division for 3
+        "let x0: usize = ((p.x >> 2_i32) as usize);",
+        "let tx: f64 = (((p.x & 3_i32) as f64) / 4_f64);",
+        "let ty: f64 = (((p.y & 7_i32) as f64) / 8_f64);",
+        "let z0: usize = ((p.z / 3_i32) as usize);",
+        "let tz: f64 = (((p.z % 3_i32) as f64) / 3_f64);",
+        // corners folded to constant strides, checked against the input's own length
+        "let v000: f64 = rd((&(*pool)), off, 1225_usize, ((x0 + (y0 * 5_usize)) + (z0 * 245_usize)));",
+        "let v111: f64 = rd((&(*pool)), off, 1225_usize, (((x0 + 1_usize) + ((y0 + 1_usize) * 5_usize)) + ((z0 + 1_usize) * 245_usize)));",
+        // x, then y, then z, as `a + t * (b - a)`
+        "let lx10: f64 = (v010 + (tx * (v110 - v010)));",
+        "let ly0: f64 = (lx00 + (ty * (lx10 - lx00)));",
+        "let lz: f64 = (ly0 + (tz * (ly1 - ly0)));",
+        // an axis that isn't interpolated drops out: 2 loads and 1 lerp
+        "fn lerp_3x1x3_by_2xrx1_f64(pool: &[f64], off: usize, p: Pos3) -> f64 {",
+        "let z0: usize = (p.z as usize);",
+        "let v100: f64 = rd((&(*pool)), off, 9_usize, ((x0 + 1_usize) + (z0 * 3_usize)));",
+        "return lx00;",
+    ]);
+    assert!(!density.contains("mul_add"), "{density}");
+    let helpers = &density[density.find("fn lerp_5x49x5").unwrap()..density.find("pub fn leaf_d4x1x4_kernel").unwrap()];
+    assert!(!helpers.contains("if ") && !helpers.contains("== 0"), "no shortcut at t == 0:\n{helpers}");
+    assert_eq!(density.matches("fn lerp_").count(), 2, "{density}");
+}
+
+/// Readers and units that share a shape share one helper; `f32` is a helper of its own.
+#[test]
+fn lerp_helpers_are_emitted_once() {
+    let src = r#"
+program {
+    fn leaf() -> f64 { return 1.0; }
+    unit leaf_u { main leaf; }
+    fn leaf32() -> f32 { return 1.0f; }
+    unit leaf32_u { main leaf32; }
+    input a = leaf_u @dims(3, 3, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, 2, 2);
+    input b = leaf_u @dims(3, 3, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, 2, 2);
+    input c = leaf32_u @dims(3, 3, 3) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @lerp(2, 2, 2);
+    fn first() -> f64 { return (density(a) + density(b)); }
+    unit first_u { main first; inputs [a, b]; }
+    fn second() -> f64 { return (density(a) + (density(c) as f64)); }
+    unit second_u { main second; inputs [a, c]; }
+    entry first_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry second_u @dims(4, 4, 4) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+    let density = generate(src).density_module;
+    assert_eq!(density.matches("fn lerp_3x3x3_by_2x2x2_f64(").count(), 1, "{density}");
+    assert_eq!(density.matches("fn lerp_3x3x3_by_2x2x2_f32(").count(), 1, "{density}");
+    assert_contains(&density, &[
+        "lerp_3x3x3_by_2x2x2_f64((&buffers.f64s), off_a, p.pos) + lerp_3x3x3_by_2x2x2_f64((&buffers.f64s), off_b, p.pos)",
+        "(lerp_3x3x3_by_2x2x2_f32((&buffers.f32s), off_c, p.pos) as f64)",
+        "fn lerp_3x3x3_by_2x2x2_f32(pool: &[f32], off: usize, p: Pos3) -> f32 {",
+        "let tx: f32 = (((p.x & 1_i32) as f32) / 2_f32);",
+    ]);
+}
+
+/// Helper loads follow the compile's `BufferBounds`, like every other read.
+#[test]
+fn lerp_helper_follows_bounds_modes() {
+    let slab = generate_with(MAPPED, BufferBounds::Slab).density_module;
+    assert_contains(&slab, &[
+        "let v000: f64 = (*pool)[(off + ((x0 + (y0 * 5_usize)) + (z0 * 245_usize))) as usize];",
+        "buffers.f64s[(off_e + (((p.pos.x >> 2_i32) as usize) + (((p.pos.z >> 2_i32) as usize) * 4_usize))) as usize]",
+    ]);
+    assert!(!slab.contains("rd((&"), "{slab}");
+
+    let unchecked = generate_with(MAPPED, BufferBounds::Unchecked).density_module;
+    assert_contains(&unchecked, &[
+        "let v000: f64 = unsafe { (*(*pool).get_unchecked((off + ((x0 + (y0 * 5_usize)) + (z0 * 245_usize))))) };",
+    ]);
+    assert!(!unchecked.contains("rd((&"), "{unchecked}");
+}
+
+fn generate_err(src: &str) -> String {
+    let program = load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program;
+    let backend = RustBackend::new(RustConfig::default());
+    let interface = Interface::build(&program, &backend.naming_rules());
+    match backend.generate(&program, &interface) {
+        Err(tungsten_interface::BackendError::Codegen(m)) => m,
+        other => panic!("expected a codegen error, got {other:?}"),
+    }
+}
+
+/// The low-level path doesn't validate; a backend refuses only what it can't emit (§5.3).
+#[test]
+fn unemittable_mappings_are_codegen_errors() {
+    let program = |leaf_type: &str, ret: &str, mapping: &str| {
+        format!(
+            r#"
+program {{
+    fn leaf() -> {leaf_type} {{ return {ret}; }}
+    unit leaf_u {{ main leaf; }}
+    input d = leaf_u @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) {mapping};
+    fn top() -> {leaf_type} {{ return density(d); }}
+    unit t {{ main top; inputs [d]; }}
+    entry t @dims(2, 2, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}}
+"#
+        )
+    };
+    let e = generate_err(&program("i32", "1", "@lerp(2, 2, 2)"));
+    assert!(e.contains("`d`") && e.contains("not f32 or f64"), "{e}");
+    let e = generate_err(&program("f64", "1.0", "@expand(0, 1, 1)"));
+    assert!(e.contains("`d`") && e.contains("factor 0"), "{e}");
+    let e = generate_err(&program("f64", "1.0", "@lerp(2, 0, 2)"));
+    assert!(e.contains("factor 0"), "{e}");
+    // The same shapes are fine where they can be emitted.
+    generate(&program("f64", "1.0", "@lerp(2, 2, 2)"));
+    generate(&program("i32", "1", "@expand(2, 2, 2)"));
+}

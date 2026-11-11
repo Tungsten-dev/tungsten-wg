@@ -6,7 +6,7 @@ Shared by expression.rs, statement.rs and function.rs.
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use tungsten_interface::Interface;
+use tungsten_interface::{Interface, LerpHelper};
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
     AmbientKind, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
@@ -65,6 +65,8 @@ pub struct FunctionConverter<'a> {
     pub called: Vec<Ref<Function>>,
     /// Constants referenced by the converted code, still to be generated.
     pub used_constants: Vec<Ref<Constant>>,
+    /// Lerp helpers called by the converted code, still to be generated.
+    pub used_lerps: Vec<LerpHelper>,
     vars: HashMap<Ref<Var>, Rc<rcl::Variable>>,
     used_names: HashSet<String>,
 }
@@ -104,6 +106,7 @@ impl<'a> FunctionConverter<'a> {
             offsets,
             called: Vec::new(),
             used_constants: Vec::new(),
+            used_lerps: Vec::new(),
             vars: HashMap::new(),
             used_names,
         }

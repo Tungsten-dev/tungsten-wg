@@ -12,7 +12,8 @@ use crate::model as rcl;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_interface::{BufferBounds, Interface};
 use tungsten_ir::model::{
-    AmbientKind, BinaryOperator, ConstExpr, Constant, Expression, OptimizedProgram, Ref, VariableType,
+    AmbientKind, AxisFactor, BinaryOperator, ConstExpr, Constant, DensityMapping, Expression,
+    OptimizedProgram, Ref, VariableType,
 };
 
 /// A read of element `index` of the input at `offset` in `pool`, whose length is `len`
@@ -241,22 +242,42 @@ impl<'a> FunctionConverter<'a> {
             Expression::DensityVariable(input, index) => {
                 let program: &'a OptimizedProgram = self.program;
                 let di = &program.density_inputs[*input];
-                let index = match index {
-                    Some(i) => R::Cast {
+                let element = self.unit_return_type(di.density_function);
+                let pool = field(&self.uniform.buffers, self.pools.field(element));
+                let offset = R::Variable(self.offset(*input));
+                let pos = field(&self.uniform.it, "pos");
+                let index = match (index, di.mapping) {
+                    (Some(i), _) => R::Cast {
                         expr: Box::new(self.convert_expression(i)),
                         to_type: rcl::Type::Usize,
                     },
-                    None if di.dimensions == (1, 1, 1) => R::UsizeLiteral(0),
-                    None => R::LateBoundCall {
+                    // A lerp reads several cells, so a helper does all of it (§5.2).
+                    (None, DensityMapping::Lerp(_)) => {
+                        let name = self.naming.lerp_helper(di);
+                        let helper = self.naming.lerp_helpers().iter().find(|h| h.name == name);
+                        self.used_lerps.push(helper.expect("lerp_helper found it").clone());
+                        return R::LateBoundCall {
+                            function_name: name.to_string(),
+                            argument_types: vec![rcl::Type::Void; 3],
+                            return_type: convert_type(element),
+                            arguments: vec![R::Ref(Box::new(pool)), offset, pos],
+                        };
+                    }
+                    (None, DensityMapping::Expand(factors)) => {
+                        if factors.iter().all(|f| *f == AxisFactor::Repeat) {
+                            R::UsizeLiteral(0)
+                        } else {
+                            crate::mapping::expand_index(di, factors, &pos)
+                        }
+                    }
+                    (None, DensityMapping::Identity) if di.dimensions == (1, 1, 1) => R::UsizeLiteral(0),
+                    (None, DensityMapping::Identity) => R::LateBoundCall {
                         function_name: "index".to_string(),
                         argument_types: vec![rcl::Type::Struct("PositionIterator".to_string())],
                         return_type: rcl::Type::Usize,
                         arguments: vec![R::Variable(self.uniform.it.clone())],
                     },
                 };
-                let element = self.unit_return_type(di.density_function);
-                let pool = field(&self.uniform.buffers, self.pools.field(element));
-                let offset = R::Variable(self.offset(*input));
                 read_pool(self.pools.bounds, pool, offset, crate::pools::cells(di.dimensions), index)
             }
             Expression::AutoConst(r) => {
