@@ -7,8 +7,8 @@ use super::Ctx;
 use super::dot::{Attrs, Dot};
 use super::format::{dims, grid_exact, grid_label, round};
 use crate::model::{
-    DagNode, DensityReadInfo, EntryInfo, FunctionDag, FunctionInfo, FunctionKind, Literal,
-    NodeKind, RegionKind,
+    DagNode, DensityReadInfo, EdgeInfo, EntryInfo, Grid, FunctionDag, FunctionInfo, FunctionKind, Literal,
+    NodeKind, RefinementInfo, RegionKind,
 };
 
 fn grey(attrs: &mut Attrs) {
@@ -54,26 +54,174 @@ pub(crate) fn dependencies(ctx: &Ctx, entry: &EntryInfo, path: &str) -> String {
     }
     for id in &entry.instances {
         for e in &ctx.instances[id.as_str()].inputs {
-            let mut label = e.input.clone();
-            if e.resampled {
-                label.push_str(&format!("\nin {}", grid_label(&e.input_grid)));
+            let mut attrs = edge_attrs(e);
+            if e.previous {
+                // A self-edge: the instance reads its own output from before the call.
+                g.edge(id, id, attrs);
+                continue;
             }
-            let mut styles = Vec::new();
-            let mut attrs: Attrs = vec![("tooltip", grid_exact(&e.input_grid))];
-            if e.indexed {
-                label.push_str(" [idx]");
-                styles.push("dashed");
-            }
-            if e.resampled {
-                styles.push("bold");
-                attrs.push(("color", "blue".into()));
-                attrs.push(("fontcolor", "blue".into()));
-            }
-            if !styles.is_empty() {
-                attrs.push(("style", styles.join(",")));
-            }
-            attrs.insert(0, ("label", label));
+            attrs.push(("tooltip", grid_exact(&e.input_grid)));
             g.edge(&e.producer, id, attrs);
+        }
+    }
+    g.finish()
+}
+
+/// Label and style of one input edge: the input name, its grid when resampled, the mapping,
+/// `[idx]` for indexed reads, and dashed for `@previous`.
+fn edge_attrs(e: &EdgeInfo) -> Attrs {
+    edge_attrs_of(&EdgeView {
+        input: &e.input,
+        input_grid: &e.input_grid,
+        resampled: e.resampled,
+        indexed: e.indexed,
+        mapping: &e.mapping,
+        mapped: e.mapped,
+        previous: e.previous,
+    })
+}
+
+struct EdgeView<'a> {
+    input: &'a str,
+    input_grid: &'a Grid,
+    resampled: bool,
+    indexed: bool,
+    mapping: &'a Option<String>,
+    mapped: bool,
+    previous: bool,
+}
+
+fn edge_attrs_of(e: &EdgeView) -> Attrs {
+    let mut label = e.input.to_string();
+    if e.previous {
+        label.push_str(" @previous");
+    }
+    if let Some(m) = e.mapping {
+        label.push_str(&format!("\n{m}"));
+    }
+    if e.resampled {
+        label.push_str(&format!("\nin {}", grid_label(&e.input_grid)));
+    }
+    let mut styles = Vec::new();
+    let mut attrs: Attrs = vec![];
+    if e.indexed {
+        label.push_str(" [idx]");
+        styles.push("dashed");
+    }
+    if e.previous {
+        styles.push("dashed");
+        attrs.push(("color", "darkgreen".into()));
+        attrs.push(("fontcolor", "darkgreen".into()));
+    } else if e.resampled || e.mapped {
+        styles.push("bold");
+        attrs.push(("color", "blue".into()));
+        attrs.push(("fontcolor", "blue".into()));
+    }
+    if !styles.is_empty() {
+        styles.dedup();
+        attrs.push(("style", styles.join(",")));
+    }
+    attrs.insert(0, ("label", label));
+    attrs
+}
+
+/// `refine_<name>.dot`: the entry's closure for one refinement. Rerun instances are filled, with
+/// the `with` unit named when one replaces it, and frozen ones are gray. Edges from a frozen
+/// instance are dashed, since a refine call reads them without recomputing.
+pub(crate) fn refinement(
+    ctx: &Ctx,
+    entry: &EntryInfo,
+    refinement: &RefinementInfo,
+    path: &str,
+) -> String {
+    let mut g = Dot::digraph(&format!("refinement {}", refinement.display));
+    g.attr("rankdir", "BT");
+    g.attr("labelloc", "t");
+    let (mx, my, mz) = refinement.march;
+    g.attr(
+        "label",
+        &format!(
+            "refinement: {} of {}\nmarch ({mx}, {my}, {mz}), {} waves",
+            refinement.display,
+            entry.display,
+            refinement.waves.len()
+        ),
+    );
+    g.defaults("node", vec![("shape", "box".into())]);
+
+    let mut wave_of: HashMap<&str, usize> = HashMap::new();
+    let mut with_of: HashMap<&str, &str> = HashMap::new();
+    for (w, wave) in refinement.waves.iter().enumerate() {
+        for run in wave {
+            wave_of.insert(&run.instance, w);
+            if ctx.instances[run.instance.as_str()].unit != run.unit {
+                with_of.insert(&run.instance, &run.unit);
+            }
+        }
+    }
+    let frozen: std::collections::HashSet<&str> =
+        refinement.frozen.iter().map(String::as_str).collect();
+
+    for id in &entry.instances {
+        let inst = ctx.instances[id.as_str()];
+        let mut label = format!("{}\n{}", inst.display, inst.buffer);
+        let mut attrs: Attrs = vec![("tooltip", grid_exact(&inst.grid))];
+        if let Some(w) = wave_of.get(id.as_str()) {
+            label.push_str(&format!("\nrerun, wave {w}"));
+            if let Some(unit) = with_of.get(id.as_str()) {
+                label.push_str(&format!("\nwith {}", ctx.display(unit)));
+            }
+            attrs.push(("style", "filled".into()));
+            attrs.push(("fillcolor", "lightyellow".into()));
+        } else if frozen.contains(id.as_str()) {
+            label.push_str("\nfrozen");
+            grey(&mut attrs);
+            attrs.push(("style", "dashed".into()));
+        } else {
+            // In the closure, but a refine call doesn't read it.
+            grey(&mut attrs);
+        }
+        if *id == entry.instance {
+            attrs.push(("penwidth", "2".into()));
+        }
+        attrs.insert(0, ("label", label));
+        href(&mut attrs, ctx.unit_href(path, &inst.unit));
+        g.node(id, attrs);
+    }
+    // A run's edges come from its unit's inputs, since a `with` unit has no instance of its own.
+    // The producer is the instance with the input's unit and grid. `@previous` reads the target.
+    for wave in &refinement.waves {
+        for run in wave {
+            let target = ctx.instances[run.instance.as_str()];
+            for input in &ctx.units[run.unit.as_str()].inputs {
+                let view = EdgeView {
+                    input: &input.name,
+                    input_grid: &input.grid,
+                    resampled: input.grid != target.grid,
+                    indexed: input.indexed,
+                    mapping: &input.mapping,
+                    mapped: input.mapping.is_some(),
+                    previous: input.previous,
+                };
+                let mut attrs = edge_attrs_of(&view);
+                if input.previous {
+                    g.edge(&run.instance, &run.instance, attrs);
+                    continue;
+                }
+                let Some(producer) = ctx
+                    .instances
+                    .values()
+                    .find(|x| x.unit == input.producer && x.grid == input.grid)
+                else {
+                    continue;
+                };
+                if frozen.contains(producer.id.as_str()) {
+                    attrs.retain(|(k, _)| *k != "style");
+                    attrs.push(("style", "dashed".into()));
+                    attrs.push(("color", "gray".into()));
+                }
+                g.edge(&producer.id, &run.instance, attrs);
+            }
         }
     }
     g.finish()
@@ -441,6 +589,12 @@ impl DagRenderer<'_, '_> {
     fn density_read(&self, info: &DensityReadInfo, attrs: &mut Attrs) -> String {
         let ctx = self.ctx;
         let mut label = info.input.clone();
+        if info.previous {
+            label.push_str(" @previous");
+        }
+        if let Some(m) = &info.mapping {
+            label.push_str(&format!("\n{m}"));
+        }
         label.push_str(&format!(
             "\n← {} @ {}",
             ctx.display(&info.producer_unit),

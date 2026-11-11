@@ -14,6 +14,9 @@ This repository only contains the backend and code generation side. The end-to-e
 - Built for Minecraft's vanilla worldgen (1.21.1).
 - Every compile is checked: the program goes through the core checker against a registry of the externs and records it uses before any backend sees it.
 - Passes like inlining run inside `compile`. A backend proposes its default passes, the frontend overrides them with `.passes(..)`, and a backend never runs passes itself.
+- Generated code is split into a thread-safe `Orchestration` and one **worker** per entry. A worker belongs to one thread and owns that entry's buffers (see "Running the generated code").
+- **Density mappings** (`@expand`, `@lerp`) say how a reader's cell maps into an input of another shape, so reads across grids are explicit. Every backend generates them, and lerp gives the same bits everywhere.
+- **Refinement** reruns part of an entry's closure at a moved `Pos3` (marching), so a large volume can be computed slice by slice. Every backend generates refine calls.
 - Backend settings are extension traits on `Compiler` (`RustCompile`, `JavaCompile`, `CudaCompile`, `InspectCompile`). A backend defined in another crate gets the same builder, passes, checking and its own extension trait.
 
 ## Workspace layout
@@ -98,6 +101,35 @@ let cuda = Compiler::new(program, registry, CudaBackend::new(CudaConfig::default
 ```
 
 A custom backend implements the Backend trait (with its Output type) and defines its own extension trait for Compiler<ItsBackend>. tests/custom_backend.rs is a complete example. Tools and tests that need the Interface after generating can still call Interface::build and generate directly. That path skips validation, the check, the passes and deny_warnings.
+
+## Running the generated code
+
+The generated code is one `Orchestration` per program and one worker per entry. The `Orchestration` is created once from the program's params, is `Send + Sync` and never changes. A worker runs exactly one entry on one thread and owns that entry's buffers: for another entry, or another thread, make another worker. Each worker has its own `<Entry>HostConsts`, holding only the hosts that entry reads.
+
+```rust,ignore
+let orch = Orchestration::new(seed);                  // shared across threads
+let mut w = orch.final_density_worker();              // one per thread, not Clone
+let hc = FinalDensityHostConsts { blend: 0.5, ..Default::default() };
+let out: &[f64; 98304] = w.run(origin, &hc);          // the entry's whole closure
+```
+
+```java
+Gen.Orchestration orch = Gen.Orchestration.create(seed);
+Gen.FinalDensityWorker w = orch.finalDensityWorker();
+double[] out = w.run(x, y, z, hc);                    // the pool; the first FINAL_DENSITY_LEN elements are the entry
+```
+
+In CUDA, `Orchestration::create(seed, out)` and `create_final_density_worker(out)` give a worker with its own stream. `enqueue(origin, hc)` launches, and `result()` is valid after `sync()` (see `crates/tungsten-cuda/README.md`).
+
+A program with a `refinement` also gets one refine call per refinement on the entry's worker (`refine_<name>`, or `enqueue_refine_<name>` in CUDA). It takes the offset and reruns only what the refinement lists. Everything else stays frozen:
+
+```rust,ignore
+w.run(origin, &hc);                                   // computes the whole closure
+w.refine_step(Pos3::new(0, 383, 0), &hc);             // reruns the listed instances at offset y = 383
+w.refine_step(Pos3::new(0, 382, 0), &hc);
+```
+
+Call refine after `run`, and keep every offset component in `[0, march]`. These are caller preconditions with no generated checks. `docs/redesign.md` has the runtime contract the generated Rust code expects, and `use-guide.md` explains mappings and refinement.
 
 ## Development
 

@@ -9,10 +9,32 @@ use crate::model::{FunctionInfo, FunctionKind, Inspection, Summary};
 
 /// The header line shared with `index.md`.
 pub(crate) fn summary_line(s: &Summary) -> String {
+    // Only named when there are some, so programs without refinements read as before.
+    let refinements = match s.refinements {
+        0 => String::new(),
+        n => format!(", {n} refinements"),
+    };
     format!(
-        "{} units ({} reachable), {} helpers, {} constants, {} tables, {} host inputs, {} entries",
+        "{} units ({} reachable), {} helpers, {} constants, {} tables, {} host inputs, {} entries{refinements}",
         s.units, s.reachable_units, s.helpers, s.constants, s.tables, s.host_inputs, s.entries
     )
+}
+
+/// ` @expand(2, *, 2)` and ` @previous`, for the attributes of an input.
+fn attributes(mapping: &Option<String>, previous: bool) -> String {
+    let mut out = String::new();
+    if let Some(m) = mapping {
+        out.push(' ');
+        out.push_str(m);
+    }
+    if previous {
+        out.push_str(" @previous");
+    }
+    out
+}
+
+fn list_of(ids: &[String], display: &dyn Fn(&str) -> String) -> String {
+    ids.iter().map(|x| display(x)).collect::<Vec<_>>().join(", ")
 }
 
 /// The text, and the 1-based line of each unit's `unit … {` line, by unit id.
@@ -67,6 +89,34 @@ pub(crate) fn program(i: &Inspection) -> (String, BTreeMap<String, usize>) {
     }
     s.push('\n');
 
+    for r in &i.refinements {
+        let entry = i.entries.iter().find(|e| e.id == r.entry).unwrap();
+        let (mx, my, mz) = r.march;
+        let _ = writeln!(
+            s,
+            "refinement {} of {} march ({mx}, {my}, {mz}) {{",
+            r.display, entry.display
+        );
+        for rr in &r.reruns {
+            let with = match &rr.with {
+                Some(u) => format!(" with {}", display(u)),
+                None => String::new(),
+            };
+            let _ = writeln!(s, "    rerun {}{with}", display(&rr.instance));
+        }
+        if !r.frozen.is_empty() {
+            let _ = writeln!(s, "    frozen {{ {} }}", list_of(&r.frozen, &display));
+        }
+        for (w, wave) in r.waves.iter().enumerate() {
+            let runs: Vec<String> = wave.iter().map(|x| display(&x.instance)).collect();
+            let _ = writeln!(s, "    wave {w}: {}", runs.join(", "));
+        }
+        s.push_str("}\n");
+    }
+    if !i.refinements.is_empty() {
+        s.push('\n');
+    }
+
     for c in &i.constants {
         let _ = writeln!(
             s,
@@ -97,10 +147,11 @@ pub(crate) fn program(i: &Inspection) -> (String, BTreeMap<String, usize>) {
         };
         let _ = writeln!(
             s,
-            "input {} = {} @ {}{unlisted}",
+            "input {} = {} @ {}{}{unlisted}",
             input.name,
             display(&input.producer),
-            grid_exact(&input.grid)
+            grid_exact(&input.grid),
+            attributes(&input.mapping, input.previous)
         );
     }
     if !i.inputs.is_empty() {
@@ -125,10 +176,11 @@ pub(crate) fn program(i: &Inspection) -> (String, BTreeMap<String, usize>) {
                 .inputs
                 .iter()
                 .map(|input| {
+                    let attrs = attributes(&input.mapping, input.previous);
                     if input.indexed {
-                        format!("{} (indexed)", input.name)
+                        format!("{}{attrs} (indexed)", input.name)
                     } else {
-                        input.name.clone()
+                        format!("{}{attrs}", input.name)
                     }
                 })
                 .collect();

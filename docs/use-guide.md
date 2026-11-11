@@ -1,12 +1,8 @@
 # Tungsten use guide
 
-Tungsten compiles Minecraft-style world generation (density functions) into fast Rust, CUDA or Java code. This guide covers what you can do with it, how to use it, the rules of the `.tw` text format, and the features that are still in development.
+Tungsten compiles Minecraft-style world generation (density functions) into fast Rust, CUDA or Java code. This guide covers what you can do with it, how to use it, the rules of the `.tw` text format, and the v0.3 features: workers, density mappings and refinement.
 
-Status labels used below:
-
-- **Available**: works on every backend today.
-- **In development**: implemented in part. The section says what works.
-- **Planned**: designed in `specs/`, not usable yet.
+Everything below is **available** on every backend (Rust, Java and CUDA) and in the interpreter, unless a section says otherwise.
 
 The details live in these files:
 
@@ -26,7 +22,7 @@ The details live in these files:
 - Describe a world-generation computation as a **program**: pure functions over positions, grouped into compute units that fill grids of cells.
 - Compile that one program to **Rust** (CPU, default), **CUDA C++** (GPU, `cuda` feature) or **Java** (`java` feature). Every backend gives the same values, bit for bit.
 - Run the program on a reference **interpreter** to get expected values. The test suite compares each backend with it.
-- **Inspect** a program and its schedule (IR text, DOT/SVG graphs, diffs) with the `inspect` backend.
+- **Inspect** a program and its schedule (IR text, DOT/SVG graphs, diffs) with the `inspect` backend. It shows mappings, `@previous` reads and each refinement's rerun, `with` and frozen instances.
 - Let the compiler **inline** small units into their readers (`Inline::All`).
 
 This repository is the backend side. A frontend (for Minecraft, `tungsten-mc-compile`) turns Minecraft's density functions into a Tungsten program. You can also write programs by hand in `.tw` files, or build them from Rust with `tungsten-builder`.
@@ -337,19 +333,13 @@ Expected values may be `vec3(..)`, `pos3(..)`, arrays and records (`new T { f: v
 
 ---
 
-## 5. Features in development
+## 5. New in v0.3: workers, mappings and refinement
 
-These three specs land together, one layer at a time (`specs/combined-rollout.md`):
+These three features landed together (`specs/combined-rollout.md`), and each is implemented in the model, the text format, the builder, the interpreter and all three backends. Workers are a **breaking change to the generated code** of every backend. The `.tw` format only grew by mappings and refinement.
 
-1. **Model**: the data structures, the text format, the builder API. *Done.*
-2. **Interpreter**: validation and reference semantics. *Mappings are in progress, refinement follows.*
-3. **Rust**, then **Java**, then **CUDA**: code generation.
+### 5.1 Density mappings
 
-Until a backend implements a feature, it **refuses** programs that use it with a `BackendError::Codegen` naming the feature. It never generates wrong code silently. The corpus files for the new features carry `@knownfail(<backend>, "pending: combined-rollout phase N")` notes that are removed as each backend lands.
-
-### 5.1 Density mappings: In development
-
-**What they are.** Today an un-indexed `density(d)` reads the buffer at the reader's flat cell number, which silently reads the wrong cell if the grids differ. A **mapping** is declared on the input and says exactly how the reader's cell maps into the input's buffer:
+**What they are.** An un-indexed `density(d)` used to read the buffer at the reader's flat cell number, which silently reads the wrong cell if the grids differ. Now the read is only legal when the shapes match or the input declares how they relate. A **mapping** is declared on the input and says exactly how the reader's cell maps into the input's buffer:
 
 | Mapping | Text | Use |
 | --- | --- | --- |
@@ -408,11 +398,11 @@ These checks run only for units that read the input **un-indexed**. An input rea
 - Mapped reads aren't inlined, apart from mappings that are identity on the grid. They are reported as `InlineRejection::MappedRead`.
 - From Rust, `InputSpec::mapping(..)` sets it. It is part of the builder's input merge key.
 
-**Where it stands.** The model, text format, builder, validation, and interpreter lowering are in. Rust, Java and CUDA code generation is pending, so a backend that doesn't implement it yet returns `BackendError::Codegen`. The only mappings allowed on every backend are `Identity` and all-`*` expand. Once a backend lands, lerp is generated as folded inline helpers with no runtime support to link.
+**Generated code.** Expand is an index computation, folded into the read. Lerp is generated as folded inline helpers with no runtime support to link, so no runtime has to provide a lerp. The reads follow the backend's `buffer_bounds` like any other read.
 
-### 5.2 Workers: Planned (model layer done)
+### 5.2 Workers
 
-**What it changes.** Today the generated code is one object that owns everything, and a frontend running on several threads clones it per thread. Workers split it in two:
+**What it changes.** Before v0.3 the generated code was one object that owns everything, and a frontend running on several threads cloned it per thread. Workers split it in two:
 
 - **`Orchestration`** is global and thread-safe (`Send + Sync`). It is created once from the program's params, builds the autoconsts and never changes afterwards.
 - **A worker** belongs to one thread and runs **exactly one entry**. It owns that entry's buffers. To run another entry, make another worker.
@@ -432,9 +422,15 @@ double[] out = w.run(x, y, z, hc);
 
 Every worker has a typed result and its own `<Entry>HostConsts` holding only the hosts that entry can read. Buffer layout is private to the worker, so later memory optimizations won't change the API.
 
-**Where it stands.** `Interface` already computes the worker layout, and the naming rules exist. No backend generates the worker API yet. This is a **breaking change to generated code** that ships with v0.3. The `.tw` format doesn't change.
+**Details.**
 
-### 5.3 Refinement: In development
+- Rust workers aren't `Clone` and take `&mut self`. Java and C++ workers are documented as one per thread.
+- Java's `run` returns the worker's whole pool array of the entry's element type. The entry output is its first `<ENTRY>_LEN` elements. CUDA's `result()` is valid after `sync()` and until the next `enqueue*`.
+- The Rust runtime must provide `Copy + Default` records and `Send + Sync` handles (`docs/redesign.md`, "Running the generated code").
+- `buffer_bounds` (`PerBuffer`, `Slab`, `Unchecked`) picks how reads are checked. On CUDA, `Slab` generates the same code as `Unchecked`.
+- The old `Orchestration::orchestrate_<entry>` (and its Java and CUDA counterparts), the public `HostConsts` and the Rust `Clone` of the per-thread object are removed, with no compatibility layer.
+
+### 5.3 Refinement
 
 **What it is.** A worker's `run` computes an entry's whole closure. **Refinement** adds a second call that reruns only part of that closure, shifting `Pos3` each time (marching), so a large volume can be computed one slice at a time instead of as one big eager 3D buffer.
 
@@ -503,11 +499,11 @@ Offsets and call order are caller preconditions with no generated checks: call `
 
 **Hosts.** A frozen buffer holds what was written last, including the hosts of that write. Hosts are the way to pass step-dependent values such as a step count.
 
-**Testing refinement.** The planned envelope adds `@refine "case" name offset(x, y, z) host(...)` and `@expect "case" after(n) ...` to drive and check a sequence of steps. These aren't in the parser yet.
+**Testing refinement.** The envelope has `@refine "case" name offset(x, y, z) host(...)` to drive a sequence of steps and `@expect "case" after(n) ...` to check the value after the n-th step (counting from 1). A case fails if any step fails.
 
 **Optimizer.** The inliner won't inline a `with` unit, a unit listed in any `reruns`, or one read directly by a running unit, because that would recompute a frozen value on every step.
 
-**Where it stands.** The data model (`Refinement`, `Rerun`, `DensityInput::previous`), text format for `refinement`, `@march`, `rerun` and `@previous`, builder API (`pb.refinement`, `RerunSpec`, `InputSpec::previous`), and the validation rules above are in. The interpreter doesn't yet run refine steps (the `@refine` / `after(n)` test directives and the sequence driver are still to do), and no backend generates refine calls.
+**Generated code.** A worker whose entry has refinements keeps the origin of its last `run`, and each refinement is a worker method `refine_<name>(offset, hosts)` (`enqueue_refine_<name>` in CUDA) that continues from it. A refined unit's density function runs at its target's dims, with `Pos3` moved by the offset and the buffer index unchanged.
 
 ### 5.4 Smaller changes that are already in
 
@@ -531,7 +527,7 @@ These landed earlier on the way to v0.3:
 | `MappingDimsMismatch` | The input has different dims from the reader. Add `@expand` or `@lerp`, or fix the grid |
 | A `(1,1,1)` input read from a bigger grid is rejected | Add `@expand(*, *, *)` |
 | Literal out of range | `3000000000` needs `L`, and `1e999` needs `inf` |
-| Backend says a feature isn't implemented | Mappings and refinement are not generated by that backend yet (§5) |
+| `BackendError::Codegen` naming a size | The backend's own limit, for example Java's 255 method slots (a function reading more than about 245 inputs) |
 
 ### Where to look when something fails
 

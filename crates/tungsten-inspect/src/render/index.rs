@@ -67,6 +67,33 @@ pub(crate) fn index(ctx: &Ctx, ir_lines: &BTreeMap<String, usize>) -> String {
         );
     }
 
+    // Refinements.
+    if !i.refinements.is_empty() {
+        s.push_str("\n## Refinements\n\n");
+        s.push_str("| refinement | entry | march | reruns | frozen | refine waves | view |\n");
+        s.push_str("| --- | --- | --- | ---: | ---: | ---: | --- |\n");
+        for r in &i.refinements {
+            let (mx, my, mz) = r.march;
+            let view = match (v.entries, ctx.entry_dir(&r.entry)) {
+                (true, Some(dir)) => link(
+                    "graph",
+                    &format!("{dir}/refine_{}.dot", super::component(&r.display)),
+                ),
+                _ => String::new(),
+            };
+            let _ = writeln!(
+                s,
+                "| {} | {} | ({mx}, {my}, {mz}) | {} | {} | {} | {} |",
+                md(&r.display),
+                md(ctx.display(&r.entry)),
+                r.reruns.len(),
+                r.frozen.len(),
+                r.waves.len(),
+                view
+            );
+        }
+    }
+
     // Compute units.
     s.push_str("\n## Compute units\n\n");
     s.push_str("| unit | grids | entries | fan-in | fan-out | depth | inline | links |\n");

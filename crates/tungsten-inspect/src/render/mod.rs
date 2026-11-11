@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::backend::{InspectConfig, Views};
-use crate::model::{FunctionInfo, Inspection, InstanceInfo, UnitInfo};
+use crate::model::{FunctionInfo, Inspection, InstanceInfo, RefinementInfo, UnitInfo};
 
 mod dot;
 pub(crate) mod format;
@@ -55,6 +55,13 @@ pub(crate) fn render(
             let path = format!("{dir}/waves.dot");
             add(path.clone(), graphs::waves(&ctx, entry, &path));
         }
+        if views.entries {
+            for id in &entry.refinements {
+                let r = ctx.refinements[id.as_str()];
+                let path = format!("{dir}/refine_{}.dot", component(&r.display));
+                add(path.clone(), graphs::refinement(&ctx, entry, r, &path));
+            }
+        }
         if views.buffers {
             add(format!("{dir}/buffers.txt"), svg::table(&ctx, entry));
             add(
@@ -87,6 +94,7 @@ pub(crate) struct Ctx<'a> {
     pub views: &'a Views,
     pub units: HashMap<&'a str, &'a UnitInfo>,
     pub instances: HashMap<&'a str, &'a InstanceInfo>,
+    pub refinements: HashMap<&'a str, &'a RefinementInfo>,
     displays: HashMap<&'a str, &'a str>,
 }
 
@@ -97,6 +105,7 @@ impl<'a> Ctx<'a> {
             displays.insert(id, display);
         };
         i.entries.iter().for_each(|x| add(&x.id, &x.display));
+        i.refinements.iter().for_each(|x| add(&x.id, &x.display));
         i.units.iter().for_each(|x| add(&x.id, &x.display));
         i.instances.iter().for_each(|x| add(&x.id, &x.display));
         i.functions.iter().for_each(|x| add(&x.id, &x.display));
@@ -108,6 +117,7 @@ impl<'a> Ctx<'a> {
             views,
             units: i.units.iter().map(|u| (u.id.as_str(), u)).collect(),
             instances: i.instances.iter().map(|x| (x.id.as_str(), x)).collect(),
+            refinements: i.refinements.iter().map(|x| (x.id.as_str(), x)).collect(),
             displays,
         }
     }
@@ -253,7 +263,7 @@ const DEVICE_NAMES: &[&str] = &[
 
 /// One path component: characters outside `[A-Za-z0-9._-]` and leading dots become `_`;
 /// Windows device names get a trailing `_` (before any extension).
-fn component(s: &str) -> String {
+pub(crate) fn component(s: &str) -> String {
     let mut out: String = s
         .chars()
         .map(|c| {

@@ -106,6 +106,10 @@ expressions:
 | `PositionScale` | `Vec3` | The `position_scale` of the entry (or density input) being evaluated |
 | `Pos3` | `Pos3` | The cell's integer position `(x, y, z)` inside its grid, each from `0` to `dims - 1` |
 
+Refine calls (`specs/refinement.md`) don't change this. `tungsten-check` lowers each one to an
+ordinary program in which `Pos3` is `Pos3 + Host(offset)`, so core sees no new ambient and no new
+rule: a refine call is just another case.
+
 The core IR doesn't compute world positions itself. A world position like
 `origin * origin_scale + pos3 * position_scale` is ordinary program code that combines these
 ambients. The interpreter only provides the raw ingredients.
@@ -414,7 +418,16 @@ The index rules:
 - **`Density(i, index)`** with an `i32` index reads buffer cell `index` directly.
   `index < 0` or `index >= cells` is `OutOfBounds`. The index expression is evaluated first.
 
-Watch out: the implicit read matches by **flat number, not by position**. When the reader and
+Mappings (`@expand`, `@lerp`) and refinement (`@previous`, frozen buffers) are **source-level
+features that `tungsten-check` desugars before core**. A mapped read arrives here as an
+ordinary `Density(i, index)` with an index built from `Pos3`, and an interpolated read as plain
+arithmetic over several such reads, in a fixed order. `@previous` and frozen reads become reads
+of a host array. Nothing in this chapter changes for them, and core can't tell them from
+hand-written reads. See `specs/density-mappings.md` §5.1 and `specs/refinement.md` §7.
+
+Watch out: the implicit read matches by **flat number, not by position**. The warning below
+stays true for core, but a source program can no longer write such a read across shapes:
+`tungsten-check` rejects it (`MappingDimsMismatch`) unless the input declares a mapping. When the reader and
 the input have the same dims, flat number `k` is the same `(x, y, z)` in both and it does what
 you'd expect. When the dims differ in shape (say `4×1×4` against `2×2×4`), cell `k` of the reader
 and cell `k` of the input are different positions. Use an explicit index if you need something

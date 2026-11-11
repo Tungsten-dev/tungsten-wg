@@ -659,6 +659,8 @@ impl DagBuilder<'_> {
                 .get(&Instance::from_input(di))
                 .map(|n| n.id.clone()),
             grid: grid_of_input(di),
+            mapping: super::mapping_label(di.mapping),
+            previous: di.previous,
         }
     }
 }

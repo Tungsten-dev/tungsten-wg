@@ -1,6 +1,6 @@
 # Program-level density inputs
 
-Status: design agreed. Milestones 1–6 implemented. The other v0.3 specs' documentation is still to come. Milestone 5 lands first among the
+Status: design agreed. Milestones 1–6 implemented. The documentation of the other v0.3 specs has landed too. Milestone 5 lands first among the
 remaining v0.3 work, in this order: this spec's milestone 5, `specs/compiler.md`, `specs/auto-consts.md`,
 `specs/workers.md`, `specs/density-mappings.md`, `specs/refinement.md`, then the documentation of all of them. v0.3 is
 released as one piece, so no intermediate state needs compatibility or workarounds.

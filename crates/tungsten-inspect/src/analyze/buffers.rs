@@ -87,6 +87,7 @@ fn axis(axis: Axis, buffers: &[Buffer], units: &[Vec<Instance>]) -> BufferAxis {
                 .info
                 .inputs
                 .iter()
+                .filter(|e| !e.previous)
                 .map(|e| {
                     *by_id
                         .get(e.producer.as_str())
@@ -272,13 +273,14 @@ fn assign(
     )
 }
 
-/// Conditions 2 and 3 of in-place aliasing: every read of `input` by `reader` is un-indexed and
-/// on the reader's own grid, so each output cell depends only on the same input cell.
+/// Conditions 2 and 3 of in-place aliasing: every read of `input` by `reader` is un-indexed, on
+/// the reader's own grid and not mapped (a mapped read covers the whole buffer), so each output
+/// cell depends only on the same input cell.
 fn alias_compatible(reader: &Buffer, input: &Buffer) -> bool {
     reader
         .info
         .inputs
         .iter()
-        .filter(|e| e.producer == input.info.id)
-        .all(|e| !e.indexed && !e.resampled)
+        .filter(|e| !e.previous && e.producer == input.info.id)
+        .all(|e| !e.indexed && !e.resampled && !e.mapped)
 }

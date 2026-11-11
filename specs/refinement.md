@@ -1,6 +1,6 @@
 # Refinement: rerun part of an orchestration, marching along `Pos3`
 
-Status: design agreed, not implemented. Lands last among the v0.3 code, after `specs/workers.md` and
+Status: implemented on the interpreter, Rust, Java and CUDA, and documented (see Implementation notes). Lands last among the v0.3 code, after `specs/workers.md` and
 `specs/density-mappings.md`. Its refine calls are worker methods.
 
 ## 1. Summary
@@ -525,3 +525,16 @@ instance's `@previous`; `with` units getting their own kernels per target; conte
 - **Mutation checks**, run against `refine/` on Java and reverted. Each turned it red: dropping the offset, rerunning a frozen
   instance, reading `@previous` from the cell after, and adding the offset to the index (`refine/march_identity_reads.tw`
   catches that last one). The worker-isolation test turns red when a refine call forgets the stored origin.
+
+### Milestone 5 (CUDA, `specs/combined-rollout.md` phase 4)
+
+- A refine kernel is `<symbol>(origin, offset, buffers, out_off, off_.., auto_constants, host_consts)`. Its `p` is non-const: it adds
+  `offset` to `p.pos` and leaves `idx`. The worker method is `enqueue_refine_<name>(Pos3 offset, hosts)`. Dropping the offset and adding it to
+  `idx` turned the `refine/` trials red. Rerunning a frozen instance and reading `@previous` from the cell after are `Interface` rules
+  shared with Rust and Java, so they weren't repeated on CUDA.
+
+### Milestone 6 (Inspect and docs, `specs/combined-rollout.md` phase 5)
+
+- **`tungsten-inspect`** (schema version 2). `inspection.json` has `refinements` (name, entry, march, reruns with their `with` unit, `waves` from `Interface::refine_waves`, and the `frozen` instances), `summary.refinements`, and `refinements` on each entry. Inputs and edges have `previous`. A `@previous` edge is left out of `depends_on`, a unit's `reads` and the buffer simulation, since it is no dependency.
+- **Where it shows.** The IR text prints `refinement <name> of <entry> march (..)` blocks with their reruns, frozen set and waves, and the `@previous` attribute on inputs. `index.md` gets a Refinements table, and the summary line names refinements only when there are some. Each refinement gets `entries/<entry>/refine_<name>.dot`: rerun instances are filled and say `rerun, wave n` and `with <unit>`, frozen ones are gray and dashed, and `@previous` is a dashed self-edge on the rerun buffer. The graph's edges come from the running unit's inputs, since a `with` unit has no instance of its own. The entry's `dependencies.dot` stays the closure of `run`. The schedule (`schedule.waves`) is `run`'s, and the refine waves are listed per refinement.
+- **Docs.** The same files as density-mappings milestone 6, plus `use-guide.md` §5.3 and the generated-code notes in `crates/tungsten-cuda/README.md` (already there).

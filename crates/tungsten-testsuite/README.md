@@ -235,11 +235,10 @@ kind     := 0 DivByZero | 1 OutOfBounds | 2 ExternDomain | 3 other
 
 `steps` is always present and 0 for a program without refinements. The size of an `Ok` response depends on
 the case's steps, so `run_cases_lens` takes one per request. The Rust driver reads the `steps` count, then
-`STEP_LEN` bytes per step (`serve(request_len, step_len, run)`), and so does the Java driver
-(`Proto.serve(requestLen, stepLen, run)`). The CUDA driver only reads the fixed part and ignores `steps`, because
-the backend's guard refuses refinement programs until its own phase (`specs/combined-rollout.md` §3.3).
-`tests/golden/protocol.txt` also holds a `step_request` and `step_response`, which only the host side checks (the
-Rust and Java drivers are exercised by the `refine/` corpus).
+`STEP_LEN` bytes per step (`serve(request_len, step_len, run)`). The Java driver does the same
+(`Proto.serve(requestLen, stepLen, run)`), and so does the CUDA one (`tw::proto::serve` in `proto.h`). Each runs every
+step on the worker of that step's refinement. `tests/golden/protocol.txt` also holds a `step_request` and
+`step_response`, which only the host side checks (the drivers are exercised by the `refine/` corpus).
 
 Values are positional and typed by the program, with no tags: `Bool` and `I8` 1 byte, `I32` and `F32` 4,
 `I64` and `F64` 8 (raw bits), `Vec3`, `Pos3`, arrays and records are their elements in order. A response of the

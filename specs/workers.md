@@ -1,6 +1,6 @@
 # Orchestration and workers: a thread-safe global, single-entry per-thread workers
 
-Status: design agreed, not implemented. This is a breaking change to the generated code of every backend, so it ships
+Status: implemented on Rust, Java and CUDA, and documented (`specs/combined-rollout.md` §11 has the implementation notes). This is a breaking change to the generated code of every backend, so it ships
 in v0.3. It lands after `specs/compiler.md` and `specs/auto-consts.md`, and before `specs/density-mappings.md` and
 `specs/refinement.md`, whose backend work targets workers directly.
 
@@ -471,3 +471,11 @@ functions are still emitted with offset params.
 - **Multi-device CUDA.** One Orchestration per device for now.
 - **`run_many` / pool helpers** in generated code, if frontends keep writing the same `for_each_init` pattern.
 - **Java parameter limit.** If real programs approach 255 offset params, fall back to an offset table for that function.
+
+## 12. Implementation notes
+
+The notes for each backend are in `specs/combined-rollout.md` §11, because workers landed per backend together with mappings and refinement. The ones that differ from this spec:
+
+- **CUDA `Slab`** generates the same code as `Unchecked`, since worker-shared device code has no slab length. §5.1 says it checks against the slab.
+- **Java pools** are always allocated (`new T[0]` for a pool the worker doesn't use), instead of one shared zero-length array. Java's 255-slot limit counts every parameter of every generated method, so the kernel with `10 + n` slots for `n` offsets fails first: 245 inputs generate, 246 give `BackendError::Codegen`.
+- **Docs** (milestone 6) landed in `README.md` ("Running the generated code"), `docs/redesign.md` (usage and the Rust runtime contract), `use-guide.md` §5.2 and `crates/tungsten-cuda/README.md`.

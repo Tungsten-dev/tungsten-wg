@@ -3,10 +3,12 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::Instance;
-use tungsten_ir::model::{ComputeUnit, DensityInput, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, DensityInput, DensityMapping, OptimizedProgram, Ref};
 
 use super::schedule::EntrySchedule;
-use super::{Ctx, buffers, grid_of_input, grid_of_instance, inline, sort_ids, sort_named};
+use super::{
+    Ctx, buffers, grid_of_input, grid_of_instance, inline, mapping_label, sort_ids, sort_named,
+};
 use crate::model::{
     EdgeInfo, EntryInfo, InputInfo, InstanceInfo, ProgramInputInfo, SharedInstance, UnitInfo,
 };
@@ -49,6 +51,8 @@ pub(crate) fn inputs(ctx: &Ctx, units: &[UnitInfo]) -> Vec<ProgramInputInfo> {
                 producer: ctx.unit_id(di.density_function),
                 grid: grid_of_input(di),
                 listed_by,
+                mapping: mapping_label(di.mapping),
+                previous: di.previous,
             }
         })
         .collect()
@@ -77,12 +81,20 @@ pub(crate) fn instances(ctx: &Ctx) -> Vec<InstanceInfo> {
                         consumer_grid,
                         resampled: input_grid != consumer_grid,
                         indexed: ctx.indexed_inputs.contains(&(inst.cu, r)),
+                        mapping: mapping_label(di.mapping),
+                        mapped: di.mapping != DensityMapping::Identity,
+                        previous: di.previous,
                     }
                 })
                 .collect();
             inputs.sort_by(|a, b| a.input.cmp(&b.input));
 
-            let mut depends_on: Vec<String> = inputs.iter().map(|e| e.producer.clone()).collect();
+            // `@previous` reads add no dependency (specs/refinement.md §3).
+            let mut depends_on: Vec<String> = inputs
+                .iter()
+                .filter(|e| !e.previous)
+                .map(|e| e.producer.clone())
+                .collect();
             sort_ids(&mut depends_on, &displays);
 
             let mut entries: Vec<String> = closures
@@ -164,6 +176,14 @@ pub(crate) fn entries(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<EntryInfo> {
                 buffers: buffers::entry_buffers(ctx, &inst, &schedule, &by_id),
                 schedule: schedule.to_model(ctx),
                 shared,
+                refinements: ctx
+                    .program
+                    .refinements
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.entry == n)
+                    .map(|(i, _)| ctx.refinements[i].id.clone())
+                    .collect(),
             }
         })
         .collect();
@@ -175,7 +195,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
     let mut reads: HashMap<Ref<ComputeUnit>, Vec<Ref<ComputeUnit>>> = HashMap::new();
     let mut read_by: HashMap<Ref<ComputeUnit>, Vec<Ref<ComputeUnit>>> = HashMap::new();
     for (r, cu) in ctx.program.compute_units.iter() {
-        for (_, di) in listed(ctx.program, cu) {
+        for (_, di) in listed(ctx.program, cu).into_iter().filter(|(_, di)| !di.previous) {
             reads.entry(r).or_default().push(di.density_function);
             read_by.entry(di.density_function).or_default().push(r);
         }
@@ -271,6 +291,8 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
                         producer: ctx.unit_id(di.density_function),
                         grid: grid_of_input(di),
                         indexed: ctx.indexed_inputs.contains(&(r, ir)),
+                        mapping: mapping_label(di.mapping),
+                        previous: di.previous,
                     })
                     .collect(),
                 tables,
@@ -327,7 +349,7 @@ fn closures(ctx: &Ctx) -> Vec<HashSet<Instance>> {
         .collect()
 }
 
-fn instance_displays(ctx: &Ctx) -> HashMap<String, String> {
+pub(crate) fn instance_displays(ctx: &Ctx) -> HashMap<String, String> {
     named_displays(&ctx.instances)
 }
 

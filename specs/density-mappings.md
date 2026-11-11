@@ -1,6 +1,6 @@
 # Static density-input mappings
 
-Status: design agreed, not implemented. Lands after `specs/workers.md`, and before `specs/refinement.md`, which extends
+Status: implemented on the interpreter, Rust, Java and CUDA, and documented (see Implementation notes). Lands after `specs/workers.md`, and before `specs/refinement.md`, which extends
 it.
 
 ## 1. Summary
@@ -450,3 +450,15 @@ to decide.
 - **Mutation checks**, run on the real path against `density/map_*` on Java and reverted. Reversing the axis order turned
   `map_lerp_3axis`, `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red. A `t == 0` shortcut turned
   `map_lerp_neg_zero` and `map_lerp_inf_nan` red, each on both stages. CUDA's are still to be done.
+
+### Milestone 5 (CUDA, `specs/combined-rollout.md` phase 4)
+
+- Expand and the lerp helpers are `__forceinline__` device functions with the same folded index and operation order as Rust and Java.
+  Reversing the lerp axis order turned 8 `map_lerp_*` trials red, and a `t == 0` shortcut turned `map_lerp_neg_zero` and
+  `map_lerp_inf_nan` red (4 trials), so the mutation checks that were still to be done on CUDA are done.
+
+### Milestone 6 (Inspect and docs, `specs/combined-rollout.md` phase 5)
+
+- **`tungsten-inspect`.** The IR text prints each input's mapping (`input spread = one_main @ 1x1x1 ... @expand(*, *, *)`), and the unit's input list too. `inspection.json` has a `mapping` on `inputs`, on unit inputs and on instance edges, and a `mapped` flag on the edge. Graph edges carry the mapping in their label, bold and blue like a resampled edge. In the dataflow DAGs a mapped read is still one `DensityRead` node, with the mapping in its label.
+- **"Reads of the whole buffer".** `mapped` is true for every non-`Identity` mapping, even one that is identity on the grid. That is stricter than the inliner's `is_identity_on`, on purpose: the buffer-reuse simulation never aliases a mapped read onto its input's slot.
+- **Docs.** `README.md`, `docs/redesign.md`, `use-guide.md` §5.1, `crates/tungsten-check/README.md` and `SEMANTICS.md` §3 and §9.3. `CHECK.md` lists only checker errors, so it needed nothing.

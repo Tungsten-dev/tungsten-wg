@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1, 2A, 2B, 3 and 4 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: done, phases 1, 2A, 2B, 3, 4 and 5 are in. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -234,10 +234,10 @@ Needs `nvcc` and the GPU.
 
 ## 9. Phase 5: Closeout
 
-- [ ] `tungsten-inspect`: mappings (density §5.6) and refinements (refinement §8.4)
-- [ ] Documentation for all three: workers M6, the density §5.6 table, the refinement §8.4 table
-- [ ] Update the three specs' status lines and add Implementation notes for anything that differed
-- [ ] Final walk through each spec's testing section
+- [x] `tungsten-inspect`: mappings (density §5.6) and refinements (refinement §8.4)
+- [x] Documentation for all three: workers M6, the density §5.6 table, the refinement §8.4 table
+- [x] Update the three specs' status lines and add Implementation notes for anything that differed
+- [x] Final walk through each spec's testing section
 
 ## 10. Decisions
 
@@ -445,3 +445,13 @@ Add deviations here as phases land, and in the relevant spec if they change its 
 - **Tests.** `tungsten-cuda/src/tests.rs` has text checks for layouts, offsets, mappings, bounds modes and refinement.
   `tests/cuda_workers.rs` has two workers on two host threads, marched slices by bits, and worker isolation.
 - **Large tier** still not run on CUDA, as on Rust and Java.
+
+**Phase 5 (Closeout).**
+
+- **Inspect.** The details are in the milestone 6 notes of `specs/density-mappings.md` and `specs/refinement.md`. The schema version is 2. A `@previous` read is an edge but no dependency: it is left out of `depends_on`, a unit's `reads` and the buffer simulation. A refine graph draws its edges from the running unit's inputs, because a `with` unit has no instance.
+- **Docs.** `README.md` ("Running the generated code"), `docs/redesign.md` (usage, the Rust runtime contract, decisions), `use-guide.md` (§5 no longer has "in development" labels), `crates/tungsten-check/README.md`, `SEMANTICS.md` and the testsuite README (the CUDA driver now reads steps). `CHECK.md` lists no lowering errors, so it didn't change.
+- **Testing walk.** Every row of the three testing sections has a corpus file or a test, with these differences:
+  - `RefineBadEntry` and `RefineBadMarch` have unit tests on hand-built IR, not `reject/` files (phase 1 notes).
+  - The vanilla-shape files (`large/map_vanilla_*`) have still not been run on any backend with `TW_LARGE=1`. The interpreter takes much longer than the 12 minutes density §5.1 estimates, and the batch runs it on every file of the directory first. Only the interpreter and inline trials of `map_vanilla_expand` passed. If either file fails on a backend, fix the cause or give it a narrow note under `docs/testing-policy.md`.
+  - CUDA's mutation checks skip the two refine rules that are `Interface` rules (frozen reruns, `@previous` from the cell after), since Rust and Java already cover them.
+- **Left open.** Optimizer integration of DCE and CSE, triggered stages, and porting `tungsten-mc-compile`, as the non-goals say.

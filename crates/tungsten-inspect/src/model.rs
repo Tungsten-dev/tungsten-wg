@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 /// Version of the `inspection.json` schema.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -27,6 +27,8 @@ pub struct Inspection {
     pub constants: Vec<ConstantInfo>,
     pub tables: Vec<TableInfo>,
     pub host_inputs: Vec<HostInputInfo>,
+    /// The program's refinements, in program order.
+    pub refinements: Vec<RefinementInfo>,
     pub call_graph: CallGraph,
     pub resources: ResourceGraph,
     /// Non-fatal remarks, e.g. unsupported buffer element types.
@@ -47,6 +49,7 @@ pub struct Summary {
     pub host_inputs: usize,
     pub entries: usize,
     pub instances: usize,
+    pub refinements: usize,
     pub unreachable: Unreachable,
 }
 
@@ -92,6 +95,8 @@ pub struct EntryInfo {
     /// Instances of this entry that other entries need too.
     pub shared: Vec<SharedInstance>,
     pub buffers: EntryBuffers,
+    /// Ids of the refinements of this entry, in program order.
+    pub refinements: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -152,6 +157,10 @@ pub struct InputInfo {
     pub grid: Grid,
     /// Some read of it in this unit's main function or helpers carries an index.
     pub indexed: bool,
+    /// How an un-indexed read maps to the input, e.g. `@expand(2, *, 2)`. `None` for `Identity`.
+    pub mapping: Option<String>,
+    /// Reads this instance's own output from before the current call (`@previous`).
+    pub previous: bool,
 }
 
 /// One input of the program's arena.
@@ -164,6 +173,9 @@ pub struct ProgramInputInfo {
     pub grid: Grid,
     /// Units that list it, sorted. Empty for an unlisted (inert) input.
     pub listed_by: Vec<String>,
+    /// `None` for `Identity`.
+    pub mapping: Option<String>,
+    pub previous: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -199,6 +211,46 @@ pub struct EdgeInfo {
     pub resampled: bool,
     /// Some read of this input in the consumer's functions carries an index.
     pub indexed: bool,
+    /// `None` for `Identity`.
+    pub mapping: Option<String>,
+    /// An un-indexed read isn't the reader's own cell, so it reads the whole buffer.
+    pub mapped: bool,
+    /// A `@previous` self-edge: it adds no dependency, and isn't in `depends_on`.
+    pub previous: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RefinementInfo {
+    pub id: String,
+    pub display: String,
+    /// Index in `OptimizedProgram::refinements`.
+    pub index: usize,
+    /// Id of the entry whose worker it runs on.
+    pub entry: String,
+    pub march: (i32, i32, i32),
+    pub reruns: Vec<RerunInfo>,
+    /// What a refine call runs, wave by wave, in execution order.
+    pub waves: Vec<Vec<RefineRunInfo>>,
+    /// Instances a running unit reads that aren't rerun, sorted by display name.
+    pub frozen: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RerunInfo {
+    pub instance: String,
+    /// The refined unit that runs instead (`with`).
+    pub with: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RefineRunInfo {
+    /// The buffer written.
+    pub instance: String,
+    /// The unit that writes it.
+    pub unit: String,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -434,6 +486,9 @@ pub struct DensityReadInfo {
     /// `None` when the producer instance isn't scheduled (unreachable code).
     pub producer_instance: Option<String>,
     pub grid: Grid,
+    /// `None` for `Identity`.
+    pub mapping: Option<String>,
+    pub previous: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]

@@ -10,6 +10,10 @@
 //! dependencies and waves, call and resource graphs, per-function dataflow DAGs) and SVG buffer
 //! charts. [`diff`] summarizes an optimization run as text (§9).
 //!
+//! Mappings and refinements (`specs/density-mappings.md`, `specs/refinement.md`) show up as the
+//! `mapping` and `previous` attributes of inputs, a `refinements` list in the model and the text,
+//! and one `refine_<name>.dot` per refinement in its entry's directory.
+//!
 //! Per-function IR text is printed during analysis (`FunctionInfo::ir`), so `diff` can compare
 //! functions across programs and the renderers never need the program.
 //!

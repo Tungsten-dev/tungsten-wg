@@ -147,7 +147,7 @@ fn inspects_small_program() {
 
     let json = &out.files[std::path::Path::new("inspection.json")];
     let parsed: serde_json::Value = serde_json::from_str(json).expect("inspection.json parses");
-    assert_eq!(parsed["version"], 1);
+    assert_eq!(parsed["version"], 2);
 
     let i = &out.inspection;
     assert_eq!(i.summary.entries, 2);
@@ -338,4 +338,82 @@ fn compiler_matches_inspect_and_views_setter_works() {
     let out = c.compile().unwrap();
     let expected = inspect(&p, &InspectConfig { views, ..InspectConfig::default() });
     assert_eq!(out.files, expected.files);
+}
+
+/// Mappings and refinement: a `(1,1,1)` input expanded onto a `(3,1,1)` grid, a lerped input,
+/// a frozen buffer, a `@previous` self-read and a `with` unit.
+const REFINED: &str = r#"
+program {
+    fn base_main() -> i32 { return (ambient(pos3).x * 100); }
+    unit base { main base_main; }
+    input frozen = base @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn one_main() -> i32 { return 7; }
+    unit one { main one_main; }
+    input spread = one @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @expand(*, *, *);
+    fn seed_main() -> i32 { return density(spread); }
+    unit seed { main seed_main; inputs [spread]; }
+    input prev = seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) @previous;
+    fn step_main() -> i32 { return ((density(prev) + density(frozen)) + ambient(pos3).y); }
+    unit step { main step_main; inputs [prev, frozen]; }
+    entry seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement go of seed @march(0, 4, 0) {
+        rerun seed @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1) with step;
+    }
+}
+"#;
+
+#[test]
+fn inspects_mappings_and_refinements() {
+    let program = program(REFINED);
+    let out = inspect(&program, &InspectConfig::default());
+    let file = |p: &str| &out.files[std::path::Path::new(p)];
+
+    let parsed: serde_json::Value = serde_json::from_str(file("inspection.json")).unwrap();
+    assert_eq!(parsed["summary"]["refinements"], 1);
+    let r = &parsed["refinements"][0];
+    assert_eq!(r["display"], "go");
+    assert_eq!(r["march"], serde_json::json!([0, 4, 0]));
+    assert_eq!(r["reruns"][0]["with"], parsed["units"].as_array().unwrap().iter()
+        .find(|u| u["display"] == "step_main").unwrap()["id"]);
+    assert_eq!(r["waves"].as_array().unwrap().len(), 1, "one rerun, one wave");
+    let frozen: Vec<&str> = r["frozen"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+    assert_eq!(frozen.len(), 1, "only `frozen` is read without being rerun: {frozen:?}");
+    assert!(frozen[0].contains("base"));
+
+    let input = |name: &str| {
+        parsed["inputs"].as_array().unwrap().iter().find(|i| i["name"] == name).unwrap()
+    };
+    assert_eq!(input("spread")["mapping"], "@expand(*, *, *)");
+    assert_eq!(input("frozen")["mapping"], serde_json::Value::Null);
+    assert_eq!(input("prev")["previous"], true);
+
+    let seed = parsed["instances"].as_array().unwrap().iter().find(|i| i["display"].as_str().unwrap().starts_with("seed_main")).unwrap();
+    let seed_edge = seed["inputs"].as_array().unwrap().iter().find(|e| e["input"] == "spread").unwrap();
+    assert_eq!(seed_edge["mapped"], true);
+
+    // The `with` unit has no buffer of its own, so no instance either.
+    assert!(!parsed["instances"].as_array().unwrap().iter().any(|i| i["display"].as_str().unwrap().starts_with("step_main")));
+
+    let ir = file("ir/program.txt");
+    assert!(ir.contains("input spread = "), "{ir}");
+    assert!(ir.contains("@expand(*, *, *)"), "{ir}");
+    assert!(ir.contains("@previous"), "{ir}");
+    assert!(ir.contains("refinement go of seed_main @ 3x1x1 march (0, 4, 0) {"), "{ir}");
+    assert!(ir.contains("rerun seed_main @ 3x1x1 with step_main"), "{ir}");
+    assert!(ir.contains("frozen {"), "{ir}");
+
+    let dep = file("entries/seed_main@3x1x1/dependencies.dot");
+    assert!(dep.contains("@expand(*, *, *)"), "{dep}");
+
+    let refine = file("entries/seed_main@3x1x1/refine_go.dot");
+    assert!(refine.contains("rerun, wave 0"), "{refine}");
+    assert!(refine.contains("with step_main"), "{refine}");
+    assert!(refine.contains("frozen"), "{refine}");
+    // `@previous` is a dashed self-edge on the rerun buffer.
+    let self_edge = refine.lines().find(|l| l.contains("@previous")).expect("@previous edge");
+    assert!(self_edge.contains("dashed"), "{self_edge}");
+
+    let index = file("index.md");
+    assert!(index.contains("## Refinements"), "{index}");
+    assert!(index.contains("1 refinements"), "{index}");
 }

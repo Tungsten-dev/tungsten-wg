@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
-    AutoConst, AutoConstArg, ComputeUnit, ConstExpr, Constant, DensityInput, Expression, Function, HostInput, Name,
+    AutoConst, AutoConstArg, AxisFactor, ComputeUnit, ConstExpr, Constant, DensityInput, DensityMapping, Expression, Function, HostInput, Name,
     OptimizedProgram, Ref, Statement, Var, VariableType,
 };
 
@@ -21,6 +21,7 @@ mod dataflow;
 mod graph;
 mod inline;
 pub(crate) mod ir_text;
+mod refine;
 mod schedule;
 
 /// What `build` computes. Derived from `InspectConfig`.
@@ -48,6 +49,7 @@ pub(crate) fn inspection(ctx: &Ctx) -> Inspection {
     let functions = calls::functions(ctx);
     let call_graph = calls::call_graph(ctx);
     let (constants, tables, host_inputs, resources) = calls::resources(ctx);
+    let refinements = refine::refinements(ctx);
 
     let unreachable = Unreachable {
         units: ids_where(&units, |u| !u.reachable, |u| &u.id),
@@ -68,6 +70,7 @@ pub(crate) fn inspection(ctx: &Ctx) -> Inspection {
         host_inputs: host_inputs.len(),
         entries: entries.len(),
         instances: instances.len(),
+        refinements: refinements.len(),
         unreachable,
     };
 
@@ -82,11 +85,26 @@ pub(crate) fn inspection(ctx: &Ctx) -> Inspection {
         constants,
         tables,
         host_inputs,
+        refinements,
         call_graph,
         resources,
         notes: ctx.notes(),
         paths: BTreeMap::new(),
     }
+}
+
+/// A mapping as the text format spells it, `@expand(2, *, 1)`. `None` for `Identity`.
+pub(crate) fn mapping_label(m: DensityMapping) -> Option<String> {
+    let (name, factors) = match m {
+        DensityMapping::Identity => return None,
+        DensityMapping::Expand(f) => ("expand", f),
+        DensityMapping::Lerp(f) => ("lerp", f),
+    };
+    let [x, y, z] = factors.map(|f| match f {
+        AxisFactor::Repeat => "*".to_string(),
+        AxisFactor::Factor(n) => n.to_string(),
+    });
+    Some(format!("@{name}({x}, {y}, {z})"))
 }
 
 fn ids_where<T>(items: &[T], keep: impl Fn(&T) -> bool, id: impl Fn(&T) -> &String) -> Vec<String> {
@@ -119,6 +137,8 @@ pub(crate) struct Ctx<'a> {
     pub instances: HashMap<Instance, Named>,
     /// By entry index.
     pub entries: Vec<Named>,
+    /// By refinement index.
+    pub refinements: Vec<Named>,
     pub functions: HashMap<Ref<Function>, Named>,
     pub constants: HashMap<Ref<Constant>, Named>,
     pub tables: HashMap<Ref<AutoConst>, Named>,
@@ -168,6 +188,7 @@ impl<'a> Ctx<'a> {
             units: HashMap::new(),
             instances: HashMap::new(),
             entries: Vec::new(),
+            refinements: Vec::new(),
             functions: HashMap::new(),
             constants: HashMap::new(),
             tables: HashMap::new(),
@@ -182,6 +203,7 @@ impl<'a> Ctx<'a> {
         ctx.name_units();
         ctx.name_instances();
         ctx.name_entries();
+        ctx.name_refinements();
         ctx.name_functions();
         ctx.name_resources();
         ctx.name_inputs();
@@ -242,6 +264,19 @@ impl<'a> Ctx<'a> {
             }
             self.entries.push(Named {
                 id: format!("entry:{n}:{}", named.id),
+                display,
+            });
+        }
+    }
+
+    fn name_refinements(&mut self) {
+        let names = self.interface.refinement_names();
+        for n in 0..self.program.refinements.len() {
+            let display = names.get(n).cloned().unwrap_or_else(|| {
+                self.program.refinements[n].name.clone()
+            });
+            self.refinements.push(Named {
+                id: format!("refine:{n}:{display}"),
                 display,
             });
         }

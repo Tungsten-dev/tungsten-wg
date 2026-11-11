@@ -38,6 +38,13 @@ untouched for the checker (`tungsten-core`'s `check`, run by `prepare`) to rejec
 The reason: this crate is unverified code. Keeping it "dumb" keeps the amount of trusted code
 small.
 
+There is one deliberate exception, and it stays out of core: **density mappings and refinement
+are desugared here**, so `tungsten-core` never sees them. A mapped un-indexed read becomes an
+ordinary `Density` read with an index computed from `Pos3` (`lower/mapping.rs`), and each
+refinement becomes one more core program, a *refine step* (`lower/refine.rs`, `lower/step.rs`).
+Both come with validation, which is the second table below. See `specs/density-mappings.md` and
+`specs/refinement.md`.
+
 ### What is a lowering error, and what isn't
 
 | `LowerErrorKind` | When |
@@ -50,6 +57,19 @@ small.
 | `BadConstruct { t }` | `Construct` on a type other than Vec3/Pos3/Extern, or `ConstructExtern` on a non-`Extern` type. |
 | `ConstructArity` | Vec3/Pos3 with ≠ 3 args, or a positional record construct with more args than fields. |
 | `Parameter { problem }` | A parameter listed twice, or not in the function's arena. |
+
+Mappings and refinements add their own kinds. They are about the *source* program, which core
+can't express, so they belong here and not in the checker:
+
+| `LowerErrorKind` | When |
+| --- | --- |
+| `MappingBadFactor`, `MappingRepeatOnWideAxis`, `MappingNotFloat` | The mapping itself is malformed: a factor below 1, `*` on an axis where the input isn't 1 wide, or `@lerp` on a non-float input. |
+| `MappingDimsMismatch`, `MappingOutOfRange` | A unit reads the input un-indexed, and the reader's grid (with its largest march offset) doesn't fit: an identity read with different dims, or an expand or lerp that reaches past the input. |
+| `RefineBadEntry`, `RefineDuplicateName`, `RefineBadMarch` | The refinement's entry doesn't exist, its name repeats on that entry, or a march component is negative. |
+| `RefineEntryNotRerun`, `RefineDuplicateRerun`, `RefineRerunUnreachable` | The reruns don't include the entry's own instance, list an instance twice, or contain one the entry doesn't reach through other reruns. |
+| `RefineTypeMismatch`, `RefineMarchScaleMismatch`, `RefineCycle` | A `with` unit returns another type than its target, targets differ in position scale on a marched axis, or the running instances form a cycle (ignoring `@previous`). |
+| `RefinedUnitInNormalGraph` | A `with` unit is also an entry, or a normal unit reads it. |
+| `PreviousOutsideRefinedUnit`, `PreviousNotTarget`, `PreviousMapped`, `PreviousIndexed` | A `@previous` input is listed by a unit that no refinement runs as `with`, doesn't name the rerun's own target, has a mapping, or is read with an index. |
 
 **Not** lowering errors (kept for the checker): every type mismatch, missing or duplicate
 record fields, a positional record construct with too few args, empty array literals, dims
@@ -73,6 +93,9 @@ src/
     expr.rs       expressions: the big match, field selection, constructs
     types.rs      VariableType → core Type
     consts.rs     ConstExpr → Expression, so constants go through the expression walker
+    mapping.rs    mapping validation and the desugaring of mapped reads
+    refine.rs     refinement validation, and which instances each refine call runs
+    step.rs       lowering one refine call to an ordinary core program
   map.rs          LowerMap: core id ↔ tungsten-ir Ref, plus names
   error.rs        LowerError, LowerErrorKind, Location (Item + path of Steps)
   tests/          see "Tests" below
