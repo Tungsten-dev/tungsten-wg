@@ -1,5 +1,4 @@
 // Expand: any element type is allowed, here an array.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> [i32; 2] {

@@ -1,6 +1,5 @@
 // March: un-indexed reads of same-dims buffers use the buffer index, not the marched `Pos3`. A frozen
 // buffer and a `@previous` one are read at a non-zero offset, on a grid wider than one cell.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn base_main() -> i32 { return (ambient(pos3).x * 100); }

@@ -1,5 +1,4 @@
 // Multiple: two refinements of one entry share its buffers, so each continues from the other's output.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return 0; }

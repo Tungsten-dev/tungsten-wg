@@ -1,5 +1,4 @@
 // March: a window two cells thick (dims.y = 2) moves as a whole.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn pos_main() -> i32 { return ((ambient(pos3).y * 10) + ambient(pos3).x); }

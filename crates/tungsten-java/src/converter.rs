@@ -7,19 +7,21 @@ use std::collections::{HashMap, HashSet};
 
 use super::types::{convert_type, unit_return_type};
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
-use tungsten_interface::Interface;
+use tungsten_interface::{Interface, LerpHelper};
 use tungsten_interface::naming::{NamingRules, java_sanitize};
 use crate::model as java;
 use tungsten_ir::model::{Name, VariableType};
 use tungsten_ir::model::{
-    Constant, Expression, Function, OptimizedProgram, Ref, Var,
+    Constant, DensityInput, Expression, Function, OptimizedProgram, Ref, Var,
 };
+use crate::pools::Pools;
 
 /// Converts one function body. Collects the helpers and constants it references so the
 /// caller can generate them afterwards.
 pub struct FunctionConverter<'a> {
     pub program: &'a OptimizedProgram,
     pub naming: &'a Interface,
+    pub pools: &'a Pools,
     /// The generated top-level class; constants are always qualified with it.
     pub class_name: &'a str,
     pub function: &'a Function,
@@ -27,6 +29,11 @@ pub struct FunctionConverter<'a> {
     pub called: Vec<Ref<Function>>,
     /// Constants referenced by the converted code, still to be generated.
     pub used_constants: Vec<Ref<Constant>>,
+    /// Lerp helpers called by the converted code, still to be generated.
+    pub used_lerps: Vec<LerpHelper>,
+    /// The inputs the function reads, directly or through helpers (`Interface::input_params`): one
+    /// `int` offset parameter each, after the uniform parameters.
+    pub offsets: Vec<Ref<DensityInput>>,
     /// Statements that must run before the statement being converted.
     pub pre: Vec<java::Statement>,
     /// Statements that must run after it (write-backs of `Ref(true)` holders).
@@ -41,6 +48,7 @@ impl<'a> FunctionConverter<'a> {
     pub fn new(
         program: &'a OptimizedProgram,
         naming: &'a Interface,
+        pools: &'a Pools,
         rules: &NamingRules,
         class_name: &'a str,
         function: &'a Function,
@@ -48,16 +56,38 @@ impl<'a> FunctionConverter<'a> {
         Self {
             program,
             naming,
+            pools,
             class_name,
             function,
             called: Vec::new(),
             used_constants: Vec::new(),
+            used_lerps: Vec::new(),
+            offsets: Vec::new(),
             pre: Vec::new(),
             post: Vec::new(),
             written_back: Vec::new(),
             vars: HashMap::new(),
             used_names: rules.used_set(),
         }
+    }
+
+    /// Makes `f`'s offset parameters known, and keeps locals off their names.
+    pub fn with_offsets(mut self, f: Ref<Function>) -> Self {
+        self.offsets = self.naming.input_params(f).to_vec();
+        for &d in &self.offsets {
+            self.used_names.insert(self.naming.offset_param(d).to_string());
+        }
+        self
+    }
+
+    /// The name of this function's offset parameter of input `d`.
+    pub fn offset(&self, d: Ref<DensityInput>) -> &'a str {
+        assert!(
+            self.offsets.contains(&d),
+            "input {d:?} is read but is not an offset parameter of the function"
+        );
+        let naming: &'a Interface = self.naming;
+        naming.offset_param(d)
     }
 
     /// `base`, or `base_N` for the first free N; keeps names unique within the function.

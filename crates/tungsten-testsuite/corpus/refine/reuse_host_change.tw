@@ -1,5 +1,4 @@
 // Reuse: when a host changes between calls, the frozen buffer keeps its value and the rerun one takes the new value.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;

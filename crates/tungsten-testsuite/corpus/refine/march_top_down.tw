@@ -1,5 +1,4 @@
 // March: a top-down surface search. Each column keeps the first solid y (y <= 2) found from the top, or -1.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return -1; }

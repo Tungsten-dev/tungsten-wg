@@ -32,6 +32,8 @@ pub enum BinaryOperator {
     Subtract,
     Multiply,
     Divide,
+    /// `%`
+    Modulo,
     Equal,
     NotEqual,
     Less,
@@ -98,7 +100,7 @@ pub enum Expression {
     /// `new T[len]`
     NewArraySized {
         element: Type,
-        len: usize,
+        len: Box<Expression>,
     },
     Binary {
         op: BinaryOperator,

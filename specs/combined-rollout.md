@@ -1,6 +1,6 @@
 # Combined rollout: workers, density mappings and refinement
 
-Status: in progress, phases 1, 2A and 2B done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
+Status: in progress, phases 1, 2A, 2B and 3 done. Implements `specs/workers.md`, `specs/density-mappings.md` and `specs/refinement.md` together,
 one layer at a time. Run it with `/implement specs/combined-rollout.md`, one phase per run.
 
 This file only decides **order** and the **temporary states** that order creates. All behaviour, names, error kinds and
@@ -211,10 +211,10 @@ Three separate steps, each green before the next.
 
 ## 7. Phase 3: Java
 
-- [ ] **Workers (M3).** §3.2 and §5.3, the `.buffer_bounds` setter, `size.rs` including the new parameters, the 255-parameter
+- [x] **Workers (M3).** §3.2 and §5.3, the `.buffer_bounds` setter, `size.rs` including the new parameters, the 255-parameter
       `BackendError::Codegen`, harness move, and the Java §8 rows, including the `ExecutorService` concurrency test
-- [ ] **Mappings (M4).** Expand and the `private static` lerp helpers. Drop the guard and notes. Mutation checks
-- [ ] **Refinement (M4).** Refine kernels and `refine_<name>`, real step handling in the driver and `Proto.java`. Drop the
+- [x] **Mappings (M4).** Expand and the `private static` lerp helpers. Drop the guard and notes. Mutation checks
+- [x] **Refinement (M4).** Refine kernels and `refine_<name>`, real step handling in the driver and `Proto.java`. Drop the
       guard and notes. Mutation checks, marched slices, worker isolation
 
 **Exit.** `cargo test --workspace` is green with no Java `pending` notes left.
@@ -383,3 +383,40 @@ Add deviations here as phases land, and in the relevant spec if they change its 
   where a second entry's worker runs between `run` and `refine_*`. The isolation test turns red when a refine call
   forgets the stored origin.
 - **Large tier** still not run on Rust, as in step 6.2.
+
+**Phase 3 (Java).**
+
+- **Classes.** The workers sit next to `Orchestration` in the generated class (`Gen.FinalDensityWorker`, not
+  `Orchestration.FinalDensityWorker`), as in the class listing of `specs/workers.md` §3.2. `AutoConsts` has a
+  package-private constructor and no `create`: `Orchestration.create(params)` builds it. `InternalBuffers` has a
+  constructor taking one length per pool, and always allocates (`new T[0]` for a pool the worker doesn't use),
+  instead of the shared zero-length array of §5.3, since the empty arrays cost nothing. Pool fields are named
+  after the IR type (`f64s`, `i32s`, `pair`s), by `tungsten_java::pools`, which uses `tungsten_rust::pools::type_stem`.
+- **`run` takes `double x, y, z`**, as the entry methods always did, and a refine call `int ox, oy, oz`. The
+  `<BASE>_LEN` constants are `public static final int` fields of the generated class, unique against its other fields.
+  The worker stores the origin as three `double` fields. Kernel calls are qualified with the generated class name, so a
+  worker method can never shadow one.
+- **Reads.** `PerBuffer` is `pool[off + java.util.Objects.checkIndex(i, LEN)]`, which throws
+  `IndexOutOfBoundsException`, so no runtime symbol is added. A literal index 0 into an input with at least one cell skips
+  the check. `Slab` and `Unchecked` index the pool directly. `Expand` and the lerp helper are the same folded
+  formulas as on Rust. A lerp helper is `private static T <name>(T[] pool, int off, int px, int py, int pz)`.
+  `Modulo` was added to the Java model for it.
+- **Refusals and limit.** `check_emittable` and `check_slots` of the Rust backend are reused as they are. The 255-slot limit
+  (`size::check_parameter_limit`) counts every parameter of every generated method, so it is the kernel, with
+  `10 + n` slots for `n` offsets, that fails first: 245 inputs generate, 246 give `BackendError::Codegen`
+  naming the kernel. The size estimates of `size.rs` need no new term: the offsets are call arguments and are counted.
+- **Harness.** `Proto.serve(requestLen, stepLen, run)` and `Reader.u32()` mirror Rust. The driver decodes every
+  host and binds each entry's own into a `<Base>HostConsts`, then runs each refine call on the worker of its
+  refinement's entry. The selftest stubs use `STEP_LEN = 16`. A result array is the worker's pool, so the driver writes
+  only the first `cells` elements.
+- **Notes removed** from the 26 mapping-only files (`density/map_*` and the two `large/map_vanilla_*`) and the 29 `refine/` files, in the same
+  commit as the code. The large tier was not run on Java either (see step 6.2).
+- **Mutation checks**, run on Java and reverted. Reversing the lerp axis order turned `map_lerp_3axis`,
+  `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red, and a `t == 0` shortcut turned `map_lerp_neg_zero` and
+  `map_lerp_inf_nan` red, as on Rust. On refinement, each turned the `refine/` trials red: dropping the offset (20
+  failing trials), adding the offset to the index (2, `march_identity_reads`), rerunning a frozen instance (20) and
+  reading `@previous` from the cell after (10). A refine call that forgets the stored origin turns the isolation test red.
+- **Tests.** `tungsten-java/src/tests.rs` has the generated text of workers, offsets, bounds modes, expand, lerp helpers
+  and refine, the refusals and the 245/246 limit. `tungsten-testsuite/tests/java_workers.rs` builds and runs concurrency
+  (an `ExecutorService`, with workers created on the pool and handed over), the bounds modes (`Unchecked` equals `Slab`),
+  the lerp bounds, marched slices and worker isolation.

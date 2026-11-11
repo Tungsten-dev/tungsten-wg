@@ -1,5 +1,4 @@
 // Rerun: a chain of three rerun instances, each reading the next.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;

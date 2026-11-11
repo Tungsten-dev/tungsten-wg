@@ -516,3 +516,12 @@ instance's `@previous`; `with` units getting their own kernels per target; conte
   `<unit fn>_<target base>_refine_kernel`.
 - Marching `idx` by the offset went unnoticed by the corpus until `refine/march_identity_reads.tw`, which reads a
   frozen and a `@previous` buffer on a grid wider than one cell at a non-zero offset.
+
+### Milestone 4 (Java, `specs/combined-rollout.md` phase 3)
+
+- A refine kernel is `<unit fn>_<target base>_refine_kernel(origin_x, origin_y, origin_z, ox, oy, oz, buffers, out_off,
+  off_.., auto_constants, host_consts)`, and its loop calls `p.set(ix + ox, iy + oy, iz + oz, idx)`. The worker keeps the
+  origin as three `double` fields set by `run`, and `refine_<name>(int ox, int oy, int oz, <Base>HostConsts hc)` passes it.
+- **Mutation checks**, run against `refine/` on Java and reverted. Each turned it red: dropping the offset, rerunning a frozen
+  instance, reading `@previous` from the cell after, and adding the offset to the index (`refine/march_identity_reads.tw`
+  catches that last one). The worker-isolation test turns red when a refine call forgets the stored origin.

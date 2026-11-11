@@ -1,5 +1,4 @@
 // `@previous`: on a (1,1,1) entry.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return 4; }

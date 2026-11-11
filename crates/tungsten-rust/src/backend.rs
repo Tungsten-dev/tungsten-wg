@@ -117,7 +117,7 @@ impl Backend for RustBackend {
 
 /// Every input a scheduled unit reads must have a slot in that worker. The checker guarantees it
 /// (a unit reads only its listed inputs), but the low-level path doesn't run the checker.
-fn check_slots(program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
+pub fn check_slots(program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
     for e in 0..program.entry_points.len() {
         let refined = program
             .refinements

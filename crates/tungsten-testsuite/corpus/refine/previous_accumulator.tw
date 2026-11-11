@@ -1,5 +1,4 @@
 // `@previous`: an accumulator over several calls. The first value comes from the normal unit.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn seed_main() -> i32 { return (ambient(pos3).x * 10); }

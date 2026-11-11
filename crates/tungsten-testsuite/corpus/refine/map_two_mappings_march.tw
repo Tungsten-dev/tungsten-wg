@@ -1,5 +1,4 @@
 // Mappings: one frozen grid read through two inputs, `@expand` and `@lerp`, along the march.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn g_main() -> f64 { return ((ambient(pos3).y * 4) as f64); }

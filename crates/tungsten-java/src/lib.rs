@@ -8,8 +8,18 @@
 //!
 //! Every density and helper function starts with the same parameters (see [`uniform_parameters`]):
 //! `PositionIterator p, Config config, InternalBuffers buffers, AutoConsts auto_constants,
-//! HostConsts host_consts`. Helper-specific parameters follow them. All names come from the
-//! shared [`Interface`] built with [`NamingRules::java`], so caller and callee always agree.
+//! HostConsts host_consts`. Then one `int` offset per input the function reads, directly or
+//! through helpers (`Interface::input_params`), then the helper's own parameters. All names come
+//! from the shared [`Interface`] built with [`NamingRules::java`], so caller and callee always agree.
+//!
+//! `InternalBuffers` holds one array per element type (a pool, see [`pools`]). Each worker sizes
+//! the pools for its own entry and passes the offsets of its instances to the kernels
+//! (`specs/workers.md`). Reads follow the compile's `BufferBounds`.
+//!
+//! Refinement (`specs/refinement.md` §6.2): a worker of an entry with refinements also stores the
+//! origin of its last `run`, and has one `refine_<name>(int ox, int oy, int oz, hosts)` method per
+//! refinement. Each runs the refinement's waves through refine kernels, which add the offset to
+//! the iterator's `pos` and leave its `index`, so buffer indices stay put.
 //!
 //! Modules:
 //! - `types`: type and operator conversion.
@@ -17,7 +27,9 @@
 //! - `expression` / `statement`: body conversion.
 //! - `function`: density functions, helpers, constants and kernels.
 //! - `orchestration`: nested classes, entry methods, file assembly.
-//! - `size`: bytecode size estimates and warnings.
+//! - `pools`: the pool fields of `InternalBuffers`.
+//! - `mapping`: buffer reads, `Expand` indices and lerp helpers.
+//! - `size`: bytecode size estimates, warnings and the parameter limit.
 //!
 //! Assumed runtime (not generated, imported from the runtime package): `Vec3`, `Pos3`, `Config`,
 //! `PositionIterator`, the `*Ref` holders, the frontend's handle types and `Helpers` (extern
@@ -26,7 +38,8 @@
 use std::collections::HashSet;
 
 use tungsten_interface::naming::NamingRules;
-use tungsten_interface::{DeviceCodegen, Instance, Interface};
+use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
+use crate::pools::Pools;
 use crate::model as java;
 use crate::model::codegen::JavaCodeGenerator;
 use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
@@ -35,8 +48,10 @@ pub mod backend;
 pub mod converter;
 pub mod expression;
 pub mod function;
+pub mod mapping;
 pub mod model;
 pub mod orchestration;
+pub mod pools;
 pub mod size;
 pub mod statement;
 pub mod types;
@@ -85,6 +100,7 @@ pub struct JavaCodegen<'a> {
     source: &'a OptimizedProgram,
     /// Names and schedule shared with the orchestration side.
     naming: &'a Interface,
+    pools: &'a Pools,
     rules: &'a NamingRules,
     /// The generated top-level class; constants are qualified with it.
     class_name: String,
@@ -97,6 +113,8 @@ pub struct JavaCodegen<'a> {
     done_functions: HashSet<Ref<Function>>,
     done_constants: HashSet<Ref<Constant>>,
     done_kernels: HashSet<Instance>,
+    done_refine_kernels: HashSet<RefineRun>,
+    done_lerps: HashSet<String>,
 }
 
 impl<'a> JavaCodegen<'a> {
@@ -106,12 +124,14 @@ impl<'a> JavaCodegen<'a> {
     pub fn new(
         source: &'a OptimizedProgram,
         naming: &'a Interface,
+        pools: &'a Pools,
         rules: &'a NamingRules,
         class_name: &str,
     ) -> Self {
         Self {
             source,
             naming,
+            pools,
             rules,
             class_name: class_name.to_string(),
             functions: Vec::new(),
@@ -121,6 +141,8 @@ impl<'a> JavaCodegen<'a> {
             done_functions: HashSet::new(),
             done_constants: HashSet::new(),
             done_kernels: HashSet::new(),
+            done_refine_kernels: HashSet::new(),
+            done_lerps: HashSet::new(),
         }
     }
 
@@ -136,7 +158,7 @@ impl<'a> JavaCodegen<'a> {
     pub fn constant_fields(&self) -> Vec<java::Field> {
         function::sort_constants(self.source, &self.constants)
             .into_iter()
-            .map(|c| function::convert_constant(self.source, self.naming, self.rules, &self.class_name, c))
+            .map(|c| function::convert_constant(self.source, self.naming, self.pools, self.rules, &self.class_name, c))
             .collect()
     }
 
@@ -163,11 +185,22 @@ impl<'a> JavaCodegen<'a> {
             if !self.done_functions.insert(f) {
                 continue;
             }
-            let converted = function::convert_helper(self.source, self.naming, self.rules, &self.class_name, f);
+            let converted =
+                function::convert_helper(self.source, self.naming, self.pools, self.rules, &self.class_name, f);
             self.functions.push(converted.method);
             pending.extend(converted.called);
+            self.generate_lerps(converted.lerps);
             for c in converted.constants {
                 self.generate_constant(c);
+            }
+        }
+    }
+
+    /// Generates the lerp helpers a converted function calls, once each.
+    fn generate_lerps(&mut self, lerps: Vec<LerpHelper>) {
+        for h in lerps {
+            if self.done_lerps.insert(h.name.clone()) {
+                self.functions.push(mapping::lerp_helper(&h, self.pools.bounds));
             }
         }
     }
@@ -189,11 +222,21 @@ impl<'a> JavaCodegen<'a> {
         if !self.done_kernels.insert(inst) {
             return;
         }
-        self.kernels.push(function::build_kernel(self.source, self.naming, &inst));
+        self.kernels.push(function::build_kernel(self.source, self.naming, self.pools, &inst));
     }
 }
 
 impl DeviceCodegen for JavaCodegen<'_> {
+    /// The refined unit at the target's dims, and the kernel running it. Repeats are no-ops.
+    fn generate_refine_kernel(&mut self, run: &RefineRun) {
+        self.generate_compute_unit(run.unit);
+        self.generate_compute_unit(run.target.cu);
+        if !self.done_refine_kernels.insert(*run) {
+            return;
+        }
+        self.kernels.push(function::build_refine_kernel(self.source, self.naming, self.pools, run));
+    }
+
     /// Generates one density function per dimension the unit is scheduled at, plus its helpers and constants.
     fn generate_compute_unit(&mut self, cu: Ref<ComputeUnit>) {
         if !self.done_units.insert(cu) {
@@ -203,12 +246,20 @@ impl DeviceCodegen for JavaCodegen<'_> {
         let ComputeUnit::DensityFunction { helper_functions, constants, .. } = &source.compute_units[cu];
 
         for dimensions in self.naming.dimensions_of(cu) {
-            let converted =
-                function::convert_density(source, self.naming, self.rules, &self.class_name, cu, dimensions);
+            let converted = function::convert_density(
+                source,
+                self.naming,
+                self.pools,
+                self.rules,
+                &self.class_name,
+                cu,
+                dimensions,
+            );
             self.functions.push(converted.method);
             for h in converted.called {
                 self.generate_helper(h);
             }
+            self.generate_lerps(converted.lerps);
             for c in converted.constants {
                 self.generate_constant(c);
             }

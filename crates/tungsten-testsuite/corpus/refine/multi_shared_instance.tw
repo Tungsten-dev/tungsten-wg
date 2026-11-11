@@ -1,6 +1,5 @@
 // Multiple: two refined entries read the same instance. Each entry has its own buffers, so rerunning it for
 // one leaves the other's frozen copy alone.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;

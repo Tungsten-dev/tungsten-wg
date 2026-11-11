@@ -115,6 +115,34 @@ fn check(what: &str, size: usize, warnings: &mut Vec<String>) {
     }
 }
 
+/// The JVM's limit on a method's parameter slots (`long` and `double` take two, and an instance
+/// method's `this` one).
+pub const PARAMETER_SLOT_LIMIT: usize = 255;
+
+fn parameter_slots(m: &Method, instance: bool) -> usize {
+    let slots = |t: &crate::model::Type| match t {
+        crate::model::Type::Long | crate::model::Type::Double => 2,
+        _ => 1,
+    };
+    m.params.iter().map(|(t, _)| slots(t)).sum::<usize>() + usize::from(instance && !m.modifiers.contains("static"))
+}
+
+/// An error naming the first method of `class` (or its nested classes) over the parameter limit.
+/// Every offset and parameter of a function counts, so a function reading enough inputs can
+/// exceed it (`specs/workers.md` D7).
+pub fn check_parameter_limit(class: &Class) -> Result<(), String> {
+    for m in &class.methods {
+        let slots = parameter_slots(m, true);
+        if slots > PARAMETER_SLOT_LIMIT {
+            return Err(format!(
+                "method {}.{} takes {} parameter slots, over the JVM limit of {}",
+                class.name, m.name, slots, PARAMETER_SLOT_LIMIT
+            ));
+        }
+    }
+    class.nested.iter().try_for_each(check_parameter_limit)
+}
+
 /// Size warnings for every method and static initializer in `class` and its nested classes.
 pub fn check_class(class: &Class, warnings: &mut Vec<String>) {
     for m in &class.methods {

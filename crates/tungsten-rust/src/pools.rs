@@ -67,7 +67,7 @@ pub fn unit_return_type(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> &Va
 }
 
 /// `f64`, `vec3`, `pair`, `f64x33`: a lower-case stem for a pool field name.
-fn type_stem(t: &VariableType) -> String {
+pub fn type_stem(t: &VariableType) -> String {
     match t {
         VariableType::Vec3 => "vec3".into(),
         VariableType::Pos3 => "pos3".into(),

@@ -149,12 +149,13 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   `Config`, `PositionIterator` and saturating casts follow `../cuda-density/src/tw/`; `tw::f2i8` clamps.
   The pure toy-table functions in `utilsf64.rs` are named `perm_lookup` and `sample_state`, so glob imports of
   generated code can't see two `perm_get`/`sampler_sample`.
-- **Naming outside the crate.** The Java and CUDA drivers call `orchestrate_<entry>` and `enqueue_<base>`, whose
-  names come from `tungsten_interface::naming::{entry_method_names, entry_base_names}`, shared with the backends.
-  The Rust driver creates one `Orchestration` per case and one worker per entry, with the names from
-  `tungsten_rust::orchestration::rust_worker_names`, and binds only that entry's hosts (`specs/workers.md`).
-  `tests/rust_workers.rs` covers what the corpus can't: threads, the bounds modes, the `Send + Sync`
-  assertion and records without `Default`.
+- **Naming outside the crate.** The CUDA driver calls `enqueue_<base>`, whose names come from
+  `tungsten_interface::naming::{entry_method_names, entry_base_names}`, shared with the backend. The Rust and
+  Java drivers create one `Orchestration` per case and one worker per entry, with the names from
+  `tungsten_rust::orchestration::rust_worker_names` and `tungsten_java::orchestration::java_worker_names`, and bind
+  only that entry's hosts (`specs/workers.md`). `tests/rust_workers.rs` and `tests/java_workers.rs` cover what the
+  corpus can't: threads (`std::thread` and an `ExecutorService`), the bounds modes, marched slices and worker
+  isolation, and on Rust the `Send + Sync` assertion and records without `Default`.
 - **What is not covered yet.** The random program generator and decision traces (see below).
 
 ## Rules and contracts
@@ -235,10 +236,11 @@ kind     := 0 DivByZero | 1 OutOfBounds | 2 ExternDomain | 3 other
 
 `steps` is always present and 0 for a program without refinements. The size of an `Ok` response depends on
 the case's steps, so `run_cases_lens` takes one per request. The Rust driver reads the `steps` count, then
-`STEP_LEN` bytes per step (`serve(request_len, step_len, run)`). Java and CUDA drivers only read the fixed part and
-ignore `steps`, because the backends' guard refuses refinement programs until their own phase
-(`specs/combined-rollout.md` §3.3). `tests/golden/protocol.txt` also holds a `step_request` and
-`step_response`, which only the host side checks (the Rust driver is exercised by the `refine/` corpus).
+`STEP_LEN` bytes per step (`serve(request_len, step_len, run)`), and so does the Java driver
+(`Proto.serve(requestLen, stepLen, run)`). The CUDA driver only reads the fixed part and ignores `steps`, because
+the backend's guard refuses refinement programs until its own phase (`specs/combined-rollout.md` §3.3).
+`tests/golden/protocol.txt` also holds a `step_request` and `step_response`, which only the host side checks (the
+Rust and Java drivers are exercised by the `refine/` corpus).
 
 Values are positional and typed by the program, with no tags: `Bool` and `I8` 1 byte, `I32` and `F32` 4,
 `I64` and `F64` 8 (raw bits), `Vec3`, `Pos3`, arrays and records are their elements in order. A response of the

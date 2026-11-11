@@ -1,6 +1,5 @@
 // Mappings: `@lerp` along the march across a frozen coarse grid gives, slice by slice, what the same grid read
 // at full resolution gives (`full`: 0, 5, 10, 15).
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn coarse_main() -> f64 { return ((ambient(pos3).y * 10) as f64); }

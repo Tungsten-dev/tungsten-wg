@@ -115,6 +115,7 @@ fn binary_op(op: BinaryOperator) -> &'static str {
         B::Subtract => "-",
         B::Multiply => "*",
         B::Divide => "/",
+        B::Modulo => "%",
         B::Equal => "==",
         B::NotEqual => "!=",
         B::Less => "<",
@@ -175,7 +176,7 @@ pub fn expression(e: &Expression) -> String {
                 dims.push_str("[]");
                 base = inner;
             }
-            format!("new {}[{}]{}", type_string(base), len, dims)
+            format!("new {}[{}]{}", type_string(base), bare(len), dims)
         }
         Expression::Binary { op, left, right } => {
             format!("({} {} {})", expression(left), binary_op(*op), expression(right))

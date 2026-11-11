@@ -19,6 +19,7 @@ public final class Proto {
         public boolean bool() { return b.get() != 0; }
         public byte i8() { return b.get(); }
         public int i32() { return b.getInt(); }
+        public int u32() { return b.getInt(); }
         public long i64() { return b.getLong(); }
         public long u64() { return b.getLong(); }
         public float f32() { return Float.intBitsToFloat(b.getInt()); }
@@ -81,8 +82,11 @@ public final class Proto {
         return b.array();
     }
 
-    /** Reads requests of {@code requestLen} bytes from stdin until EOF, answering each on stdout. */
-    public static void serve(int requestLen, Runner run) {
+    /**
+     * Reads requests from stdin until EOF, answering each on stdout. A request is {@code requestLen}
+     * bytes, which end with the {@code steps} count, followed by that many steps of {@code stepLen} bytes.
+     */
+    public static void serve(int requestLen, int stepLen, Runner run) {
         DataInputStream in = new DataInputStream(new BufferedInputStream(System.in));
         PrintStream out = new PrintStream(new FileOutputStream(FileDescriptor.out), false);
         System.setOut(System.err);
@@ -91,6 +95,9 @@ public final class Proto {
                 byte[] buf = new byte[requestLen];
                 try {
                     in.readFully(buf);
+                    int steps = ByteBuffer.wrap(buf, requestLen - 4, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                    buf = java.util.Arrays.copyOf(buf, requestLen + steps * stepLen);
+                    in.readFully(buf, requestLen, steps * stepLen);
                 } catch (EOFException e) {
                     return;
                 }

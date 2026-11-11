@@ -1,5 +1,4 @@
 // Schedule: a frozen instance that only a refinement reads is computed by orchestrate, with its hosts.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     host k: i32;

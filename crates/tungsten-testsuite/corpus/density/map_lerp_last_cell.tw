@@ -1,5 +1,4 @@
 // Lerp: the last reader cell of each axis reads the input's last high corner.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {

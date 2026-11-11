@@ -1,5 +1,4 @@
 // Mappings: `@expand` with `*` on the marched axis reads the frozen input's only layer at every offset.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn col_main() -> i32 { return (ambient(pos3).x * 7); }

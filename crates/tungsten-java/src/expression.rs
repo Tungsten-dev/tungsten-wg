@@ -6,13 +6,14 @@ the generated class so locals cannot shadow them.
 */
 
 use super::converter::FunctionConverter;
-use super::types::{boxed_class, convert_binary_op, convert_type, holder_class, is_object, numeric_literal};
+use super::types::{boxed_class, convert_binary_op, convert_type, holder_class, is_object, numeric_literal, unit_return_type};
+use crate::mapping::read_pool;
+use tungsten_rust::pools::cells;
 use super::{HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_POS, uniform_arguments};
-use tungsten_interface::Instance;
 use tungsten_interface::naming::java_sanitize;
 use crate::model as java;
 use tungsten_ir::model::VariableType;
-use tungsten_ir::model::{AmbientKind, BinaryOperator, ConstExpr, Expression, UnaryOperator};
+use tungsten_ir::model::{AmbientKind, AxisFactor, BinaryOperator, ConstExpr, DensityMapping, Expression, UnaryOperator};
 
 use java::Expression as J;
 
@@ -116,8 +117,12 @@ impl<'a> FunctionConverter<'a> {
                 self.called.push(*function);
                 let program = self.program;
                 let callee = &program.functions[*function];
-                // Uniform arguments first, then the helper's own parameters.
+                // Uniform arguments first, then the callee's offsets (the caller's own offset
+                // parameters, since `input_params` is transitive), then its own parameters.
                 let mut args = uniform_arguments();
+                for &d in self.naming.input_params(*function) {
+                    args.push(J::name(self.offset(d)));
+                }
                 for (p, arg) in callee.parameters.iter().zip(parameters) {
                     args.push(self.convert_to_type(arg, &callee.variables[*p].t));
                 }
@@ -132,14 +137,34 @@ impl<'a> FunctionConverter<'a> {
                 J::call(Some(J::name(HELPERS_CLASS)), &java_sanitize(function_name), args)
             }
             Expression::DensityVariable(input, index) => {
-                let di = &self.program.density_inputs[*input];
-                let buffer = self.naming.buffer_field(&Instance::from_input(di)).to_string();
-                let index = match index {
-                    Some(i) => self.convert_to_type(i, &VariableType::I32),
-                    None if di.dimensions == (1, 1, 1) => J::IntLit(0),
-                    None => J::field(J::name(PARAM_POS), "index"),
+                let program = self.program;
+                let di = &program.density_inputs[*input];
+                let element = unit_return_type(program, di.density_function);
+                let pool = J::field(J::name(PARAM_BUFFERS), self.pools.field(element));
+                let offset = J::name(self.offset(*input));
+                let pos = J::field(J::name(PARAM_POS), "pos");
+                let index = match (index, di.mapping) {
+                    (Some(i), _) => self.convert_to_type(i, &VariableType::I32),
+                    // A lerp reads several cells, so a helper does all of it (§5.2).
+                    (None, DensityMapping::Lerp(_)) => {
+                        let name = self.naming.lerp_helper(di);
+                        let helper = self.naming.lerp_helpers().iter().find(|h| h.name == name);
+                        self.used_lerps.push(helper.expect("lerp_helper found it").clone());
+                        let mut args = vec![pool, offset];
+                        args.extend(["x", "y", "z"].map(|a| J::field(pos.clone(), a)));
+                        return J::call(None, name, args);
+                    }
+                    (None, DensityMapping::Expand(factors)) => {
+                        if factors.iter().all(|f| *f == AxisFactor::Repeat) {
+                            J::IntLit(0)
+                        } else {
+                            crate::mapping::expand_index(di, factors, &pos)
+                        }
+                    }
+                    (None, DensityMapping::Identity) if di.dimensions == (1, 1, 1) => J::IntLit(0),
+                    (None, DensityMapping::Identity) => J::field(J::name(PARAM_POS), "index"),
                 };
-                J::Index { base: Box::new(J::field(J::name(PARAM_BUFFERS), &buffer)), index: Box::new(index) }
+                read_pool(self.pools.bounds, pool, offset, cells(di.dimensions), index)
             }
             Expression::AutoConst(r) => {
                 J::field(J::name(PARAM_AUTO_CONSTS), self.naming.auto_const_field(*r))

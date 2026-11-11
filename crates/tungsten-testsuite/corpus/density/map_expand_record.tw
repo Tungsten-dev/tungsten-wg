@@ -1,5 +1,4 @@
 // Expand: any element type is allowed, here a record.
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> extern Pair {

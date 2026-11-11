@@ -14,7 +14,8 @@ use super::{
     uniform_parameters,
 };
 use tungsten_interface::naming::NamingRules;
-use tungsten_interface::{Instance, Interface};
+use crate::pools::Pools;
+use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
 use crate::model as java;
 use tungsten_ir::model::VariableType;
 use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref};
@@ -30,6 +31,16 @@ pub struct Converted {
     pub called: Vec<Ref<Function>>,
     /// Module-level constants read by the body that the caller must still generate.
     pub constants: Vec<Ref<Constant>>,
+    /// Lerp helpers called by the body that the caller must still generate.
+    pub lerps: Vec<LerpHelper>,
+}
+
+/// Name of a kernel's own slot offset.
+pub const KERNEL_OUT_OFFSET: &str = "out_off";
+
+/// The `int` offset parameter of every input `f` reads, after the uniform parameters.
+fn offset_parameters(naming: &Interface, f: Ref<Function>) -> Vec<(java::Type, String)> {
+    naming.input_params(f).iter().map(|&d| (java::Type::Int, naming.offset_param(d).to_string())).collect()
 }
 
 /// Declares every local bare at the top of the function. Initializing them is the frontend's job
@@ -52,20 +63,22 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java
 }
 
 fn finish(conv: FunctionConverter<'_>, method: java::Method) -> Converted {
-    Converted { method, called: conv.called, constants: conv.used_constants }
+    Converted { method, called: conv.called, constants: conv.used_constants, lerps: conv.used_lerps }
 }
 
-/// Converts a helper function: uniform parameters, then its own parameters, then the body.
+/// Converts a helper function: uniform parameters and offsets, then its own parameters, then the body.
 pub fn convert_helper(
     program: &OptimizedProgram,
     naming: &Interface,
+    pools: &Pools,
     rules: &NamingRules,
     class_name: &str,
     f: Ref<Function>,
 ) -> Converted {
     let func = &program.functions[f];
-    let mut conv = FunctionConverter::new(program, naming, rules, class_name, func);
+    let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, func).with_offsets(f);
     let mut params = uniform_parameters();
+    params.extend(offset_parameters(naming, f));
     // Helper-specific parameters follow the uniform ones.
     for p in &func.parameters {
         let name = conv.declare_var(*p);
@@ -90,6 +103,7 @@ pub fn convert_helper(
 pub fn convert_density(
     program: &OptimizedProgram,
     naming: &Interface,
+    pools: &Pools,
     rules: &NamingRules,
     class_name: &str,
     cu: Ref<ComputeUnit>,
@@ -97,7 +111,7 @@ pub fn convert_density(
 ) -> Converted {
     let ComputeUnit::DensityFunction { function, source_hash, .. } = &program.compute_units[cu];
     let func = &program.functions[*function];
-    let mut conv = FunctionConverter::new(program, naming, rules, class_name, func);
+    let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, func).with_offsets(*function);
     let mut body = declare_locals(&mut conv, func);
     body.extend(conv.convert_block(&func.body));
     let doc = format!(
@@ -110,7 +124,7 @@ pub fn convert_density(
         modifiers: "static".into(),
         return_type: Some(convert_type(&func.return_type)),
         name: naming.density_fn(cu, dimensions).to_string(),
-        params: uniform_parameters(),
+        params: uniform_parameters().into_iter().chain(offset_parameters(naming, *function)).collect(),
         body,
     };
     finish(conv, method)
@@ -133,6 +147,7 @@ fn empty_function() -> Function {
 pub fn convert_constant(
     program: &OptimizedProgram,
     naming: &Interface,
+    pools: &Pools,
     rules: &NamingRules,
     class_name: &str,
     c: Ref<Constant>,
@@ -141,7 +156,7 @@ pub fn convert_constant(
     let t = derive_const_type(program, &constant.value)
         .unwrap_or_else(|| panic!("cannot derive the type of constant '{}'", constant.name));
     let function = empty_function();
-    let mut conv = FunctionConverter::new(program, naming, rules, class_name, &function);
+    let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, &function);
     let init = conv.convert_to_type(&const_to_expression(&constant.value), &t);
     java::Field {
         modifiers: "static final".into(),
@@ -190,15 +205,44 @@ fn vec3_literal((x, y, z): (f64, f64, f64)) -> java::Expression {
     vec3(J::DoubleLit(x), J::DoubleLit(y), J::DoubleLit(z))
 }
 
-/// `static void <kernel>(origin_x, origin_y, origin_z, buffers, auto_constants, host_consts)`:
-/// builds the `Config`, loops over every position (x minor, y middle, z major, matching RCL's
-/// `iter_3d`) and stores the density function's result in the instance's buffer.
-pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, inst: &Instance) -> java::Method {
+/// `static void <kernel>(origin_x, origin_y, origin_z, buffers, out_off, off_.., auto_constants,
+/// host_consts)`: builds the `Config`, loops over every position (x minor, y middle, z major,
+/// matching RCL's `iter_3d`) and stores the density function's result at `out_off + idx` of the
+/// unit's pool. The offsets are those of the unit's main function.
+pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, pools: &Pools, inst: &Instance) -> java::Method {
+    kernel(program, naming, pools, inst, inst.cu, naming.kernel(inst), false)
+}
+
+/// The kernel of one refine run (`specs/refinement.md` §6.2): `build_kernel` with `ox, oy, oz`
+/// after the origin. It runs `run.unit` over the target's grid and adds the offset to the
+/// iterator's `pos` only, so the store index stays in the buffer.
+pub fn build_refine_kernel(
+    program: &OptimizedProgram,
+    naming: &Interface,
+    pools: &Pools,
+    run: &RefineRun,
+) -> java::Method {
+    kernel(program, naming, pools, &run.target, run.unit, naming.refine_kernel(run), true)
+}
+
+/// `unit` is the one called per cell, and `target` the instance whose grid and buffer it fills.
+fn kernel(
+    program: &OptimizedProgram,
+    naming: &Interface,
+    pools: &Pools,
+    inst: &Instance,
+    unit: Ref<ComputeUnit>,
+    name: &str,
+    refine: bool,
+) -> java::Method {
     use java::Statement as S;
-    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
-    let element = convert_type(&program.functions[*function].return_type);
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[unit];
+    let ComputeUnit::DensityFunction { function: target_function, .. } = &program.compute_units[inst.cu];
+    let target_type = &program.functions[*target_function].return_type;
+    let element = convert_type(target_type);
     let (dx, dy, dz) = inst.dimensions;
     let class = |n: &str| java::Type::class(n);
+    let offsets = offset_parameters(naming, *function);
 
     let mut body = vec![
         S::Declare {
@@ -231,22 +275,34 @@ pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, inst: &Insta
         S::Declare {
             t: java::Type::Array(Box::new(element)),
             name: "out".into(),
-            init: Some(J::field(J::name(PARAM_BUFFERS), naming.buffer_field(inst))),
+            init: Some(J::field(J::name(PARAM_BUFFERS), pools.field(target_type))),
             is_final: true,
         },
         S::Declare { t: java::Type::Int, name: "idx".into(), init: Some(J::IntLit(0)), is_final: false },
     ];
 
-    // The running `idx` replaces a per-element index computation, like RCL's `iter_3d`.
+    // The running `idx` replaces a per-element index computation, like RCL's `iter_3d`. A refine
+    // call moves `pos` and leaves `idx`, which the store and unindexed reads use.
+    let moved = |axis: &str, offset: &str| {
+        if refine { J::binary(java::BinaryOperator::Add, J::name(axis), J::name(offset)) } else { J::name(axis) }
+    };
+    let arguments = uniform_arguments()
+        .into_iter()
+        .chain(offsets.iter().map(|(_, n)| J::name(n)))
+        .collect();
     let inner = vec![
         S::Expr(J::call(
             Some(J::name(PARAM_POS)),
             "set",
-            vec![J::name("ix"), J::name("iy"), J::name("iz"), J::name("idx")],
+            vec![moved("ix", "ox"), moved("iy", "oy"), moved("iz", "oz"), J::name("idx")],
         )),
+        // In range by construction, so never the `PerBuffer` form.
         S::Assign {
-            target: J::Index { base: Box::new(J::name("out")), index: Box::new(J::name("idx")) },
-            value: J::call(None, naming.density_fn(inst.cu, inst.dimensions), uniform_arguments()),
+            target: J::Index {
+                base: Box::new(J::name("out")),
+                index: Box::new(J::binary(java::BinaryOperator::Add, J::name(KERNEL_OUT_OFFSET), J::name("idx"))),
+            },
+            value: J::call(None, naming.density_fn(unit, inst.dimensions), arguments),
         },
         S::Assign {
             target: J::name("idx"),
@@ -257,19 +313,25 @@ pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, inst: &Insta
     let y_loop = S::ForRange { var: "iy".into(), end: J::IntLit(dy), body: vec![x_loop] };
     body.push(S::ForRange { var: "iz".into(), end: J::IntLit(dz), body: vec![y_loop] });
 
+    let mut params = vec![
+        (java::Type::Double, "origin_x".into()),
+        (java::Type::Double, "origin_y".into()),
+        (java::Type::Double, "origin_z".into()),
+    ];
+    if refine {
+        params.extend(["ox", "oy", "oz"].map(|n| (java::Type::Int, n.to_string())));
+    }
+    params.push((class(INTERNAL_BUFFERS_CLASS), PARAM_BUFFERS.into()));
+    params.push((java::Type::Int, KERNEL_OUT_OFFSET.into()));
+    params.extend(offsets);
+    params.push((class(AUTO_CONSTS_CLASS), PARAM_AUTO_CONSTS.into()));
+    params.push((class(HOST_CONSTS_CLASS), PARAM_HOST_CONSTS.into()));
     java::Method {
         doc: None,
         modifiers: "static".into(),
         return_type: Some(java::Type::Void),
-        name: naming.kernel(inst).to_string(),
-        params: vec![
-            (java::Type::Double, "origin_x".into()),
-            (java::Type::Double, "origin_y".into()),
-            (java::Type::Double, "origin_z".into()),
-            (class(INTERNAL_BUFFERS_CLASS), PARAM_BUFFERS.into()),
-            (class(AUTO_CONSTS_CLASS), PARAM_AUTO_CONSTS.into()),
-            (class(HOST_CONSTS_CLASS), PARAM_HOST_CONSTS.into()),
-        ],
+        name: name.to_string(),
+        params,
         body,
     }
 }

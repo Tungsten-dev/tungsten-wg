@@ -1,5 +1,4 @@
 // Lerp bits: an infinite or NaN high corner at t = 0 still makes the result NaN (0 * inf).
-@knownfail(java, "pending: combined-rollout phase 3")
 @knownfail(cuda, "pending: combined-rollout phase 4")
 program {
     fn leaf() -> f64 {

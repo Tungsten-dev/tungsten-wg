@@ -20,8 +20,8 @@ const SHORT: Duration = Duration::from_millis(1500);
 fn jstub(id: &str, body: &str, extra: &str) -> TestSource {
     let source = format!(
         "//@@FILE Driver.java\npackage {id};\nimport tungsten.runtime.*;\npublic final class Driver {{\n    \
-         static final int REQUEST_LEN = 28;\n    static byte[] runCase(Proto.Reader r) {{ {body} }}\n    {extra}\n    \
-         public static void main(String[] a) {{ Proto.serve(REQUEST_LEN, Driver::runCase); }}\n}}\n"
+         static final int REQUEST_LEN = 28;\n    static final int STEP_LEN = 16;\n    static byte[] runCase(Proto.Reader r) {{ {body} }}\n    {extra}\n    \
+         public static void main(String[] a) {{ Proto.serve(REQUEST_LEN, STEP_LEN, Driver::runCase); }}\n}}\n"
     );
     TestSource { name: id.to_string(), id: id.to_string(), source }
 }
