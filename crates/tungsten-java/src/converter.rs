@@ -12,14 +12,14 @@ use tungsten_interface::naming::{NamingRules, java_sanitize};
 use crate::model as java;
 use tungsten_ir::model::{Name, VariableType};
 use tungsten_ir::model::{
-    Constant, DensityInput, Expression, Function, OptimizedProgram, Ref, Var,
+    Constant, DensityInput, Expression, Function, Program, Ref, Var,
 };
 use crate::pools::Pools;
 
 /// Converts one function body. Collects the helpers and constants it references so the
 /// caller can generate them afterwards.
 pub struct FunctionConverter<'a> {
-    pub program: &'a OptimizedProgram,
+    pub program: &'a Program,
     pub naming: &'a Interface,
     pub pools: &'a Pools,
     /// The generated top-level class; constants are always qualified with it.
@@ -46,7 +46,7 @@ pub struct FunctionConverter<'a> {
 
 impl<'a> FunctionConverter<'a> {
     pub fn new(
-        program: &'a OptimizedProgram,
+        program: &'a Program,
         naming: &'a Interface,
         pools: &'a Pools,
         rules: &NamingRules,

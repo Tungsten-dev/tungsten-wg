@@ -8,7 +8,7 @@ wrapper, so a future fused kernel can call several bodies unchanged.
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
-use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref, VariableType};
+use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, Program, Ref, VariableType};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
 
@@ -76,7 +76,7 @@ fn finish(conv: FunctionConverter<'_>, function: cuda::Function) -> Converted {
 
 /// Converts a helper function: uniform parameters, then its own parameters, then the body.
 pub fn convert_helper<'a>(
-    program: &'a OptimizedProgram,
+    program: &'a Program,
     naming: &'a Interface,
     config: &'a CudaConfig,
     used_names: &HashSet<String>,
@@ -110,7 +110,7 @@ pub fn convert_helper<'a>(
 ///
 /// It returns the value for the single position `p`; the kernel picks the position.
 pub fn convert_density<'a>(
-    program: &'a OptimizedProgram,
+    program: &'a Program,
     naming: &'a Interface,
     config: &'a CudaConfig,
     used_names: &HashSet<String>,
@@ -156,7 +156,7 @@ fn empty_function() -> Function {
 /// `constexpr T name = init;` for a scalar constant, `__device__ constexpr` for an aggregate (a
 /// host `constexpr` aggregate can't be indexed dynamically from device code).
 pub fn convert_constant(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     config: &CudaConfig,
     c: Ref<Constant>,
@@ -178,9 +178,9 @@ pub fn convert_constant(
 
 /// `constants` reordered so every constant follows the ones its initializer reads (C++ needs
 /// declaration before use). Roots are visited in arena order, so the output is deterministic.
-pub fn sort_constants(program: &OptimizedProgram, constants: &[Ref<Constant>]) -> Vec<Ref<Constant>> {
+pub fn sort_constants(program: &Program, constants: &[Ref<Constant>]) -> Vec<Ref<Constant>> {
     fn visit(
-        program: &OptimizedProgram,
+        program: &Program,
         c: Ref<Constant>,
         state: &mut HashMap<Ref<Constant>, bool>,
         out: &mut Vec<Ref<Constant>>,
@@ -258,7 +258,7 @@ impl Kernel {
 /// The parameters a kernel body and its wrapper share after `local`: the origin, the offset of a
 /// refine kernel, the slab, the kernel's own slot offset and its unit's input offsets, and the
 /// constants.
-fn kernel_parameters(program: &OptimizedProgram, naming: &Interface, k: &Kernel) -> Vec<(cuda::Type, String)> {
+fn kernel_parameters(program: &Program, naming: &Interface, k: &Kernel) -> Vec<(cuda::Type, String)> {
     let restrict = |n: &str| cuda::Type::const_restrict_ptr(cuda::Type::named(n));
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[k.unit];
     let mut params = vec![(cuda::Type::named("double3"), "origin".to_string())];
@@ -273,13 +273,13 @@ fn kernel_parameters(program: &OptimizedProgram, naming: &Interface, k: &Kernel)
     params
 }
 
-fn kernel_arguments(program: &OptimizedProgram, naming: &Interface, k: &Kernel) -> Vec<cuda::Expression> {
+fn kernel_arguments(program: &Program, naming: &Interface, k: &Kernel) -> Vec<cuda::Expression> {
     kernel_parameters(program, naming, k).into_iter().map(|(_, n)| C::Name(n)).collect()
 }
 
 /// `__device__ void <kernel>_body(int3 local, ...)`: bounds check, `Ctx`, position, call, store at
 /// `out_off + idx`.
-pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config: &CudaConfig, k: &Kernel) -> cuda::Function {
+pub fn build_kernel_body(program: &Program, naming: &Interface, config: &CudaConfig, k: &Kernel) -> cuda::Function {
     let inst = &k.target;
     let element = device_type(unit_return_type(program, inst.cu));
     if element.is_pointer() {
@@ -363,7 +363,7 @@ pub fn build_kernel_body(program: &OptimizedProgram, naming: &Interface, config:
 /// to `z >= DZ`, which the body's bounds check rejects. Without `body` it is the declaration that
 /// `interface.cuh` uses.
 pub fn build_kernel_wrapper(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     config: &CudaConfig,
     k: &Kernel,

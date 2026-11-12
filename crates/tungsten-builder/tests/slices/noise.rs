@@ -86,7 +86,7 @@ fn lower_normal_noise(
     }
 }
 
-fn build() -> Result<OptimizedProgram, BuildErrors> {
+fn build() -> Result<Program, BuildErrors> {
     let noise = NormalNoise {
         octaves: vec![(0.5, 0.5, -1), (2.0, 0.25, 1)],
         amplitude: 2.0,

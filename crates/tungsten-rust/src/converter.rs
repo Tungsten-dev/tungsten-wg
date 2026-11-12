@@ -9,7 +9,7 @@ use std::rc::Rc;
 use tungsten_interface::{Interface, LerpHelper};
 use tungsten_interface::naming::sanitize_name;
 use tungsten_ir::model::{
-    AmbientKind, ComputeUnit, Constant, DensityInput, Expression, Function, Name, OptimizedProgram,
+    AmbientKind, ComputeUnit, Constant, DensityInput, Expression, Function, Name, Program,
     Ref, Var, VariableType,
 };
 use super::types::{convert_type, derive_binop_type, derive_const_type, element_type};
@@ -53,7 +53,7 @@ impl UniformVars {
 /// Converts one function body. Collects the helpers and constants it references so the
 /// caller can generate them afterwards.
 pub struct FunctionConverter<'a> {
-    pub program: &'a OptimizedProgram,
+    pub program: &'a Program,
     pub naming: &'a Interface,
     pub pools: &'a Pools,
     pub function: &'a Function,
@@ -74,7 +74,7 @@ pub struct FunctionConverter<'a> {
 impl<'a> FunctionConverter<'a> {
     /// `f` is the function being converted, which must be `program.functions[f]`.
     pub fn new(
-        program: &'a OptimizedProgram,
+        program: &'a Program,
         naming: &'a Interface,
         pools: &'a Pools,
         f: Ref<Function>,
@@ -155,7 +155,7 @@ impl<'a> FunctionConverter<'a> {
 
     /// Return type of the unit's main function, i.e. the element type of its buffer.
     pub fn unit_return_type(&self, cu: Ref<ComputeUnit>) -> &'a VariableType {
-        let program: &'a OptimizedProgram = self.program;
+        let program: &'a Program = self.program;
         let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
         &program.functions[*function].return_type
     }

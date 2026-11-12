@@ -13,7 +13,7 @@ use tungsten_interface::naming::sanitize_name;
 use tungsten_interface::{BufferBounds, Interface};
 use tungsten_ir::model::{
     AmbientKind, AxisFactor, BinaryOperator, ConstExpr, Constant, DensityMapping, Expression,
-    OptimizedProgram, Ref, VariableType,
+    Program, Ref, VariableType,
 };
 
 /// A read of element `index` of the input at `offset` in `pool`, whose length is `len`
@@ -77,7 +77,7 @@ fn constructor_call<'m>(t: &VariableType, args: Vec<rcl::Expression<'m>>) -> rcl
 
 /// Reference to the module-level constant `r`, typed from its initializer.
 pub fn constant_variable(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     r: Ref<Constant>,
 ) -> Rc<rcl::Variable> {
@@ -123,7 +123,7 @@ pub fn const_refs(e: &ConstExpr, out: &mut Vec<Ref<Constant>>) {
 
 /// Converts a constant initializer; constants may only reference other constants.
 pub fn convert_const_expr<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     e: &ConstExpr,
 ) -> rcl::Expression<'m> {
@@ -240,7 +240,7 @@ impl<'a> FunctionConverter<'a> {
                 }
             }
             Expression::DensityVariable(input, index) => {
-                let program: &'a OptimizedProgram = self.program;
+                let program: &'a Program = self.program;
                 let di = &program.density_inputs[*input];
                 let element = self.unit_return_type(di.density_function);
                 let pool = field(&self.uniform.buffers, self.pools.field(element));

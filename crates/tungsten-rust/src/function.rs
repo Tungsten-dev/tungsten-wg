@@ -13,7 +13,7 @@ use crate::model as rcl;
 use crate::pools::Pools;
 use tungsten_interface::{BufferBounds, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{
-    ComputeUnit, Constant, Function, OptimizedProgram, Ref,
+    ComputeUnit, Constant, Function, Program, Ref,
 };
 
 /// Name of a kernel's own slot offset.
@@ -47,7 +47,7 @@ fn add_uniform_parameters(f: &mut rcl::Function<'_>, conv: &FunctionConverter<'_
 /// Converts a helper function: uniform parameters and offsets, then its own parameters, then the
 /// body.
 pub fn convert_helper<'a, 'm>(
-    program: &'a OptimizedProgram,
+    program: &'a Program,
     naming: &'a Interface,
     pools: &'a Pools,
     f: Ref<Function>,
@@ -87,7 +87,7 @@ pub fn convert_helper<'a, 'm>(
 ///
 /// It returns the value for the single position `p`; the kernel does the looping.
 pub fn convert_density<'a, 'm>(
-    program: &'a OptimizedProgram,
+    program: &'a Program,
     naming: &'a Interface,
     pools: &'a Pools,
     cu: Ref<ComputeUnit>,
@@ -122,7 +122,7 @@ pub fn convert_density<'a, 'm>(
 
 /// Converts a module-level constant; also returns the constants its initializer references.
 pub fn convert_constant<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     c: Ref<Constant>,
 ) -> (rcl::Constant<'m>, Vec<Ref<Constant>>) {
@@ -142,7 +142,7 @@ pub fn convert_constant<'m>(
 /// `Config`, loops over every position and stores the density function's result at
 /// `out_off + index(p)` of the unit's pool. The offsets are those of the unit's main function.
 pub fn build_kernel<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     inst: &Instance,
@@ -154,7 +154,7 @@ pub fn build_kernel<'m>(
 /// `offset: Pos3` after `origin`. It runs `run.unit` over the target's grid and adds the offset to
 /// the iterator's `pos` only, so the store index stays in the buffer.
 pub fn build_refine_kernel<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     run: &RefineRun,
@@ -164,7 +164,7 @@ pub fn build_refine_kernel<'m>(
 
 /// `unit` is the one called per cell, and `target` the instance whose grid and buffer it fills.
 fn kernel<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     inst: &Instance,

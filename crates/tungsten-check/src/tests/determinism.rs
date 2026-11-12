@@ -11,8 +11,8 @@ pub const CORPUS: &[&str] = &[
 ];
 
 /// The parse corpus, plus snippets that use records and externs.
-pub fn corpus() -> Vec<OptimizedProgram> {
-    let mut out: Vec<OptimizedProgram> = CORPUS.iter().map(|s| load(s)).collect();
+pub fn corpus() -> Vec<IrProgram> {
+    let mut out: Vec<IrProgram> = CORPUS.iter().map(|s| load(s)).collect();
     out.push(load(&snippet(
         "fn mk(x: f64) -> extern Pair { return new extern Pair { a: x, b: 1 }; }",
         "let q: extern Pair = mk(p); return (q.a + ext sin(ext sample(auto(t), density(d))));",

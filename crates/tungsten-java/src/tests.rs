@@ -3,21 +3,21 @@
 
 use tungsten_interface::naming::java_sanitize;
 use tungsten_interface::{Backend, BackendError, BufferBounds, CompileError, Compiler, Interface};
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 use tungsten_parse::{FileId, NoEnv, load};
 use tungsten_rust::backend::{RustBackend, RustConfig};
 
 use crate::backend::{JavaBackend, JavaCompile, JavaConfig};
 
-fn program(src: &str) -> OptimizedProgram {
+fn program(src: &str) -> Program {
     load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program
 }
 
-fn java(program: &OptimizedProgram) -> String {
+fn java(program: &Program) -> String {
     java_with(program, BufferBounds::PerBuffer)
 }
 
-fn java_with(program: &OptimizedProgram, bounds: BufferBounds) -> String {
+fn java_with(program: &Program, bounds: BufferBounds) -> String {
     let backend = JavaBackend::new(JavaConfig { buffer_bounds: bounds, ..JavaConfig::default() });
     let interface = Interface::build(program, &backend.naming_rules());
     backend.generate(program, &interface).unwrap().source

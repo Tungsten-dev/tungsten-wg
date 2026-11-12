@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use tungsten_ir::model::{ComputeUnit, OptimizedProgram, Ref, Refinement};
+use tungsten_ir::model::{ComputeUnit, Program, Ref, Refinement};
 
 use crate::Instance;
 
@@ -28,7 +28,7 @@ pub(crate) struct Walk {
 }
 
 /// The listed inputs of `cu` as instances, `@previous` ones left out: they add no dependency.
-pub(crate) fn normal_inputs(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> Vec<Instance> {
+pub(crate) fn normal_inputs(program: &Program, cu: Ref<ComputeUnit>) -> Vec<Instance> {
     let ComputeUnit::DensityFunction { density_inputs, .. } = &program.compute_units[cu];
     let mut out: Vec<Instance> = vec![];
     for &r in density_inputs {
@@ -48,7 +48,7 @@ pub(crate) fn rerun_instance(r: &tungsten_ir::model::Rerun) -> Instance {
     Instance::new(r.cu, r.dimensions, r.scaled_origin, r.scaled_position)
 }
 
-pub(crate) fn walk(program: &OptimizedProgram, r: &Refinement) -> Walk {
+pub(crate) fn walk(program: &Program, r: &Refinement) -> Walk {
     let Some(entry) = program.entry_points.get(r.entry) else {
         return Walk::default();
     };
@@ -95,7 +95,7 @@ pub(crate) fn walk(program: &OptimizedProgram, r: &Refinement) -> Walk {
 ///
 /// Panics on a cycle, like `arrange_waves`: validation rejects it (`RefineCycle`), and the
 /// low-level path doesn't validate.
-pub(crate) fn refine_waves(program: &OptimizedProgram, running: &[RefineRun]) -> Vec<Vec<RefineRun>> {
+pub(crate) fn refine_waves(program: &Program, running: &[RefineRun]) -> Vec<Vec<RefineRun>> {
     let targets: HashSet<Instance> = running.iter().map(|r| r.target).collect();
     let mut remaining: Vec<(RefineRun, Vec<Instance>)> = running
         .iter()
@@ -123,7 +123,7 @@ pub(crate) fn refine_waves(program: &OptimizedProgram, running: &[RefineRun]) ->
 
 /// What entry `entry`'s `run` has to compute (§4.5): the entry, the frozen instances its
 /// refinements' running units read, and every `with` target. Without refinements, only the entry.
-pub(crate) fn schedule_seeds(program: &OptimizedProgram, walks: &[Walk], entry: usize) -> Vec<Instance> {
+pub(crate) fn schedule_seeds(program: &Program, walks: &[Walk], entry: usize) -> Vec<Instance> {
     let mut seeds = vec![Instance::from_entry(&program.entry_points[entry])];
     for (r, w) in program.refinements.iter().zip(walks) {
         if r.entry == entry {

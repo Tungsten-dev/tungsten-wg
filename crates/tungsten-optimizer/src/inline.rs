@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use tungsten_ir::Name;
 use tungsten_ir::model::{
-    ComputeUnit, DensityInput, Expression, Function, OptimizedProgram, Ref, Statement, Var,
+    ComputeUnit, DensityInput, Expression, Function, Program, Ref, Statement, Var,
 };
 
 /// The grid a compute unit is evaluated over, as observed by whoever consumes it
@@ -100,7 +100,7 @@ struct InlinePlan {
 
 /// One verdict per compute unit, for the program as it is (no iteration: inlining one unit can
 /// change the verdicts of others).
-pub fn explain_inline(program: &OptimizedProgram) -> Vec<(Ref<ComputeUnit>, InlineVerdict)> {
+pub fn explain_inline(program: &Program) -> Vec<(Ref<ComputeUnit>, InlineVerdict)> {
     let planner = Planner { program };
     program
         .compute_units
@@ -120,11 +120,11 @@ pub fn explain_inline(program: &OptimizedProgram) -> Vec<(Ref<ComputeUnit>, Inli
 }
 
 pub struct Inliner<'m> {
-    program: &'m mut OptimizedProgram,
+    program: &'m mut Program,
 }
 
 impl<'m> Inliner<'m> {
-    pub fn new(program: &'m mut OptimizedProgram) -> Self {
+    pub fn new(program: &'m mut Program) -> Self {
         Self { program }
     }
 
@@ -161,7 +161,7 @@ impl<'m> Inliner<'m> {
 
 /// The read-only half of the inliner: deciding what can be inlined.
 struct Planner<'m> {
-    program: &'m OptimizedProgram,
+    program: &'m Program,
 }
 
 impl<'m> Planner<'m> {

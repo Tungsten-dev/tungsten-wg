@@ -8,8 +8,8 @@ use tungsten_parse::*;
 
 const N: usize = MAX_DEPTH as usize;
 
-fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
-    let mut p = OptimizedProgram {
+fn program(body: Vec<Statement>, param: VariableType) -> Program {
+    let mut p = Program {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],
@@ -47,7 +47,7 @@ fn program(body: Vec<Statement>, param: VariableType) -> OptimizedProgram {
 }
 
 /// `x`, the only var of the program's only fn.
-fn x(p: &OptimizedProgram) -> Expression {
+fn x(p: &Program) -> Expression {
     let f = p.functions.values().next().unwrap();
     Expression::Variable(f.variables.iter().next().unwrap().0)
 }
@@ -55,8 +55,8 @@ fn x(p: &OptimizedProgram) -> Expression {
 /// `return e;` where `e` is `shape` applied to `x` until the expression is `depth` deep.
 fn with_expr(
     depth: usize,
-    shape: impl Fn(Expression, &OptimizedProgram) -> Expression,
-) -> OptimizedProgram {
+    shape: impl Fn(Expression, &Program) -> Expression,
+) -> Program {
     let mut p = program(vec![], VariableType::F64);
     let mut e = x(&p);
     for _ in 1..depth {
@@ -75,7 +75,7 @@ fn binary(left: Expression, right: Expression) -> Expression {
     }
 }
 
-fn round_trips(p: &OptimizedProgram, what: &str) {
+fn round_trips(p: &Program, what: &str) {
     let text = print(p);
     let t = match load(&text, FileId(0), &NoEnv) {
         Ok(t) => t,
@@ -85,12 +85,12 @@ fn round_trips(p: &OptimizedProgram, what: &str) {
     assert_eq!(print(&t.program), text, "P2 failed for {what}");
 }
 
-fn too_deep(p: &OptimizedProgram, what: &str) {
+fn too_deep(p: &Program, what: &str) {
     let d = load(&print(p), FileId(0), &NoEnv).expect_err(what);
     assert!(d.message.contains("nested too deeply"), "{what}: {d}");
 }
 
-type Shape = fn(Expression, &OptimizedProgram) -> Expression;
+type Shape = fn(Expression, &Program) -> Expression;
 
 const SHAPES: &[(&str, Shape)] = &[
     ("left-nested", |e, p| binary(e, x(p))),

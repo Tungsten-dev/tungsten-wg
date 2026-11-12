@@ -2,7 +2,7 @@
 //! constants, host inputs and tables. Set `TUNGSTEN_INSPECT_OUT=<dir>` to write the tree there.
 
 use tungsten_interface::{Backend, Compiler, Interface};
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 use tungsten_optimizer::{explain_inline, perform_inline};
 use tungsten_parse::{FileId, NoEnv, load};
 
@@ -10,7 +10,7 @@ use crate::backend::{InspectBackend, InspectCompile, InspectConfig, Views, inspe
 use crate::diff::diff;
 use crate::model::{Inspection, Verdict};
 
-fn program(src: &str) -> OptimizedProgram {
+fn program(src: &str) -> Program {
     load(src, FileId(0), &NoEnv).unwrap_or_else(|d| panic!("{d}")).program
 }
 

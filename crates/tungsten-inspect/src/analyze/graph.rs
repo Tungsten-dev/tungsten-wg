@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::Instance;
-use tungsten_ir::model::{ComputeUnit, DensityInput, DensityMapping, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, DensityInput, DensityMapping, Program, Ref};
 
 use super::schedule::EntrySchedule;
 use super::{
@@ -15,7 +15,7 @@ use crate::model::{
 
 /// The distinct inputs `cu` lists, in list order, with their values.
 fn listed<'p>(
-    program: &'p OptimizedProgram,
+    program: &'p Program,
     cu: &ComputeUnit,
 ) -> Vec<(Ref<DensityInput>, &'p DensityInput)> {
     let ComputeUnit::DensityFunction { density_inputs, .. } = cu;

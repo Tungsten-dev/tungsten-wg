@@ -5,7 +5,7 @@ use tungsten_interface::{
     Backend, BackendError, BufferBounds, Compiler, Instance, Interface,
     OrchestrationCodegen,
 };
-use tungsten_ir::model::{ComputeUnit, OptimizedProgram};
+use tungsten_ir::model::{ComputeUnit, Program};
 
 use crate::RCLCodegen;
 use crate::TransformRclOrchestration;
@@ -81,7 +81,7 @@ impl Backend for RustBackend {
 
     fn generate(
         &self,
-        program: &OptimizedProgram,
+        program: &Program,
         interface: &Interface,
     ) -> Result<RustOutput, BackendError> {
         crate::mapping::check_emittable(program, interface)?;
@@ -116,7 +116,7 @@ impl Backend for RustBackend {
 
 /// Every input a scheduled unit reads must have a slot in that worker. The checker guarantees it
 /// (a unit reads only its listed inputs), but the low-level path doesn't run the checker.
-pub fn check_slots(program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
+pub fn check_slots(program: &Program, interface: &Interface) -> Result<(), BackendError> {
     for e in 0..program.entry_points.len() {
         let refined = program
             .refinements

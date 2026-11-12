@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use tungsten_builder::BuildErrorKind;
 use tungsten_builder::prelude::*;
-use tungsten_ir::{ComputeUnit, Name, OptimizedProgram, Ref};
+use tungsten_ir::{ComputeUnit, Name, Program, Ref};
 use tungsten_optimizer::{InlineRejection, InlineVerdict, explain_inline};
 
 fn base(pb: &mut ProgramBuilder, name: &str) -> Unit {
@@ -128,7 +128,7 @@ fn constants_helpers_and_units_are_not_merged() {
     assert_eq!(p.compute_units.iter().count(), 2);
 }
 
-fn unit(p: &OptimizedProgram, main: &str) -> Ref<ComputeUnit> {
+fn unit(p: &Program, main: &str) -> Ref<ComputeUnit> {
     p.compute_units
         .iter()
         .find(|(_, u)| {

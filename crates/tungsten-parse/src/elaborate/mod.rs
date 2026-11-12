@@ -1,4 +1,4 @@
-//! AST + `Env` → `OptimizedProgram` + `SourceMap` + envelope.
+//! AST + `Env` → `Program` + `SourceMap` + envelope.
 //!
 //! Two passes. The first collects labels and creates every arena slot in textual order (so slot
 //! order is textual order and forward references work). The second elaborates constants, bodies
@@ -159,7 +159,7 @@ pub struct CellSample {
 }
 
 pub struct TestFile {
-    pub program: OptimizedProgram,
+    pub program: Program,
     pub source_map: SourceMap,
     /// Index = `entry_points` index; informational only.
     pub entry_labels: Vec<String>,
@@ -183,7 +183,7 @@ pub(crate) struct Ctx<'a> {
     /// on a collision with a local label.
     pub imported_from: HashMap<(bool, LabelKey), (String, Span)>,
 
-    pub prog: OptimizedProgram,
+    pub prog: Program,
     pub map: SourceMap,
     pub hosts: HashMap<LabelKey, Ref<HostInput>>,
     pub auto_params: HashMap<LabelKey, Ref<AutoParam>>,
@@ -207,7 +207,7 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
         lib_stack: vec![],
         imports: Default::default(),
         imported_from: HashMap::new(),
-        prog: OptimizedProgram {
+        prog: Program {
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],

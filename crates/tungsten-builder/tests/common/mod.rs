@@ -14,7 +14,7 @@ pub fn empty_registry() -> Registry {
 }
 
 /// Builds and runs the core checker, panicking with every message on failure.
-pub fn checked(pb: ProgramBuilder) -> OptimizedProgram {
+pub fn checked(pb: ProgramBuilder) -> Program {
     let p = pb.build().unwrap_or_else(|e| panic!("build failed:\n{e}"));
     if let Err(e) = tungsten_check::prepare(&p, &empty_registry()) {
         panic!("core rejected the program:\n{e}\n\n{}", tungsten_parse::print(&p));
@@ -23,7 +23,7 @@ pub fn checked(pb: ProgramBuilder) -> OptimizedProgram {
 }
 
 /// Parses and elaborates a `.tw` program with no externs or records.
-pub fn parse(src: &str) -> OptimizedProgram {
+pub fn parse(src: &str) -> Program {
     let file = tungsten_parse::FileId(0);
     match tungsten_parse::load(src, file, &tungsten_parse::NoEnv) {
         Ok(t) => t.program,

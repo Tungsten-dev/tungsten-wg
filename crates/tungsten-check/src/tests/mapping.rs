@@ -5,7 +5,6 @@
 use tungsten_core::Value;
 
 use super::eval::run_with;
-use super::*;
 use crate::EvalOptions;
 
 /// Copied from `tungsten-frontends/tungsten-mc/src/mathf64.rs` (commit 88b88ae): `lerp`,

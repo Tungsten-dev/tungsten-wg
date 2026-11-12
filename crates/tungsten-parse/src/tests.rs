@@ -694,8 +694,8 @@ fn no_env_knows_nothing() {
 // §5.2 labels
 // ---------------------------------------------------------------------------------------------
 
-fn empty_program() -> OptimizedProgram {
-    OptimizedProgram {
+fn empty_program() -> Program {
+    Program {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],

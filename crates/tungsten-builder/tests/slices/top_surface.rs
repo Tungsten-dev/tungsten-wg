@@ -60,7 +60,7 @@ fn find_top_surface(
     pb.finish_unit(f)
 }
 
-fn build() -> Result<OptimizedProgram, BuildErrors> {
+fn build() -> Result<Program, BuildErrors> {
     let mut pb = ProgramBuilder::new();
     let work = Columns { dims: (3, 1, 1) };
 

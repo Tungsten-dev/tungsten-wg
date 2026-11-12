@@ -4,7 +4,7 @@ use tungsten_interface::naming::{NamingRules, java_sanitize};
 use tungsten_interface::{
     Backend, BackendError, BufferBounds, Compiler, Interface, OrchestrationCodegen,
 };
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 
 use crate::pools::Pools;
 use crate::{JavaCodegen, TransformJavaOrchestration};
@@ -77,7 +77,7 @@ impl Backend for JavaBackend {
 
     fn generate(
         &self,
-        program: &OptimizedProgram,
+        program: &Program,
         interface: &Interface,
     ) -> Result<JavaOutput, BackendError> {
         tungsten_rust::mapping::check_emittable(program, interface)?;

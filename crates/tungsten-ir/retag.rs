@@ -91,9 +91,9 @@ impl Clone for Function {
     }
 }
 
-impl Clone for OptimizedProgram {
+impl Clone for Program {
     fn clone(&self) -> Self {
-        let mut c = OptimizedProgram {
+        let mut c = Program {
             compute_units: self.compute_units.clone(),
             functions: self.functions.clone_with(Function::clone_raw),
             entry_points: self.entry_points.clone(),
@@ -128,7 +128,7 @@ impl Clone for OptimizedProgram {
 // Walkers. Every variant is listed explicitly so adding one fails to compile here.
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) fn walk_program(p: &mut OptimizedProgram, v: &mut impl RefVisitor) {
+pub(crate) fn walk_program(p: &mut Program, v: &mut impl RefVisitor) {
     for e in &mut p.entry_points {
         v.compute_unit(&mut e.density_function);
     }
@@ -349,8 +349,8 @@ mod tests {
 
     /// leaf <- root (reads leaf, calls a helper that also reads leaf through root's inputs),
     /// plus a constant depending on a constant, a host input and a table.
-    fn program() -> OptimizedProgram {
-        let mut p = OptimizedProgram {
+    fn program() -> Program {
+        let mut p = Program {
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],
@@ -491,13 +491,13 @@ mod tests {
         p
     }
 
-    fn main_name(p: &OptimizedProgram, cu: Ref<ComputeUnit>) -> Option<String> {
+    fn main_name(p: &Program, cu: Ref<ComputeUnit>) -> Option<String> {
         let ComputeUnit::DensityFunction { function, .. } = &p.compute_units[cu];
         p.functions[*function].canonical_name.clone()
     }
 
     /// Each rerun still names the units it named in `p`, through refs valid in `q`.
-    fn assert_same_refinements(p: &OptimizedProgram, q: &OptimizedProgram) {
+    fn assert_same_refinements(p: &Program, q: &Program) {
         assert_eq!(p.refinements.len(), q.refinements.len());
         for (a, b) in p.refinements.iter().zip(&q.refinements) {
             assert_eq!((&a.name, a.entry, a.march), (&b.name, b.entry, b.march));

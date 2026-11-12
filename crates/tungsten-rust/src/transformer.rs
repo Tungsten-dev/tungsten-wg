@@ -1,5 +1,5 @@
 /* 
-transformation!(DeviceCodegenRCL: OptimizedProgram=O -> RCL=R;
+transformation!(DeviceCodegenRCL: Program=O -> RCL=R;
     map O::Model -> R::Model
     map O::Function -> R::Function
     map O::Constant -> R::Constant

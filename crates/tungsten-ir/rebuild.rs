@@ -65,8 +65,8 @@ fn copy_arena<T>(
     }
 }
 
-fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> OptimizedProgram {
-    let mut out = OptimizedProgram {
+fn rebuild(p: &Program, order: &mut dyn FnMut(usize) -> Vec<usize>) -> Program {
+    let mut out = Program {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: p.entry_points.clone(),
@@ -143,13 +143,13 @@ fn rebuild(p: &OptimizedProgram, order: &mut dyn FnMut(usize) -> Vec<usize>) -> 
 
 /// A copy with every arena in iteration order and without holes: all generations are 0, every
 /// free list is empty, and every `Ref` is fresh. Panics on dangling refs.
-pub fn compact(p: &OptimizedProgram) -> OptimizedProgram {
+pub fn compact(p: &Program) -> Program {
     rebuild(p, &mut |n| (0..n).collect())
 }
 
 /// Shuffles the slot order of every arena (hosts, auto params, autoconsts, consts, density inputs, fns, vars of
 /// each fn, units) and rewrites all refs. The program means the same afterwards.
-pub fn permute(p: &mut OptimizedProgram, seed: u64) {
+pub fn permute(p: &mut Program, seed: u64) {
     let mut state = seed;
     let mut next = move || {
         // splitmix64
@@ -171,7 +171,7 @@ pub fn permute(p: &mut OptimizedProgram, seed: u64) {
 
 /// The bit patterns of every float in the program, in a fixed order. `Debug` and `PartialEq`
 /// can't tell NaN payloads apart.
-fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
+fn float_bits(p: &Program) -> Vec<u64> {
     fn expr(e: &Expression, out: &mut Vec<u64>) {
         match e {
             Expression::Float(v) => out.push(v.to_bits() as u64),
@@ -292,7 +292,7 @@ fn float_bits(p: &OptimizedProgram) -> Vec<u64> {
 }
 
 /// Not cheap: it compacts the program and formats all of it. Meant for tests.
-fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
+fn fingerprint(p: &Program) -> (String, Vec<(u8, u64)>, Vec<u64>) {
     let mut c = compact(p);
     let mut f = Fingerprint::default();
     for (i, (r, _)) in c.compute_units.iter().enumerate() {
@@ -341,6 +341,6 @@ fn fingerprint(p: &OptimizedProgram) -> (String, Vec<(u8, u64)>, Vec<u64>) {
 /// Structural equality: same slot order, same values, and every ref pointing at the same slot.
 /// Tags, generations and free lists are ignored. Floats compare by bit pattern. It formats both
 /// programs in full, so keep it to tests.
-pub fn isomorphic(a: &OptimizedProgram, b: &OptimizedProgram) -> bool {
+pub fn isomorphic(a: &Program, b: &Program) -> bool {
     fingerprint(a) == fingerprint(b)
 }

@@ -17,8 +17,8 @@ tungsten-wg (facade, repo root)
 
 | Crate | Responsibility |
 | --- | --- |
-| `tungsten-ir` | The `OptimizedProgram` model (compute units, functions, statements, arenas). Leaf crate. |
-| `tungsten-builder` | Builds `OptimizedProgram`s from Rust for frontends: `ProgramBuilder`, `FnBuilder`, typed `Expr` with collected errors, derived unit lists, `body!`/`build!`, `extern_fns!`/`record_decls!`. The replacement for the removed legacy builder. |
+| `tungsten-ir` | The `Program` model (compute units, functions, statements, arenas). Leaf crate. |
+| `tungsten-builder` | Builds `Program`s from Rust for frontends: `ProgramBuilder`, `FnBuilder`, typed `Expr` with collected errors, derived unit lists, `body!`/`build!`, `extern_fns!`/`record_decls!`. The replacement for the removed legacy builder. |
 | `tungsten-optimizer` | Passes over the IR. Currently inlining (`perform_inline` returns `InlineStats`); `fuse` is a stub and not exported. |
 | `tungsten-interface` | The backend-agnostic contract: `Interface` (names and wave schedule), `NamingRules`, `DeviceCodegen`, `OrchestrationCodegen`, `Backend`, and the pipeline that drives it: `Compiler`, `Passes`, `CompileError`. |
 | `tungsten-codegen` | Language-agnostic building blocks (`Printer`, `Interned`). Leaf crate. |
@@ -39,7 +39,7 @@ tungsten-wg (facade, repo root)
 One backend per compile. `Compiler` is generic over the backend and returns that backend's own output type. Backend settings are extension traits on `Compiler<ThatBackend>`, defined in the backend's crate.
 
 ```rust
-let program = /* build or lower an OptimizedProgram */;
+let program = /* build or lower an Program */;
 let registry = /* tungsten_wg::registry_from([..]); owned, or an Arc shared between compiles */;
 
 let out: RustOutput = Compiler::new(program, registry, RustBackend::new(RustConfig::default()))
@@ -83,7 +83,7 @@ An entry with a `refinement` has one more method per refinement on its worker (`
 | Optimization | Backends propose passes (`default_passes`), the frontend overrides them on `Compiler`, and `Compiler` runs them. | Backends running their own passes: hidden behavior. Explicit passes only, before `compile`: no way for a backend to express per-target policy. |
 | Facade | Root stays the `tungsten-wg` package (not a virtual workspace). | A virtual workspace: it would break the published name, the `tungsten_wg` lib name and `tungsten-mc-compile`'s dependency. |
 | Legacy SPMT | Lived in its own crate and lowered to the IR through `conversion`. The crate and the `tungsten_wg::spmt` re-export were deleted in v0.3 (`specs/program-level-inputs.md` §6.8). `tungsten-mc-compile` stays pinned to v0.2 until it is ported to `tungsten-builder`. | Keeping it in the facade or in the IR crate: the IR would be coupled to a model that is being phased out. |
-| Density inputs | One `density_inputs` arena on `OptimizedProgram`. A unit lists the inputs it reads, like hosts, tables and consts, so units and shared helpers can share an input. Core has no `owner`, and the checker reports `InputNotListed`. Equal inputs are not merged by the IR. | An arena per unit: no sharing, nested arenas and placeholder variables, and IR inputs wouldn't map 1:1 to core's `inputs`. |
+| Density inputs | One `density_inputs` arena on `Program`. A unit lists the inputs it reads, like hosts, tables and consts, so units and shared helpers can share an input. Core has no `owner`, and the checker reports `InputNotListed`. Equal inputs are not merged by the IR. | An arena per unit: no sharing, nested arenas and placeholder variables, and IR inputs wouldn't map 1:1 to core's `inputs`. |
 | Legacy pipeline | The old wave orchestration and `transform_*` codegen were not migrated. `Interface::waves()` replaced wave orchestration. | Porting them: they consumed the legacy SPMT/wave DAG. The old `compile(&SPMT, &CompilerConfig)` API is removed. |
 | Program construction | `tungsten-builder`: an owned `FnBuilder` per function plus `&mut ProgramBuilder`, typed `Expr` with poison-and-collect errors, lists always derived, equal inputs merged. See `specs/builder.md` §11. | `Rc<RefCell>` builders (borrow panics, `!Send`), panicking on type errors (one error per run), hand-written lists (transitive helpers become frontend bookkeeping). |
 | Orchestration and workers | A thread-safe `Orchestration` plus one non-`Clone` worker per entry, with the entry's buffers private to it. No compatibility layer. See `specs/workers.md` D1-D17. | One object that owns everything and is cloned per thread: no sharing of autoconsts, and every layout change was a public API change. |

@@ -37,7 +37,7 @@
 use std::collections::HashSet;
 
 use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
-use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
 
 use crate::interned::Interned;
 use crate::model as rcl;
@@ -45,16 +45,27 @@ use crate::model::codegen::RustCodeGenerator;
 use crate::pools::Pools;
 
 pub mod backend;
+#[doc(hidden)]
 pub mod converter;
+#[doc(hidden)]
 pub mod expression;
+#[doc(hidden)]
 pub mod function;
+#[doc(hidden)]
 pub mod interned;
+#[doc(hidden)]
 pub mod mapping;
+#[doc(hidden)]
 pub mod model;
+#[doc(hidden)]
 pub mod orchestration;
+#[doc(hidden)]
 pub mod pools;
+#[doc(hidden)]
 pub mod statement;
+#[doc(hidden)]
 pub mod transformer;
+#[doc(hidden)]
 pub mod types;
 
 /// Names of runtime items and generated structs that the generated code refers to by name.
@@ -146,7 +157,7 @@ pub fn uniform_kernel_parameters() -> Vec<rcl::Parameter> {
 /// Generation is idempotent per item (the `done_*` sets), so units, helpers and constants shared
 /// between instances are emitted once.
 pub struct RCLCodegen<'a, 'm> {
-    source: &'a OptimizedProgram,
+    source: &'a Program,
     /// Names and schedule shared with the orchestration side.
     naming: &'a Interface,
     pools: &'a Pools,
@@ -164,7 +175,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
     /// `interface` must be the one built for `source`, and `pools` built from both; nothing is
     /// generated until asked.
     pub fn new(
-        source: &'a OptimizedProgram,
+        source: &'a Program,
         arena: &'m bumpalo::Bump,
         interface: &'a Interface,
         pools: &'a Pools,

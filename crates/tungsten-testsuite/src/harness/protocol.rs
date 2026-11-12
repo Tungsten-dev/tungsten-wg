@@ -7,7 +7,7 @@
 
 use tungsten_check::Value;
 use tungsten_core::{F64x3, I32x3};
-use tungsten_ir::model::{ComputeUnit, HostInput, Name, OptimizedProgram};
+use tungsten_ir::model::{ComputeUnit, HostInput, Name, Program};
 use tungsten_ir::VariableType;
 
 use crate::env::TestEnv;
@@ -198,7 +198,7 @@ impl EntryIo {
 }
 
 impl TestIo {
-    pub fn from_program(p: &OptimizedProgram) -> Result<TestIo, String> {
+    pub fn from_program(p: &Program) -> Result<TestIo, String> {
         let params = p.auto_params.values().map(|a| (a.name.clone(), a.t.clone())).collect();
         let mut hosts = vec![];
         for (_, h) in p.host_inputs.iter() {

@@ -1,6 +1,6 @@
 # tungsten-builder
 
-Builds `tungsten-ir` `OptimizedProgram`s from Rust. It is meant for frontends that lower a source
+Builds `tungsten-ir` `Program`s from Rust. It is meant for frontends that lower a source
 language, and it replaces the legacy SPMT builder. The design is in `specs/builder.md`.
 
 It depends only on `tungsten-ir`. The facade re-exports it as `tungsten_wg::builder`.
@@ -40,7 +40,7 @@ build!(f, {
 let main = pb.finish_unit(f);
 pb.entry(main, grid);
 
-let program: OptimizedProgram = pb.build()?;
+let program: Program = pb.build()?;
 # Ok(())
 # }
 ```

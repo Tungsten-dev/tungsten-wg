@@ -7,7 +7,7 @@
 
 use tungsten_builder::prelude::*;
 
-fn build() -> Result<OptimizedProgram, BuildErrors> {
+fn build() -> Result<Program, BuildErrors> {
     let mut pb = ProgramBuilder::new();
     let start_y = pb.host("start_y", I32);
     let splitter = pb.host("splitter", vt!("Pair"));

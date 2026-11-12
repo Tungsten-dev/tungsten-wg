@@ -422,8 +422,8 @@ impl Default for Options {
     }
 }
 
-pub fn gen_program(rng: &mut Rng, opts: &Options) -> OptimizedProgram {
-    let mut p = OptimizedProgram {
+pub fn gen_program(rng: &mut Rng, opts: &Options) -> Program {
+    let mut p = Program {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],
@@ -712,7 +712,7 @@ pub fn gen_value(rng: &mut Rng, t: &VariableType) -> Value {
 }
 
 /// Wraps a program (generated with `valued: true`) in an envelope.
-pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
+pub fn gen_test_file(rng: &mut Rng, program: Program) -> TestFile {
     let mut cases = vec![];
     for i in 0..1 + rng.below(2) {
         let hosts = program
@@ -841,7 +841,7 @@ pub fn gen_test_file(rng: &mut Rng, program: OptimizedProgram) -> TestFile {
 /// A generated value whose `Debug` is its canonical text, so a shrunk failure reads as a program.
 pub struct Shown<T>(pub T);
 
-impl fmt::Debug for Shown<OptimizedProgram> {
+impl fmt::Debug for Shown<Program> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "\n{}", print(&self.0))
     }
@@ -869,7 +869,7 @@ pub fn config(cases: u32) -> ProptestConfig {
     }
 }
 
-pub fn programs(opts: Options) -> impl Strategy<Value = Shown<OptimizedProgram>> {
+pub fn programs(opts: Options) -> impl Strategy<Value = Shown<Program>> {
     choices().prop_map(move |c| Shown(gen_program(&mut Rng::replay(c), &opts)))
 }
 

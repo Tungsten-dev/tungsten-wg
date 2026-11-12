@@ -12,13 +12,13 @@ mod recursive;
 mod shared;
 mod top_surface;
 
-use tungsten_builder::OptimizedProgram;
+use tungsten_builder::Program;
 use tungsten_ir::isomorphic;
 use tungsten_testsuite::corpus::{corpus_root, load_source};
 use tungsten_testsuite::env::TestEnv;
 
 /// The twin at `corpus/<path>.tw`.
-fn twin(path: &str) -> OptimizedProgram {
+fn twin(path: &str) -> Program {
     let file = corpus_root().join(format!("{path}.tw"));
     let src = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
     load_source(&src, &TestEnv::new())
@@ -27,7 +27,7 @@ fn twin(path: &str) -> OptimizedProgram {
 }
 
 /// Checks a built slice: core accepts it, it equals its twin, and it survives printing.
-fn check_slice(built: Result<OptimizedProgram, tungsten_builder::BuildErrors>, path: &str) {
+fn check_slice(built: Result<Program, tungsten_builder::BuildErrors>, path: &str) {
     let p = built.unwrap_or_else(|e| panic!("{path}: build failed:\n{e}"));
     let env = TestEnv::new();
     let registry = env.spec().build().unwrap();

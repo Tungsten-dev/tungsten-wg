@@ -3,10 +3,10 @@
 mod common;
 
 use common::Rng;
-use tungsten_ir::{ConstExpr, OptimizedProgram};
+use tungsten_ir::{ConstExpr, Program};
 use tungsten_parse::*;
 
-fn consts(p: &OptimizedProgram) -> Vec<ConstExpr> {
+fn consts(p: &Program) -> Vec<ConstExpr> {
     p.constants.values().map(|c| c.value.clone()).collect()
 }
 
@@ -17,7 +17,7 @@ fn roundtrip(values: Vec<ConstExpr>) {
             .iter()
             .enumerate()
             .map(|(i, v)| {
-                let mut p = OptimizedProgram {
+                let mut p = Program {
                     compute_units: tungsten_ir::Arena::new(),
                     functions: tungsten_ir::Arena::new(),
                     entry_points: vec![],

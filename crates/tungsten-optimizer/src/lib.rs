@@ -1,7 +1,7 @@
 mod fuse;
 mod inline;
 
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 
 pub use inline::{GridInfo, InlineRecord, InlineRejection, InlineVerdict, explain_inline};
 
@@ -14,7 +14,7 @@ pub struct InlineStats {
     pub records: Vec<InlineRecord>,
 }
 
-pub fn perform_inline(program: &mut OptimizedProgram) -> InlineStats {
+pub fn perform_inline(program: &mut Program) -> InlineStats {
     let records = inline::Inliner::new(program).traverse();
     InlineStats {
         inlined: records.len(),

@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use tungsten_builder::prelude::*;
-use tungsten_ir::{ComputeUnit, OptimizedProgram, isomorphic};
+use tungsten_ir::{ComputeUnit, Program, isomorphic};
 
 fn program() -> ProgramBuilder {
     let mut pb = ProgramBuilder::new();
@@ -124,7 +124,7 @@ fn lists_match_the_hand_written_twin() {
 }
 
 /// Every way of removing one entry from one derived list.
-fn removals(p: &OptimizedProgram) -> Vec<(String, OptimizedProgram)> {
+fn removals(p: &Program) -> Vec<(String, Program)> {
     let mut out = Vec::new();
     for (u, cu) in p.compute_units.iter() {
         let ComputeUnit::DensityFunction {

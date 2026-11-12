@@ -3,7 +3,7 @@
 
 use tungsten_builder::prelude::*;
 
-fn build() -> Result<OptimizedProgram, BuildErrors> {
+fn build() -> Result<Program, BuildErrors> {
     let mut pb = ProgramBuilder::new();
     let mut f = FnBuilder::new("base_main", I32);
     f.ret(pos3().x() * 10 + pos3().y());

@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 
 use tungsten_ir::model::{AutoConst, AutoParam, AxisFactor,
     ComputeUnit, Constant, DensityInput, DensityMapping, EntryPoint, Function, HostInput, Name,
-    OptimizedProgram, Ref, VariableType,
+    Program, Ref, VariableType,
 };
 
 pub mod compiler;
@@ -111,7 +111,7 @@ pub trait DeviceCodegen {
 /// Decides what the device codegen generates and produces the glue that runs it.
 pub trait OrchestrationCodegen<'a> {
     /// Generates everything for `program`, using the names and schedule in `interface`.
-    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface);
+    fn convert_program(&mut self, program: &'a Program, interface: &Interface);
     /// The generated source; call after `convert_program`.
     fn output(&self) -> String;
 }
@@ -142,7 +142,7 @@ pub trait Backend {
     /// Generates everything for `program`. Stores nothing in `self`.
     fn generate(
         &self,
-        program: &OptimizedProgram,
+        program: &Program,
         interface: &Interface,
     ) -> Result<Self::Output, BackendError>;
 
@@ -220,7 +220,7 @@ pub struct Interface {
 
 impl Interface {
     /// Fixes every name with `rules`; reserved names are never produced.
-    pub fn build(program: &OptimizedProgram, rules: &NamingRules) -> Self {
+    pub fn build(program: &Program, rules: &NamingRules) -> Self {
         let walks: Vec<refine::Walk> = program.refinements.iter().map(|r| refine::walk(program, r)).collect();
         let (instances, dependencies) = discover_instances(program);
         // Instances only a refinement reruns have buffers, but no wave: `run` doesn't compute them.
@@ -544,7 +544,7 @@ impl Interface {
 
 /// Helpers for the `Lerp` inputs that reachable units read without an index, in discovery order.
 fn collect_lerp_helpers(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     rules: &NamingRules,
     used: &mut HashSet<String>,
@@ -592,7 +592,7 @@ fn collect_lerp_helpers(
 /// Everything reachable from the entry points (breadth-first), then what only refinements need,
 /// with each instance's direct inputs. `@previous` inputs add no dependency.
 fn discover_instances(
-    program: &OptimizedProgram,
+    program: &Program,
 ) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
     let mut instances = Vec::new();
     let mut dependencies: HashMap<Instance, Vec<Instance>> = HashMap::new();
@@ -635,7 +635,7 @@ fn discover_instances(
 /// Instances some entry's `run` computes: its seeds (`refine::schedule_seeds`) and everything they
 /// depend on.
 fn scheduled_instances(
-    program: &OptimizedProgram,
+    program: &Program,
     walks: &[refine::Walk],
     dependencies: &HashMap<Instance, Vec<Instance>>,
 ) -> HashSet<Instance> {

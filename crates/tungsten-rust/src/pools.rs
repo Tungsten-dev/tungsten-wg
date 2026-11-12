@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use tungsten_interface::naming::{NamingRules, sanitize_name, unique};
 use tungsten_interface::{BufferBounds, Interface};
-use tungsten_ir::model::{ComputeUnit, OptimizedProgram, Ref, VariableType};
+use tungsten_ir::model::{ComputeUnit, Program, Ref, VariableType};
 
 use crate::model as rcl;
 use crate::types::convert_type;
@@ -24,7 +24,7 @@ pub struct Pools {
 impl Pools {
     /// One field per element type used by any worker or read by any density input, so dead code
     /// still compiles.
-    pub fn new(program: &OptimizedProgram, interface: &Interface, bounds: BufferBounds) -> Self {
+    pub fn new(program: &Program, interface: &Interface, bounds: BufferBounds) -> Self {
         let mut types: Vec<VariableType> = vec![];
         let mut add = |t: &VariableType| {
             if !types.contains(t) {
@@ -61,7 +61,7 @@ impl Pools {
 }
 
 /// Element type of an instance's buffer: its unit's return type.
-pub fn unit_return_type(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> &VariableType {
+pub fn unit_return_type(program: &Program, cu: Ref<ComputeUnit>) -> &VariableType {
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
     &program.functions[*function].return_type
 }

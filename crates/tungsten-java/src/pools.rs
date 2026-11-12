@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use tungsten_interface::naming::{NamingRules, unique};
 use tungsten_interface::{BufferBounds, Interface};
-use tungsten_ir::model::{OptimizedProgram, VariableType};
+use tungsten_ir::model::{Program, VariableType};
 use tungsten_rust::pools::{type_stem, unit_return_type};
 
 /// The pools of `InternalBuffers`, and how reads of them are checked.
@@ -21,7 +21,7 @@ pub struct Pools {
 impl Pools {
     /// One field per element type used by any worker or read by any density input, so dead code
     /// still compiles.
-    pub fn new(program: &OptimizedProgram, interface: &Interface, bounds: BufferBounds) -> Self {
+    pub fn new(program: &Program, interface: &Interface, bounds: BufferBounds) -> Self {
         let mut types: Vec<VariableType> = vec![];
         let mut add = |t: &VariableType| {
             if !types.contains(t) {

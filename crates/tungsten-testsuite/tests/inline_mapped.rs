@@ -1,19 +1,19 @@
 //! What the inliner does with mapped reads (`specs/density-mappings.md` §5.4). The corpus trials
 //! check that values survive inlining; these check the program's shape.
 
-use tungsten_ir::model::{ComputeUnit, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, Program, Ref};
 use tungsten_optimizer::{InlineRejection, InlineVerdict, explain_inline, perform_inline};
 use tungsten_testsuite::corpus::{corpus_root, load_source};
 use tungsten_testsuite::env::TestEnv;
 
-fn load(name: &str) -> OptimizedProgram {
+fn load(name: &str) -> Program {
     let path = corpus_root().join(format!("density/{name}.tw"));
     let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     load_source(&src, &TestEnv::new()).unwrap_or_else(|e| panic!("{name}: {e}")).program
 }
 
 /// The unit whose main function is `main`.
-fn unit(p: &OptimizedProgram, main: &str) -> Ref<ComputeUnit> {
+fn unit(p: &Program, main: &str) -> Ref<ComputeUnit> {
     p.compute_units
         .iter()
         .find(|(_, u)| {
@@ -24,12 +24,12 @@ fn unit(p: &OptimizedProgram, main: &str) -> Ref<ComputeUnit> {
         .unwrap_or_else(|| panic!("no unit with main `{main}`"))
 }
 
-fn verdict(p: &OptimizedProgram, main: &str) -> InlineVerdict {
+fn verdict(p: &Program, main: &str) -> InlineVerdict {
     let r = unit(p, main);
     explain_inline(p).into_iter().find(|(u, _)| *u == r).unwrap().1
 }
 
-fn listed(p: &OptimizedProgram, main: &str) -> Vec<String> {
+fn listed(p: &Program, main: &str) -> Vec<String> {
     let ComputeUnit::DensityFunction { density_inputs, .. } = &p.compute_units[unit(p, main)];
     density_inputs.iter().map(|r| format!("{:?}", p.density_inputs[*r].name)).collect()
 }

@@ -9,7 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use tungsten_interface::naming::{WorkerNames, sanitize_name};
 use tungsten_interface::{Backend, BufferBounds, Interface};
-use tungsten_ir::model::{HostInput, OptimizedProgram};
+use tungsten_ir::model::{HostInput, Program};
 use tungsten_ir::VariableType;
 use tungsten_rust::backend::{RustBackend, RustConfig};
 use tungsten_rust::orchestration::rust_worker_names;
@@ -146,7 +146,7 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, depth: usize, sp
 /// only its own entry's hosts), and then the case's refine calls, each on the worker of its
 /// refinement's entry.
 pub fn driver_source(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     workers: &[WorkerNames],
     io: &TestIo,
@@ -226,13 +226,13 @@ fn encode_result(s: &mut String, e: &super::protocol::EntryIo, spec: &RegistrySp
 /// Module source of one test: runtime imports, both backend modules and the driver. Panics in
 /// the backend (it panics on types it can't derive) become an `Err`. Corpus tests compile with
 /// `BufferBounds::PerBuffer`, so bad indices fail where the interpreter's do.
-pub fn generate_test(program: &OptimizedProgram, env: &TestEnv) -> Result<String, String> {
+pub fn generate_test(program: &Program, env: &TestEnv) -> Result<String, String> {
     generate_test_with(program, env, BufferBounds::PerBuffer)
 }
 
 /// [`generate_test`] with another bounds mode.
 pub fn generate_test_with(
-    program: &OptimizedProgram,
+    program: &Program,
     env: &TestEnv,
     bounds: BufferBounds,
 ) -> Result<String, String> {

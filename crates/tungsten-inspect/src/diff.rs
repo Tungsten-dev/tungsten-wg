@@ -5,7 +5,7 @@ use std::fmt::Write;
 
 use tungsten_interface::Interface;
 use tungsten_interface::naming::NamingRules;
-use tungsten_ir::model::{ComputeUnit, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, Program, Ref};
 use tungsten_optimizer::{InlineRecord, InlineStats};
 
 use crate::analyze::{self, Ctx, Options, ir_text};
@@ -17,7 +17,7 @@ use crate::render::format::bytes;
 ///
 /// `before` must be a clone of the program that `after` was mutated from, and `stats` the result
 /// of that run; refs are matched with `Arena::translate`, which panics on unrelated programs.
-pub fn diff(before: &OptimizedProgram, after: &OptimizedProgram, stats: &InlineStats) -> String {
+pub fn diff(before: &Program, after: &Program, stats: &InlineStats) -> String {
     let options = Options {
         dataflow: false,
         element_sizes: ElementSizes::default(),

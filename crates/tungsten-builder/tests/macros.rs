@@ -11,7 +11,7 @@ fn finish(pb: &mut ProgramBuilder, f: FnBuilder) {
     pb.entry(u, Grid::new((1, 1, 1)));
 }
 
-fn with_macros() -> OptimizedProgram {
+fn with_macros() -> Program {
     let mut pb = ProgramBuilder::new();
     let mut f = FnBuilder::new("m", F64);
     let x = f.local("x", F64);
@@ -52,7 +52,7 @@ fn with_macros() -> OptimizedProgram {
     checked(pb)
 }
 
-fn with_methods() -> OptimizedProgram {
+fn with_methods() -> Program {
     let mut pb = ProgramBuilder::new();
     let mut f = FnBuilder::new("m", F64);
     let x = f.local("x", F64);

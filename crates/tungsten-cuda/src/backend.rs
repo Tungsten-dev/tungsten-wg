@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use tungsten_interface::naming::{NamingRules, cuda_sanitize};
 use tungsten_interface::{Backend, BackendError, BufferBounds, Compiler, Interface, OrchestrationCodegen};
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 
 use crate::{CudaCodegen, TransformCudaOrchestration};
 
@@ -237,7 +237,7 @@ impl Backend for CudaBackend {
         self.config.validate()
     }
 
-    fn generate(&self, program: &OptimizedProgram, interface: &Interface) -> Result<CudaOutput, BackendError> {
+    fn generate(&self, program: &Program, interface: &Interface) -> Result<CudaOutput, BackendError> {
         let naming_rules = self.naming_rules();
         let device = CudaCodegen::new(program, interface, &naming_rules, &self.config);
         let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &naming_rules);

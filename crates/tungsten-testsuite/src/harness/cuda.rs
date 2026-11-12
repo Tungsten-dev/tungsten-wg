@@ -15,7 +15,7 @@ use tungsten_cuda::{CudaConfig, Profile};
 use tungsten_interface::naming::WorkerNames;
 use tungsten_interface::{Backend, BufferBounds, Interface};
 use tungsten_ir::VariableType;
-use tungsten_ir::model::{HostInput, OptimizedProgram};
+use tungsten_ir::model::{HostInput, Program};
 
 use super::protocol::TestIo;
 use crate::env::TestEnv;
@@ -149,7 +149,7 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, ids: &mut Ids, s
 /// its own entry's hosts), and then the case's refine calls, each on the worker of its
 /// refinement's entry.
 pub fn driver_source(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     id: &str,
     workers: &[WorkerNames],
@@ -259,13 +259,13 @@ fn encode_result(s: &mut String, i: usize, e: &super::protocol::EntryIo, ids: &m
 /// The generated files of one test as a blob with paths relative to `<id>/`, and the test's
 /// `<id>.cu` (path `../<id>.cu` is avoided: it is written next to the directory by the batch).
 /// Backend panics become an `Err`.
-pub fn generate_test(program: &OptimizedProgram, env: &TestEnv, id: &str) -> Result<String, String> {
+pub fn generate_test(program: &Program, env: &TestEnv, id: &str) -> Result<String, String> {
     generate_test_with(program, env, id, BufferBounds::PerBuffer)
 }
 
 /// [`generate_test`] with another bounds mode.
 pub fn generate_test_with(
-    program: &OptimizedProgram,
+    program: &Program,
     env: &TestEnv,
     id: &str,
     bounds: BufferBounds,

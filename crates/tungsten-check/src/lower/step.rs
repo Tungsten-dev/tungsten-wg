@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use tungsten_core::{Ambient, Axis, BinOp, Expr, FieldSel, HostId, Lit, Type};
-use tungsten_ir::{ComputeUnit, DensityInput, OptimizedProgram, Ref};
+use tungsten_ir::{ComputeUnit, DensityInput, Program as IrProgram, Ref};
 
 use super::mapping::{listed_inputs, unit_return_type};
 use super::refine::{Inst, RefineGraph, Run};
@@ -38,7 +38,7 @@ pub(super) struct StepCfg {
 impl StepCfg {
     /// The step of `program.refinements[refinement]`, with new hosts from `first_host`. `None`
     /// if its entry doesn't exist.
-    pub fn new(p: &OptimizedProgram, refinement: usize, first_host: usize) -> Option<Self> {
+    pub fn new(p: &IrProgram, refinement: usize, first_host: usize) -> Option<Self> {
         let graph = RefineGraph::new(p);
         let walk = graph.walks.into_iter().find(|w| w.index == refinement)?;
         let offset = HostId(first_host);

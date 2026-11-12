@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use tungsten_ir::model::{AutoConst, ComputeUnit, HostInput, OptimizedProgram, Ref};
+use tungsten_ir::model::{AutoConst, ComputeUnit, HostInput, Program, Ref};
 
 /// Per-language naming: names that must never be generated, and how to make a legal identifier.
 /// Each backend builds its own [`super::Interface`] with its rules, so names may differ between backends.
@@ -275,7 +275,7 @@ pub fn unique(used: &mut HashSet<String>, base: String) -> String {
 /// `orchestrate_<unit>`, made unique against `used` (which each backend seeds with the names
 /// already taken in that type, such as the constructor) and against each other.
 pub fn entry_method_names(
-    program: &OptimizedProgram,
+    program: &Program,
     rules: &NamingRules,
     mut used: HashSet<String>,
 ) -> Vec<String> {
@@ -295,7 +295,7 @@ pub fn entry_method_names(
 /// the unit's base name made unique against `used` (which the backend seeds with the member names
 /// already taken) and against each other. `enqueue_<base>` and `result_<base>` derive from it.
 pub fn entry_base_names(
-    program: &OptimizedProgram,
+    program: &Program,
     rules: &NamingRules,
     mut used: HashSet<String>,
 ) -> Vec<String> {
@@ -311,7 +311,7 @@ pub fn entry_base_names(
 /// members the backend gives a worker). Refinement names are unique per entry, so two entries'
 /// methods may share a spelling: they live on different workers.
 pub fn refinement_method_names(
-    program: &OptimizedProgram,
+    program: &Program,
     rules: &NamingRules,
     reserved: &HashSet<String>,
 ) -> Vec<String> {
@@ -363,7 +363,7 @@ pub struct WorkerNames {
 /// of `rules`, `used_types` (the other generated types) and each other. Factories are unique
 /// against the reserved names, `used_members` (the other members of `Orchestration`) and each other.
 pub fn worker_names(
-    program: &OptimizedProgram,
+    program: &Program,
     rules: &NamingRules,
     style: FactoryStyle,
     used_types: HashSet<String>,
@@ -455,7 +455,7 @@ pub fn host_field_name(rules: &NamingRules, input: &HostInput) -> String {
 
 pub fn unit_base_name(
     rules: &NamingRules,
-    program: &OptimizedProgram,
+    program: &Program,
     cu: Ref<ComputeUnit>,
 ) -> String {
     let ComputeUnit::DensityFunction {
@@ -474,11 +474,11 @@ pub fn unit_base_name(
 mod tests {
     use super::{FactoryStyle, NamingRules, WorkerNames, cuda_sanitize, unique, worker_names};
     use std::collections::HashSet;
-    use tungsten_ir::model::{Arena, ComputeUnit, EntryPoint, Function, OptimizedProgram, VariableType};
+    use tungsten_ir::model::{Arena, ComputeUnit, EntryPoint, Function, Program, VariableType};
 
     /// One unit per name, each an entry.
-    fn entries(names: &[&str]) -> OptimizedProgram {
-        let mut p = OptimizedProgram {
+    fn entries(names: &[&str]) -> Program {
+        let mut p = Program {
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],
@@ -518,7 +518,7 @@ mod tests {
         p
     }
 
-    fn names(p: &OptimizedProgram, rules: &NamingRules, style: FactoryStyle) -> Vec<WorkerNames> {
+    fn names(p: &Program, rules: &NamingRules, style: FactoryStyle) -> Vec<WorkerNames> {
         worker_names(p, rules, style, HashSet::new(), HashSet::new())
     }
 

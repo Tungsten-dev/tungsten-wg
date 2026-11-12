@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use tungsten_interface::{Instance, Interface};
 use tungsten_ir::model::{
     AutoConst, AutoConstArg, AxisFactor, ComputeUnit, ConstExpr, Constant, DensityInput, DensityMapping, Expression, Function, HostInput, Name,
-    OptimizedProgram, Ref, Statement, Var, VariableType,
+    Program, Ref, Statement, Var, VariableType,
 };
 
 use crate::backend::ElementSizes;
@@ -33,7 +33,7 @@ pub(crate) struct Options {
 }
 
 pub(crate) fn build(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     options: &Options,
 ) -> Inspection {
@@ -130,7 +130,7 @@ pub(crate) struct InputName {
 
 /// The program, its interface, and every id and display name, resolved once.
 pub(crate) struct Ctx<'a> {
-    pub program: &'a OptimizedProgram,
+    pub program: &'a Program,
     pub interface: &'a Interface,
     pub options: &'a Options,
     pub units: HashMap<Ref<ComputeUnit>, Named>,
@@ -157,7 +157,7 @@ pub(crate) struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     pub fn new(
-        program: &'a OptimizedProgram,
+        program: &'a Program,
         interface: &'a Interface,
         options: &'a Options,
     ) -> Self {

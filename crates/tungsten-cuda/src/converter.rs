@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use tungsten_interface::{Interface, LerpHelper};
 use tungsten_interface::naming::cuda_sanitize;
 use tungsten_ir::model::{
-    BinaryOperator, Constant, DensityInput, Expression, Function, Name, OptimizedProgram, Ref, Var,
+    BinaryOperator, Constant, DensityInput, Expression, Function, Name, Program, Ref, Var,
     VariableType,
 };
 use tungsten_rust::types::{derive_binop_type, derive_const_type, element_type};
@@ -20,7 +20,7 @@ use crate::model as cuda;
 /// Converts one function body. Collects the helpers and constants it references so the caller can
 /// generate them afterwards.
 pub struct FunctionConverter<'a> {
-    pub program: &'a OptimizedProgram,
+    pub program: &'a Program,
     pub naming: &'a Interface,
     pub config: &'a CudaConfig,
     pub function: &'a Function,
@@ -44,7 +44,7 @@ impl<'a> FunctionConverter<'a> {
     /// `used_names` must hold every reserved and namespace-level name: C++ locals shadow functions
     /// and constants, so a local may not reuse one.
     pub fn new(
-        program: &'a OptimizedProgram,
+        program: &'a Program,
         naming: &'a Interface,
         config: &'a CudaConfig,
         function: &'a Function,

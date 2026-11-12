@@ -36,7 +36,7 @@ Claude sessions: see [Maintaining this file](#maintaining-this-file) at the bott
      - Float comparison is bit-exact, including `-0.0` vs `0.0`. min/max follow Java `Math.min/max`.
    - Most publishable part: cross-backend float/integer agreement on GPU code is a known pain point.
 2. **Two-IR architecture for verification.**
-   - A rich IR (`OptimizedProgram`) for compiling, and a plain core IR (dense ids, resolved types,
+   - A rich IR (`Program`) for compiling, and a plain core IR (dense ids, resolved types,
      no names, floats as bits) for proving. An unverified, tested lowering connects them.
    - Everything inside `tungsten-core` is proven, everything outside is tested.
    - The trust boundary is `prim.rs`, the only `external_body` file. `verify.sh` refuses

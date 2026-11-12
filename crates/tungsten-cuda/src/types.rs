@@ -56,7 +56,7 @@ pub fn auto_const_type(t: &VariableType) -> cuda::Type {
 
 /// Element type of a unit's buffer: the return type of its main function.
 pub fn unit_return_type(
-    program: &opt::OptimizedProgram,
+    program: &opt::Program,
     cu: opt::Ref<opt::ComputeUnit>,
 ) -> &VariableType {
     let opt::ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];

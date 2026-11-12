@@ -31,20 +31,29 @@ use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
-use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
 
 use crate::model as cuda;
 use crate::model::codegen::CudaCodeGenerator;
 
 pub mod backend;
+#[doc(hidden)]
 pub mod converter;
+#[doc(hidden)]
 pub mod expression;
+#[doc(hidden)]
 pub mod function;
+#[doc(hidden)]
 pub mod launch;
+#[doc(hidden)]
 pub mod mapping;
+#[doc(hidden)]
 pub mod model;
+#[doc(hidden)]
 pub mod orchestration;
+#[doc(hidden)]
 pub mod statement;
+#[doc(hidden)]
 pub mod types;
 
 pub use backend::{CudaBackend, CudaCompile, CudaConfig, CudaOutput, InlinePolicy, Profile};
@@ -91,7 +100,7 @@ pub fn kernel_body_name(interface: &Interface, inst: &Instance) -> String {
 
 /// Every namespace-level name of the device code, plus the reserved names. Locals may not reuse
 /// any of them, since a C++ local shadows a function or constant of the same name.
-fn namespace_names(source: &OptimizedProgram, naming: &Interface, rules: &NamingRules, config: &CudaConfig) -> HashSet<String> {
+fn namespace_names(source: &Program, naming: &Interface, rules: &NamingRules, config: &CudaConfig) -> HashSet<String> {
     let mut names = rules.used_set();
     for inst in naming.instances() {
         names.insert(naming.density_fn(inst.cu, inst.dimensions).to_string());
@@ -134,7 +143,7 @@ fn namespace_names(source: &OptimizedProgram, naming: &Interface, rules: &Naming
 /// Generation is idempotent per item (the `done_*` sets), so units, helpers and constants shared
 /// between instances are emitted once.
 pub struct CudaCodegen<'a> {
-    source: &'a OptimizedProgram,
+    source: &'a Program,
     /// Names and schedule shared with the orchestration side.
     naming: &'a Interface,
     rules: &'a NamingRules,
@@ -160,7 +169,7 @@ pub struct CudaCodegen<'a> {
 impl<'a> CudaCodegen<'a> {
     /// `naming` must be the interface built for `source` with `rules`; nothing is generated until
     /// asked.
-    pub fn new(source: &'a OptimizedProgram, naming: &'a Interface, rules: &'a NamingRules, config: &'a CudaConfig) -> Self {
+    pub fn new(source: &'a Program, naming: &'a Interface, rules: &'a NamingRules, config: &'a CudaConfig) -> Self {
         let namespace_names = namespace_names(source, naming, rules, config);
         Self {
             source,

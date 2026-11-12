@@ -42,18 +42,28 @@ use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineR
 use crate::pools::Pools;
 use crate::model as java;
 use crate::model::codegen::JavaCodeGenerator;
-use tungsten_ir::model::{ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
 
 pub mod backend;
+#[doc(hidden)]
 pub mod converter;
+#[doc(hidden)]
 pub mod expression;
+#[doc(hidden)]
 pub mod function;
+#[doc(hidden)]
 pub mod mapping;
+#[doc(hidden)]
 pub mod model;
+#[doc(hidden)]
 pub mod orchestration;
+#[doc(hidden)]
 pub mod pools;
+#[doc(hidden)]
 pub mod size;
+#[doc(hidden)]
 pub mod statement;
+#[doc(hidden)]
 pub mod types;
 
 pub use backend::{JavaBackend, JavaCompile, JavaConfig, JavaOutput};
@@ -97,7 +107,7 @@ pub fn uniform_arguments() -> Vec<java::Expression> {
 /// Generation is idempotent per item (the `done_*` sets), so units, helpers and constants shared
 /// between instances are emitted once.
 pub struct JavaCodegen<'a> {
-    source: &'a OptimizedProgram,
+    source: &'a Program,
     /// Names and schedule shared with the orchestration side.
     naming: &'a Interface,
     pools: &'a Pools,
@@ -122,7 +132,7 @@ impl<'a> JavaCodegen<'a> {
     /// asked. `class_name` is the (already sanitized) generated top-level class, which `rules` must
     /// reserve so no member collides with it.
     pub fn new(
-        source: &'a OptimizedProgram,
+        source: &'a Program,
         naming: &'a Interface,
         pools: &'a Pools,
         rules: &'a NamingRules,

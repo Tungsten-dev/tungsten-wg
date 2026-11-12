@@ -11,7 +11,7 @@ use crate::model as rcl;
 use crate::pools::cells;
 use crate::types::convert_type;
 use tungsten_interface::{BackendError, BufferBounds, Interface, LerpHelper};
-use tungsten_ir::model::{AxisFactor, DensityInput, DensityMapping, OptimizedProgram, VariableType};
+use tungsten_ir::model::{AxisFactor, DensityInput, DensityMapping, Program, VariableType};
 
 /// Parameter names of a lerp helper.
 const POOL: &str = "pool";
@@ -22,7 +22,7 @@ const AXES: [&str; 3] = ["x", "y", "z"];
 
 /// What generated code can't express at all: a factor below 1, and a lerp of a non-float element.
 /// Everything else is legal, even when the checked path would have rejected it (§5.3).
-pub fn check_emittable(program: &OptimizedProgram, interface: &Interface) -> Result<(), BackendError> {
+pub fn check_emittable(program: &Program, interface: &Interface) -> Result<(), BackendError> {
     for (r, d) in program.density_inputs.iter() {
         let name = interface.offset_param(r).trim_start_matches("off_");
         let (DensityMapping::Expand(factors) | DensityMapping::Lerp(factors)) = d.mapping else {

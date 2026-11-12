@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use tungsten_wg::interface::{Interface, naming::NamingRules};
-use tungsten_wg::ir::model::OptimizedProgram;
+use tungsten_wg::ir::model::Program;
 use tungsten_wg::{Backend, BackendError, CompileError, Compiler, Inline, Passes, check};
 
 struct MyConfig {
@@ -51,7 +51,7 @@ impl Backend for MyBackend {
         Passes::default().inline(Inline::All)
     }
 
-    fn generate(&self, p: &OptimizedProgram, _: &Interface) -> Result<MyOutput, BackendError> {
+    fn generate(&self, p: &Program, _: &Interface) -> Result<MyOutput, BackendError> {
         Ok(MyOutput {
             text: format!("level {}, {} unit(s)", self.config.level, p.compute_units.iter().count()),
             warnings: if self.config.warn { vec!["careful".into()] } else { vec![] },
@@ -80,7 +80,7 @@ impl MyCompile for Compiler<MyBackend> {
     }
 }
 
-fn program() -> OptimizedProgram {
+fn program() -> Program {
     use tungsten_wg::builder::prelude::*;
     let mut pb = ProgramBuilder::new();
     let mut f = FnBuilder::new("m", F64);

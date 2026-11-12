@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use tungsten_core::check::{CaseErrors, check, check_case};
 use tungsten_core::exec::{CaseResult, Failure, eval_program, new_memo};
 use tungsten_core::{Case, EvalError, ExternId, Externs, F64x3, HostId, I32x3, Program, StuckReason, Value};
-use tungsten_ir::OptimizedProgram;
+use tungsten_ir::Program as IrProgram;
 
 use crate::check::{CheckErrors, Invalid, render};
 use crate::map::{Instance, LowerMap};
@@ -92,7 +92,7 @@ pub struct Prepared {
 }
 
 /// Lowers `p` against `reg` and runs the checker. Do this once per program.
-pub fn prepare(p: &OptimizedProgram, reg: &Registry) -> Result<Prepared, Invalid> {
+pub fn prepare(p: &IrProgram, reg: &Registry) -> Result<Prepared, Invalid> {
     let lowered = lower(p, reg).map_err(Invalid::Lower)?;
     if let Err(errs) = check(&lowered.program) {
         return Err(Invalid::Check(render(&lowered.program, &lowered.map, errs)));
@@ -325,7 +325,7 @@ fn eval_checked<E: Externs>(program: &Program, case: &Case, ext: &E, opts: EvalO
 
 /// `prepare`, bind, `eval` in one go.
 pub fn evaluate<E: Externs>(
-    p: &OptimizedProgram,
+    p: &IrProgram,
     reg: &Registry,
     case: &NamedCase,
     ext: &E,

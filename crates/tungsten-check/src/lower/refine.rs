@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 
 use tungsten_core::InputId;
-use tungsten_ir::{ComputeUnit, DensityInput, DensityMapping, OptimizedProgram, Ref, Refinement, Rerun};
+use tungsten_ir::{ComputeUnit, DensityInput, DensityMapping, Program as IrProgram, Ref, Refinement, Rerun};
 
 use super::Ctx;
 use super::mapping::{AXES, arr, listed_inputs, unit_reads, unit_return_type};
@@ -72,7 +72,7 @@ pub(super) struct RefineGraph {
 }
 
 impl RefineGraph {
-    pub fn new(p: &OptimizedProgram) -> Self {
+    pub fn new(p: &IrProgram) -> Self {
         let walks = p
             .refinements
             .iter()
@@ -83,7 +83,7 @@ impl RefineGraph {
     }
 }
 
-fn walk(p: &OptimizedProgram, index: usize, r: &Refinement) -> Option<Walk> {
+fn walk(p: &IrProgram, index: usize, r: &Refinement) -> Option<Walk> {
     let entry = p.entry_points.get(r.entry)?;
     let reruns: Vec<Inst> = r.reruns.iter().map(Inst::of_rerun).collect();
     // The first listing wins when an instance is listed twice (`RefineDuplicateRerun`).

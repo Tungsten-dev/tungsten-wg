@@ -15,14 +15,14 @@ compiles the program, runs it out of process on the same cases, and must match t
 
 New pieces:
 
-- `tungsten-parse`: a lenient parser from text to `OptimizedProgram` and a canonical printer
+- `tungsten-parse`: a lenient parser from text to `Program` and a canonical printer
   back to text.
 - `tungsten-core`: the single **Verus-verified** crate, with no dependencies besides Verus'
   own. It holds the core IR, the well-formedness and type checker, the spec semantics written
   as `spec fn`s, and the executable interpreter, which is proven to refine that spec. Everything
   in this crate is proven, and everything outside it is tested.
 - `tungsten-check`: plain Rust, unverified. The registry, the lowering from
-  `OptimizedProgram` to the core IR, and the entry points `tungsten_check::{prepare, evaluate}`
+  `Program` to the core IR, and the entry points `tungsten_check::{prepare, evaluate}`
   (lower → check → evaluate). User-facing through the facade's `check` module and `Compiler`. See its
   `README.md`.
 - `tungsten-testsuite` (`publish = false`): the harness, the test corpus, the extern registry,
@@ -34,7 +34,7 @@ New pieces:
 | --- | --- |
 | Verification tool | Verus. The crates build with plain `cargo` (`verus!{}` erases). `vstd` comes from crates.io, `=`-pinned. Proofs run with `scripts/verify.sh` (downloads the pinned release, runs `cargo verus verify -p tungsten-core`), locally only. They don't gate CI. |
 | What is proven | Spec + refinement: exec interpreter == spec semantics. Plus type soundness of the checker, fuel monotonicity, and the layout lemma (§6.3). Floats are uninterpreted in both spec and exec. |
-| Verified IR | A lowered **core IR** (dense `Vec` indices, resolved types, no names). The lowering from `OptimizedProgram` is ordinary Rust and is tested, not proven. |
+| Verified IR | A lowered **core IR** (dense `Vec` indices, resolved types, no names). The lowering from `Program` is ordinary Rust and is tested, not proven. |
 | Checker | Verified. `check(p) == Ok` ⇒ the interpreter never gets stuck. |
 | Termination | Fuel **per `While` execution**: one `While` may run at most `fuel` iterations, else `OutOfFuel`. This outcome is interpreter-only: it fails the test unless the file says `@expect "<case>" error(OutOfFuel)`, and either way that case is never sent to a backend, which has no fuel. `Repeat` costs nothing. Recursion and cyclic consts/inputs are rejected by the checker. Every function, const, input and unit has a **rank** (its depth in the dependency DAG), and every call/read checks that the rank decreases. |
 | Edge semantics | Java semantics, normative for every backend: wrapping integer arithmetic, masked shift amounts, saturating float→int casts with NaN→0. Integer `/` and `%` by zero is an error. |
@@ -79,7 +79,7 @@ crates/tungsten-core/          # all inside verus!{}, depends only on vstd/built
   src/proofs/         # (not started) type soundness, fuel monotonicity, layout lemma
 crates/tungsten-check/         # plain Rust, unverified
   src/registry.rs     # Registry, RegistryBuilder (names + decls)
-  src/lower/          # OptimizedProgram -> core IR
+  src/lower/          # Program -> core IR
   src/check.rs        # checker errors → Location; Invalid
   src/eval.rs         # prepare, Prepared::eval, evaluate (lower → check → eval)
 crates/tungsten-testsuite/     # Rust, Java and CUDA differential done; layout in its README

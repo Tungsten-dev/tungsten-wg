@@ -21,6 +21,10 @@ mod wf_mirror;
 
 use tungsten_core::{Expr, FnId, Stmt};
 use tungsten_ir::*;
+// `tungsten_ir::Program` shares its name with the core IR one: tests say `IrProgram` for the former.
+#[allow(unused_imports)]
+pub(crate) use tungsten_core::Program;
+pub(crate) use tungsten_ir::Program as IrProgram;
 use tungsten_parse::{Env, ExternSig, FileId};
 
 use crate::{AutoArgType, Lowered, Registry, RegistryBuilder, lower};
@@ -80,7 +84,7 @@ pub fn registry() -> Registry {
         .unwrap()
 }
 
-pub fn load(src: &str) -> OptimizedProgram {
+pub fn load(src: &str) -> IrProgram {
     tungsten_parse::load(src, FileId(0), &TestEnv)
         .unwrap_or_else(|d| panic!("{d}\n{src}"))
         .program
@@ -134,7 +138,7 @@ pub fn snippet(decls: &str, body: &str) -> String {
 
 /// Lowers, expecting success, and checks wf. Then runs the checker: a rejection must be listed
 /// in `check_rejects.rs`.
-pub fn ok(p: &OptimizedProgram, registry: &Registry) -> Lowered {
+pub fn ok(p: &IrProgram, registry: &Registry) -> Lowered {
     let l = lower(p, registry).unwrap_or_else(|e| panic!("lowering failed:\n{e}"));
     let wf = tungsten_core::check::wf::check_wf(&l.program);
     assert!(wf.is_empty(), "lowered program is not wf: {wf:?}");
@@ -145,7 +149,7 @@ pub fn ok(p: &OptimizedProgram, registry: &Registry) -> Lowered {
 }
 
 /// Lowers, expecting failure; the errors as `Display` lines.
-pub fn errs(p: &OptimizedProgram, registry: &Registry) -> Vec<String> {
+pub fn errs(p: &IrProgram, registry: &Registry) -> Vec<String> {
     match lower(p, registry) {
         Ok(_) => panic!("lowering succeeded"),
         Err(e) => e.0.iter().map(|e| e.to_string()).collect(),
@@ -178,8 +182,8 @@ pub fn ret(body: &str) -> Expr {
 }
 
 /// An empty program to build on by hand.
-pub fn empty() -> OptimizedProgram {
-    OptimizedProgram {
+pub fn empty() -> IrProgram {
+    IrProgram {
         compute_units: Arena::new(),
         functions: Arena::new(),
         entry_points: vec![],

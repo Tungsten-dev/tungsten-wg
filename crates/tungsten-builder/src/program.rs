@@ -5,7 +5,7 @@ use std::panic::Location;
 
 use tungsten_ir::{
     Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput, DensityMapping, EntryPoint, Expression,
-    Function, HostInput, Name, OptimizedProgram, OwnerTag, Ref, Refinement, Rerun, UnaryOperator, VariableType,
+    Function, HostInput, Name, Program, OwnerTag, Ref, Refinement, Rerun, UnaryOperator, VariableType,
 };
 
 use crate::derive::{Summary, const_deps, summarize};
@@ -232,10 +232,10 @@ impl RerunSpec {
 
 type InputKey = (Ref<ComputeUnit>, (i32, i32, i32), [u64; 6], DensityMapping, bool);
 
-/// Builds an [`OptimizedProgram`]. Errors from every function and declaration collect here, and
+/// Builds an [`Program`]. Errors from every function and declaration collect here, and
 /// [`build`](Self::build) returns them all.
 pub struct ProgramBuilder {
-    pub(crate) program: OptimizedProgram,
+    pub(crate) program: Program,
     pub(crate) summaries: HashMap<Ref<Function>, Summary>,
     /// Each constant's transitive dependencies, dependencies first, without the constant.
     pub(crate) const_deps: HashMap<Ref<tungsten_ir::Constant>, Vec<Ref<tungsten_ir::Constant>>>,
@@ -256,7 +256,7 @@ impl Default for ProgramBuilder {
 impl ProgramBuilder {
     pub fn new() -> Self {
         Self {
-            program: OptimizedProgram {
+            program: Program {
                 compute_units: Arena::new(),
                 functions: Arena::new(),
                 entry_points: Vec::new(),
@@ -611,7 +611,7 @@ impl ProgramBuilder {
     }
 
     /// The program, or every error recorded while building it.
-    pub fn build(self) -> Result<OptimizedProgram, BuildErrors> {
+    pub fn build(self) -> Result<Program, BuildErrors> {
         if self.errors.is_empty() {
             Ok(self.program)
         } else {

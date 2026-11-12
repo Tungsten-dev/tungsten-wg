@@ -109,7 +109,7 @@ pub fn derive_binop_type(
 
 /// Type of a constant initializer; `None` if it cannot be derived.
 pub fn derive_const_type(
-    program: &opt::OptimizedProgram,
+    program: &opt::Program,
     e: &opt::ConstExpr,
 ) -> Option<VariableType> {
     use opt::ConstExpr as C;

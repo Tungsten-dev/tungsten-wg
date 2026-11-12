@@ -5,7 +5,7 @@ rules it follows (errors, id order, design decisions).
 
 ## What this crate does
 
-It turns a `tungsten-ir` `OptimizedProgram` into the core IR defined in `tungsten-core`. Read
+It turns a `tungsten-ir` `IrProgram` into the core IR defined in `tungsten-core`. Read
 that crate's `README.md` first if you don't know what the core IR looks like.
 
 ```rust
@@ -395,5 +395,5 @@ Open questions:
   `tests/check_errors.rs`.
 - **New error kind:** add it to `LowerErrorKind` in `error.rs` with a `Display` message, and
   add a test in `tests/errors.rs`.
-- **New arena in `OptimizedProgram`:** give it ids in `build_ids`, lower it in `run` at the
+- **New arena in `IrProgram`:** give it ids in `build_ids`, lower it in `run` at the
   right point in the walk order, and add it to `LowerMap`.

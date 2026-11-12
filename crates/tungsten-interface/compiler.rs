@@ -7,7 +7,7 @@ each backend crate adds its own settings as an extension trait on `Compiler<ItsB
 use std::sync::Arc;
 
 use tungsten_check as check;
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 
 use crate::{Backend, BackendError, Interface};
 
@@ -64,7 +64,7 @@ pub enum CompileError {
 /// in the backend's crate (`RustCompile`, `CudaCompile`, ...), reached through
 /// [`backend_mut`](Self::backend_mut).
 pub struct Compiler<B: Backend> {
-    program: OptimizedProgram,
+    program: Program,
     registry: Arc<check::Registry>,
     backend: B,
     /// `None` means `backend.default_passes()`.
@@ -72,14 +72,14 @@ pub struct Compiler<B: Backend> {
     deny_warnings: bool,
     /// Runs after the real passes. Reports whether it changed the program.
     #[cfg(test)]
-    pub(crate) test_pass: Option<fn(&mut OptimizedProgram) -> bool>,
+    pub(crate) test_pass: Option<fn(&mut Program) -> bool>,
 }
 
 impl<B: Backend> Compiler<B> {
     /// `registry` declares every extern and record the program uses. It can be an owned
     /// `Registry`, or an `Arc` shared by the `Compiler`s of several targets.
     pub fn new(
-        program: OptimizedProgram,
+        program: Program,
         registry: impl Into<Arc<check::Registry>>,
         backend: B,
     ) -> Self {
@@ -226,7 +226,7 @@ mod tests {
         fn default_passes(&self) -> Passes {
             self.passes.clone()
         }
-        fn generate(&self, p: &OptimizedProgram, _: &Interface) -> Result<Out, BackendError> {
+        fn generate(&self, p: &Program, _: &Interface) -> Result<Out, BackendError> {
             self.calls.set(self.calls.get() + 1);
             Ok(Out {
                 warnings: self.warnings.clone(),
@@ -250,8 +250,8 @@ mod tests {
         }
     }
 
-    fn program(valid: bool) -> OptimizedProgram {
-        let mut p = OptimizedProgram {
+    fn program(valid: bool) -> Program {
+        let mut p = Program {
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],
@@ -306,7 +306,7 @@ mod tests {
         fn default_passes(&self) -> Passes {
             self.1.default_passes()
         }
-        fn generate(&self, p: &OptimizedProgram, i: &Interface) -> Result<Out, BackendError> {
+        fn generate(&self, p: &Program, i: &Interface) -> Result<Out, BackendError> {
             self.0.set(self.0.get() + 1);
             self.1.generate(p, i)
         }
@@ -417,13 +417,13 @@ mod tests {
 
     #[test]
     fn recheck_only_when_a_pass_changed_the_program() {
-        fn corrupt(p: &mut OptimizedProgram) -> bool {
+        fn corrupt(p: &mut Program) -> bool {
             let mut other: Arena<ComputeUnit> = Arena::new();
             let f = p.functions.iter().next().map(|(r, _)| r).unwrap();
             p.entry_points[0].density_function = other.insert(unit(f));
             true
         }
-        fn unchanged(_: &mut OptimizedProgram) -> bool {
+        fn unchanged(_: &mut Program) -> bool {
             false
         }
         let reg = registry();

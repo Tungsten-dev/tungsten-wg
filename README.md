@@ -25,8 +25,8 @@ The project is a Cargo workspace of small crates. Each one owns a single part of
 
 <!-- TODO: add dependency diagram (draw.io) -->
 
-- tungsten-ir: the OptimizedProgram model (compute units, functions, statements, arenas). Density inputs live in one program-wide arena, and each unit lists the ones it reads.
-- tungsten-builder: builds OptimizedPrograms from Rust, for frontends. Expressions are typed as they are built, every mistake is collected, and unit lists are derived from the bodies.
+- tungsten-ir: the Program model (compute units, functions, statements, arenas). Density inputs live in one program-wide arena, and each unit lists the ones it reads.
+- tungsten-builder: builds Programs from Rust, for frontends. Expressions are typed as they are built, every mistake is collected, and unit lists are derived from the bodies.
 - tungsten-optimizer: passes over the IR. Right now that is inlining.
 - tungsten-interface: the contract between the compiler and the backends (Interface, NamingRules, the codegen traits and the Backend trait), and the pipeline that drives it: Compiler, Passes and CompileError.
 - tungsten-check: lowers programs to the core IR against a registry and runs the checker.
@@ -67,7 +67,7 @@ use tungsten_wg::builder::prelude::*;
 use tungsten_wg::{Compiler, Inline, Passes, RustBackend, RustCompile, RustConfig, RustOutput};
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
-// Build an OptimizedProgram (see crates/tungsten-builder/README.md)
+// Build an Program (see crates/tungsten-builder/README.md)
 let mut pb = ProgramBuilder::new();
 let mut f = FnBuilder::new("height", F64);
 f.ret(pos3().y().cast(F64) * 0.5);

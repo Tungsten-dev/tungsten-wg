@@ -82,7 +82,7 @@ pub struct Grid {
 pub struct EntryInfo {
     pub id: String,
     pub display: String,
-    /// Index in `OptimizedProgram::entry_points`.
+    /// Index in `Program::entry_points`.
     pub index: usize,
     /// The instance this entry point returns.
     pub instance: String,
@@ -224,7 +224,7 @@ pub struct EdgeInfo {
 pub struct RefinementInfo {
     pub id: String,
     pub display: String,
-    /// Index in `OptimizedProgram::refinements`.
+    /// Index in `Program::refinements`.
     pub index: usize,
     /// Id of the entry whose worker it runs on.
     pub entry: String,

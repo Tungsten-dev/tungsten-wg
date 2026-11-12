@@ -588,7 +588,7 @@ pub struct Function {
 /// fresh tag, and every embedded `Ref` is rewritten to it.
 ///
 /// Any new `Ref`-holding field anywhere in the IR must be added to the walker in `retag.rs`.
-pub struct OptimizedProgram {
+pub struct Program {
     pub compute_units: Arena<ComputeUnit>,
     pub functions: Arena<Function>,
     pub entry_points: Vec<EntryPoint>,

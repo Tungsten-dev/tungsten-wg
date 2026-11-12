@@ -22,7 +22,7 @@ pub fn convert_type(t: &VariableType) -> java::Type {
 }
 
 /// Element type of a unit's buffer: the return type of its main function.
-pub fn unit_return_type(program: &opt::OptimizedProgram, cu: opt::Ref<opt::ComputeUnit>) -> &VariableType {
+pub fn unit_return_type(program: &opt::Program, cu: opt::Ref<opt::ComputeUnit>) -> &VariableType {
     let opt::ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
     &program.functions[*function].return_type
 }

@@ -7,7 +7,7 @@ use tungsten_core as core;
 use tungsten_core::{ConstId, FnId, HostId, InputId, LocalId, TableId, UnitId};
 use tungsten_ir::{
     AutoConst, AutoConstArg, ComputeUnit, DensityInput, EntryPoint, Function, HostInput, Name,
-    OptimizedProgram, VariableType,
+    Program as IrProgram, VariableType,
 };
 
 use super::refine::{Inst, RefineGraph};
@@ -40,16 +40,16 @@ pub(crate) struct Output {
 
 /// Lowers `p` as the normal program: the entries, then a hidden entry per instance a refine call
 /// reads from `run` that no entry computes (`specs/refinement.md` §7.1).
-pub(crate) fn run(p: &OptimizedProgram, reg: &Registry) -> Output {
+pub(crate) fn run(p: &IrProgram, reg: &Registry) -> Output {
     lower_with(p, reg, None)
 }
 
 /// Lowers refine call `refinement` of `p`, which lowered without errors (§7.2).
-pub(crate) fn run_step(p: &OptimizedProgram, reg: &Registry, refinement: usize) -> Output {
+pub(crate) fn run_step(p: &IrProgram, reg: &Registry, refinement: usize) -> Output {
     lower_with(p, reg, Some(refinement))
 }
 
-fn lower_with(p: &OptimizedProgram, reg: &Registry, refinement: Option<usize>) -> Output {
+fn lower_with(p: &IrProgram, reg: &Registry, refinement: Option<usize>) -> Output {
     let mut cx = Ctx {
         p,
         reg,
@@ -104,7 +104,7 @@ fn lower_with(p: &OptimizedProgram, reg: &Registry, refinement: Option<usize>) -
 }
 
 /// Ids in arena iteration order, with display names.
-fn build_ids(p: &OptimizedProgram) -> LowerMap {
+fn build_ids(p: &IrProgram) -> LowerMap {
     let mut m = LowerMap::default();
     for (i, (r, f)) in p.functions.iter().enumerate() {
         let name = f.canonical_name.clone().unwrap_or_else(|| format!("#{i}"));

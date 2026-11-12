@@ -12,7 +12,7 @@ pub(crate) mod types;
 use std::collections::HashMap;
 
 use tungsten_core::{HandleTypeId, RecordId, Type};
-use tungsten_ir::{Arena, Function, OptimizedProgram, Ref, Var, VariableType};
+use tungsten_ir::{Arena, Function, Program as IrProgram, Ref, Var, VariableType};
 
 use crate::error::{Item, Location, LowerError, LowerErrorKind, Step};
 use crate::map::LowerMap;
@@ -30,7 +30,7 @@ pub(crate) fn get<T>(a: &Arena<T>, r: Ref<T>) -> Option<&T> {
 /// Lowering state: the program, the registry, the map built so far, collected errors and the
 /// current location.
 pub(crate) struct Ctx<'p, 'r> {
-    pub p: &'p OptimizedProgram,
+    pub p: &'p IrProgram,
     pub reg: &'r Registry,
     pub map: LowerMap,
     pub errors: Vec<LowerError>,

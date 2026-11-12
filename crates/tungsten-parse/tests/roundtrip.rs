@@ -15,7 +15,7 @@ fn load_ok(src: &str) -> TestFile {
 }
 
 /// P1 and P2 for one program.
-fn check_program(m: &tungsten_ir::OptimizedProgram, what: &str) {
+fn check_program(m: &tungsten_ir::Program, what: &str) {
     let text = print(m);
     let t = load_ok(&text);
     let c = compact(m);

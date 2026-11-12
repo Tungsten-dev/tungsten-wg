@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use tungsten_interface::naming::{FactoryStyle, NamingRules, WorkerNames, worker_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen, RefineRun};
-use tungsten_ir::model::{AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, Ref, VariableType};
+use tungsten_ir::model::{AutoConstArg, ComputeUnit, HostInput, Program, Ref, VariableType};
 
 use super::function::{Kernel, build_kernel_wrapper};
 use super::launch::launch_shape;
@@ -44,7 +44,7 @@ const RESERVED_MEMBERS: [&str; 5] = ["create", "profile", "required_flags", "sha
 
 /// Names of every entry's worker, in entry order: `<Base>Worker`, `<Base>HostConsts`,
 /// `<Base>Layout` and `create_<base>_worker`. Frontends and drivers get them from here.
-pub fn cuda_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec<WorkerNames> {
+pub fn cuda_worker_names(program: &Program, rules: &NamingRules) -> Vec<WorkerNames> {
     worker_names(
         program,
         rules,
@@ -87,7 +87,7 @@ impl Entry {
     }
 }
 
-fn entries(program: &OptimizedProgram, rules: &NamingRules) -> Vec<Entry> {
+fn entries(program: &Program, rules: &NamingRules) -> Vec<Entry> {
     let names = cuda_worker_names(program, rules);
     program
         .entry_points
@@ -121,13 +121,13 @@ fn array_type_string(t: &cuda::Type) -> String {
     format!("{}{}", type_string(base), dims)
 }
 
-fn canonical_name(program: &OptimizedProgram, inst: &Instance) -> String {
+fn canonical_name(program: &Program, inst: &Instance) -> String {
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[inst.cu];
     program.functions[*function].canonical_name.clone().unwrap_or_else(|| "density function".into())
 }
 
 /// Static host inputs with their interface field names, in arena order.
-fn static_host_inputs<'p>(program: &'p OptimizedProgram, interface: &Interface) -> Vec<(String, &'p VariableType)> {
+fn static_host_inputs<'p>(program: &'p Program, interface: &Interface) -> Vec<(String, &'p VariableType)> {
     program
         .host_inputs
         .iter()
@@ -140,7 +140,7 @@ fn static_host_inputs<'p>(program: &'p OptimizedProgram, interface: &Interface) 
 
 /// The static hosts entry `entry`'s worker reads (`Interface::entry_hosts`), with their field names.
 fn entry_host_inputs<'p>(
-    program: &'p OptimizedProgram,
+    program: &'p Program,
     interface: &Interface,
     entry: usize,
 ) -> Vec<(String, &'p VariableType)> {
@@ -164,7 +164,7 @@ fn generated_comment(what: &str) -> cuda::Item {
 
 /// Every kernel that gets generated, in generation order: those of the scheduled units' instances,
 /// then one per distinct refine run.
-fn kernels(program: &OptimizedProgram, interface: &Interface) -> Vec<Kernel> {
+fn kernels(program: &Program, interface: &Interface) -> Vec<Kernel> {
     let mut out = Vec::new();
     let mut units = HashSet::new();
     for inst in interface.waves().iter().flatten() {
@@ -185,7 +185,7 @@ fn kernels(program: &OptimizedProgram, interface: &Interface) -> Vec<Kernel> {
 
 /// `interface.cuh`: `DeviceHostConsts`, `AutoConsts`, one `<Base>Layout` per worker, `Ctx` and the
 /// kernel declarations, in `<namespace>::dev`.
-fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
+fn interface_header(program: &Program, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
     let host_consts = cuda::Struct {
         doc: Some(format!(
             "Static host inputs of every entry, the device side of each `<Base>HostConsts` of `{}` (checked in orchestration.cu).",
@@ -288,7 +288,7 @@ fn interface_header(program: &OptimizedProgram, interface: &Interface, config: &
 }
 
 /// `orchestration.h`: the CUDA-free public API.
-fn public_header(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
+fn public_header(program: &Program, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
     let field = |t, n: &str| cuda::Item::Field { t, name: n.into() };
     let vec3 = cuda::Struct {
         doc: None,
@@ -467,7 +467,7 @@ fn string_literal(s: &str) -> String {
 }
 
 /// `long long seed, double salt, ` (with the trailing separator): the creation parameters.
-fn create_params(program: &OptimizedProgram, interface: &Interface) -> String {
+fn create_params(program: &Program, interface: &Interface) -> String {
     program
         .auto_params
         .iter()
@@ -479,7 +479,7 @@ fn create_params(program: &OptimizedProgram, interface: &Interface) -> String {
 }
 
 /// Statements of `create` that fill `auto_constants` on the host.
-fn auto_const_assignments(program: &OptimizedProgram, interface: &Interface) -> Vec<String> {
+fn auto_const_assignments(program: &Program, interface: &Interface) -> Vec<String> {
     let mut out = Vec::new();
     for (r, a) in program.auto_consts.iter() {
         let args: Vec<String> = a
@@ -512,7 +512,7 @@ fn indent(lines: &[String], depth: usize) -> String {
 /// The launches of one wave list: `kernel<<<..>>>(args)` and its error check. `origin` and
 /// `offset` are the host expressions of the kernel's leading arguments.
 fn launches(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     config: &CudaConfig,
     e: &Entry,
@@ -552,7 +552,7 @@ fn launches(
 
 /// `orchestration.cu`: `OrchestrationShared`, one `Impl` and the methods of each worker, `create`,
 /// the worker factories and the layout checks between the public and device structs.
-fn orchestration_source(program: &OptimizedProgram, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
+fn orchestration_source(program: &Program, interface: &Interface, config: &CudaConfig, entries: &[Entry]) -> cuda::File {
     let ns = &config.namespace;
     let host_inputs = static_host_inputs(program, interface);
 
@@ -908,7 +908,7 @@ impl<'a> TransformCudaOrchestration<'a> {
 impl<'a> OrchestrationCodegen<'a> for TransformCudaOrchestration<'a> {
     /// Generates the kernels on the device side in wave order, then the refine kernels, then the headers and host source.
     /// Calling it again replaces the files.
-    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
+    fn convert_program(&mut self, program: &'a Program, interface: &Interface) {
         for wave in interface.waves() {
             for inst in wave {
                 self.device.generate_kernel_of(vec![inst.cu]);

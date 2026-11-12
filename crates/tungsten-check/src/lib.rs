@@ -1,4 +1,4 @@
-//! Lowers a tungsten-ir [`OptimizedProgram`] to the core IR of `tungsten-core`
+//! Lowers a tungsten-ir [`IrProgram`] to the core IR of `tungsten-core`
 //! (re-exported as [`core_ir`]). See this crate's `README.md`.
 //!
 //! The lowering only resolves names and normalizes shapes. Anything that can be *wrong* (type
@@ -42,7 +42,7 @@ pub use tungsten_core::exec::{CaseResult, Failure};
 pub use tungsten_core::{Case, EvalError, ExternFail, Externs, StuckReason, Value};
 pub use registry::{AutoArgType, InitializerDecl, Registry, RegistryBuilder, RegistryError};
 
-use tungsten_ir::OptimizedProgram;
+use tungsten_ir::Program as IrProgram;
 
 use crate::lower::{run, run_step};
 use tungsten_core::HostId;
@@ -81,7 +81,7 @@ pub struct LoweredStep {
 /// Lowers `p` against `registry`. On success the program and its refine steps satisfy
 /// `tungsten_core::wf::wf_program`, and their extern and record tables are the registry's. On
 /// failure, every error of the normal program is returned, in walk order.
-pub fn lower(p: &OptimizedProgram, registry: &Registry) -> Result<Lowered, LowerErrors> {
+pub fn lower(p: &IrProgram, registry: &Registry) -> Result<Lowered, LowerErrors> {
     let out = run(p, registry);
     if !out.errors.is_empty() {
         return Err(LowerErrors(out.errors));

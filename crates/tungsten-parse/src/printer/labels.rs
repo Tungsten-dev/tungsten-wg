@@ -77,7 +77,7 @@ macro_rules! accessors {
 
 impl Labels {
     /// Panics (naming the entity) if an entry's unit doesn't resolve.
-    pub fn new(p: &OptimizedProgram) -> Labels {
+    pub fn new(p: &Program) -> Labels {
         let mut l = Labels::default();
 
         let fn_names = count(

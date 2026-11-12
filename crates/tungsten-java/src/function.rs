@@ -18,7 +18,7 @@ use crate::pools::Pools;
 use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
 use crate::model as java;
 use tungsten_ir::model::VariableType;
-use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, OptimizedProgram, Ref};
+use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, Program, Ref};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
 
@@ -68,7 +68,7 @@ fn finish(conv: FunctionConverter<'_>, method: java::Method) -> Converted {
 
 /// Converts a helper function: uniform parameters and offsets, then its own parameters, then the body.
 pub fn convert_helper(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     rules: &NamingRules,
@@ -101,7 +101,7 @@ pub fn convert_helper(
 ///
 /// It returns the value for the single position `p`; the kernel does the looping.
 pub fn convert_density(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     rules: &NamingRules,
@@ -145,7 +145,7 @@ fn empty_function() -> Function {
 
 /// `static final <T> <name> = <init>;` for constant `c`.
 pub fn convert_constant(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     rules: &NamingRules,
@@ -168,9 +168,9 @@ pub fn convert_constant(
 
 /// `constants` reordered so every constant follows the ones its initializer reads; Java rejects
 /// forward references between static fields.
-pub fn sort_constants(program: &OptimizedProgram, constants: &[Ref<Constant>]) -> Vec<Ref<Constant>> {
+pub fn sort_constants(program: &Program, constants: &[Ref<Constant>]) -> Vec<Ref<Constant>> {
     fn visit(
-        program: &OptimizedProgram,
+        program: &Program,
         c: Ref<Constant>,
         state: &mut HashMap<Ref<Constant>, bool>,
         out: &mut Vec<Ref<Constant>>,
@@ -209,7 +209,7 @@ fn vec3_literal((x, y, z): (f64, f64, f64)) -> java::Expression {
 /// host_consts)`: builds the `Config`, loops over every position (x minor, y middle, z major,
 /// matching RCL's `iter_3d`) and stores the density function's result at `out_off + idx` of the
 /// unit's pool. The offsets are those of the unit's main function.
-pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, pools: &Pools, inst: &Instance) -> java::Method {
+pub fn build_kernel(program: &Program, naming: &Interface, pools: &Pools, inst: &Instance) -> java::Method {
     kernel(program, naming, pools, inst, inst.cu, naming.kernel(inst), false)
 }
 
@@ -217,7 +217,7 @@ pub fn build_kernel(program: &OptimizedProgram, naming: &Interface, pools: &Pool
 /// after the origin. It runs `run.unit` over the target's grid and adds the offset to the
 /// iterator's `pos` only, so the store index stays in the buffer.
 pub fn build_refine_kernel(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     run: &RefineRun,
@@ -227,7 +227,7 @@ pub fn build_refine_kernel(
 
 /// `unit` is the one called per cell, and `target` the instance whose grid and buffer it fills.
 fn kernel(
-    program: &OptimizedProgram,
+    program: &Program,
     naming: &Interface,
     pools: &Pools,
     inst: &Instance,

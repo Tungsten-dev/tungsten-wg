@@ -6,7 +6,7 @@ produces the core IR is described in [`../tungsten-check/README.md`](../tungsten
 
 ## What this crate is for
 
-Tungsten programs have a rich representation (`tungsten-ir`'s `OptimizedProgram`). It is
+Tungsten programs have a rich representation (`tungsten-ir`'s `IrProgram`). It is
 built for compiling: generational `Ref`s, arenas, names everywhere, convenience variants such
 as `ConstructExtern`, and annotations the backends rely on.
 
@@ -16,7 +16,7 @@ That representation is awkward to *reason about*. The long-term plan is to write
 string and every float. So this crate defines a second, much plainer form of the same program:
 the **core IR**.
 
-You never write the core IR by hand. `tungsten-check` produces it from an `OptimizedProgram`
+You never write the core IR by hand. `tungsten-check` produces it from an `IrProgram`
 (see its `README.md`). This crate holds:
 
 1. the data types (`ir.rs`, `registry.rs`, `value.rs`),
@@ -29,7 +29,7 @@ termination of every exec fn. The code is shaped so the proof phase only *adds* 
 `ensures`, invariants and lemmas.
 
 ```
-OptimizedProgram ──(tungsten-check::lower)──▶ core_ir::Program ──▶ check::check ──▶ exec::eval_program
+IrProgram ──(tungsten-check::lower)──▶ core_ir::IrProgram ──▶ check::check ──▶ exec::eval_program
    (tungsten-ir)                               (this crate)          (this crate)     (this crate)
 ```
 

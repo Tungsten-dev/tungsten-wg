@@ -19,7 +19,7 @@ fn remove_nth<T>(a: &mut Arena<T>, k: usize) -> bool {
 }
 
 /// Applies mutation `kind`. Returns whether the result must be `Err`.
-fn mutate(p: &mut OptimizedProgram, other: &OptimizedProgram, kind: usize, k: usize) -> bool {
+fn mutate(p: &mut IrProgram, other: &IrProgram, kind: usize, k: usize) -> bool {
     match kind {
         // Random removals: may or may not leave a dangling ref, so only "no panic" is checked.
         0 => {

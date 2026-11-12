@@ -212,7 +212,7 @@ written *outside* `verus!{}` and delegates to it. Verified code calls `clone_*` 
 
 ### 5.1 The core IR exists because of Verus
 
-`tungsten-ir`'s `OptimizedProgram` is built for compiling: generational `Ref`s into arenas,
+`tungsten-ir`'s `IrProgram` is built for compiling: generational `Ref`s into arenas,
 names everywhere, convenience variants like `ConstructExtern`, `f32`/`f64` values. Each of those
 makes proofs harder. So the core IR is a second, much plainer form of the same program:
 

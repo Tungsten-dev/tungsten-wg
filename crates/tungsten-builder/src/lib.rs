@@ -1,4 +1,4 @@
-//! Builds valid-by-construction [`OptimizedProgram`](tungsten_ir::OptimizedProgram)s from Rust.
+//! Builds valid-by-construction [`Program`](tungsten_ir::Program)s from Rust.
 //! See `README.md` and `specs/builder.md`.
 //!
 //! A [`ProgramBuilder`] owns the program. Each function is an owned [`FnBuilder`], finished as a
@@ -22,7 +22,7 @@ pub use program::{
     Auto, AutoArg, Constant, Entry, Grid, Helper, Host, Input, InputSpec, Param, ProgramBuilder, RerunSpec, Unit,
 };
 
-pub use tungsten_ir::{AutoArgType, AxisFactor, DensityMapping, OptimizedProgram, VariableType};
+pub use tungsten_ir::{AutoArgType, AxisFactor, DensityMapping, Program, VariableType};
 
 #[doc(hidden)]
 pub use tungsten_ir as __ir;
@@ -37,7 +37,7 @@ pub mod prelude {
     };
     // `pos3` above brings both the ambient function and the `pos3!` macro.
     pub use crate::{array, auto_initializers, body, build, extern_fns, record_decls, vec3, vt};
-    pub use tungsten_ir::OptimizedProgram;
+    pub use tungsten_ir::Program;
     pub use tungsten_ir::VariableType::{
         self, Bool, F32, F64, I8, I32, I64, Handle, Pos3, Vec3,
     };

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{Backend, BackendError, Compiler, Interface};
-use tungsten_ir::model::OptimizedProgram;
+use tungsten_ir::model::Program;
 
 use crate::model::Inspection;
 use crate::{analyze, render};
@@ -135,7 +135,7 @@ impl Backend for InspectBackend {
 
     fn generate(
         &self,
-        program: &OptimizedProgram,
+        program: &Program,
         interface: &Interface,
     ) -> Result<InspectOutput, BackendError> {
         Ok(run(program, interface, &self.config))
@@ -160,12 +160,12 @@ impl InspectCompile for Compiler<InspectBackend> {
 
 /// Standalone: builds its own `Interface` with [`NamingRules::inspect`], then follows the same
 /// path as [`InspectBackend`], so both give identical output.
-pub fn inspect(program: &OptimizedProgram, config: &InspectConfig) -> InspectOutput {
+pub fn inspect(program: &Program, config: &InspectConfig) -> InspectOutput {
     let interface = Interface::build(program, &NamingRules::inspect());
     run(program, &interface, config)
 }
 
-fn run(program: &OptimizedProgram, interface: &Interface, config: &InspectConfig) -> InspectOutput {
+fn run(program: &Program, interface: &Interface, config: &InspectConfig) -> InspectOutput {
     let options = analyze::Options {
         dataflow: config.views.dataflow,
         element_sizes: config.element_sizes.clone(),

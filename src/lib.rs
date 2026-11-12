@@ -1,6 +1,6 @@
 //! Facade over the `tungsten-*` workspace crates.
 //!
-//! Build an [`OptimizedProgram`](ir::model::OptimizedProgram) and a [`check::Registry`] that
+//! Build an [`Program`](ir::model::Program) and a [`check::Registry`] that
 //! declares the externs and records it uses, then compile with one backend through
 //! [`Compiler`]. The result is that backend's own output type. Backend settings are extension
 //! traits on `Compiler<ThatBackend>` (`RustCompile`, `JavaCompile`, `CudaCompile`,
@@ -10,9 +10,11 @@
 
 pub use tungsten_builder as builder;
 pub use tungsten_check as check;
+#[doc(hidden)]
 pub use tungsten_codegen as codegen;
 pub use tungsten_interface as interface;
 pub use tungsten_ir as ir;
+#[doc(hidden)]
 pub use tungsten_optimizer as optimizer;
 
 pub use tungsten_interface::{Backend, BackendError, CompileError, Compiler, Inline, Passes};
@@ -60,8 +62,11 @@ pub fn registry_from(
         };
     }
     for r in &all.records {
-        let fields: Vec<(&str, ir::VariableType)> =
-            r.fields.iter().map(|(n, t)| (n.as_str(), t.clone())).collect();
+        let fields: Vec<(&str, ir::VariableType)> = r
+            .fields
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.clone()))
+            .collect();
         rb = rb.record(&r.name, &fields);
     }
     for i in &all.initializers {
@@ -122,14 +127,26 @@ mod registry_tests {
         assert_eq!(t.params, [ir::AutoArgType::I64, ir::AutoArgType::Str]);
         assert!(matches!(t.ret, check::core_ir::Type::Handle(_)));
         let s = r.initializer("derive_salt").unwrap();
-        assert_eq!(s.params, [ir::AutoArgType::I64, ir::AutoArgType::F64, ir::AutoArgType::Bool]);
+        assert_eq!(
+            s.params,
+            [
+                ir::AutoArgType::I64,
+                ir::AutoArgType::F64,
+                ir::AutoArgType::Bool
+            ]
+        );
         assert_eq!(s.ret, check::core_ir::Type::I64);
         assert!(r.initializer("nothing").is_none());
 
         // The registry checks a program built from the same declarations.
         let mut pb = ProgramBuilder::new();
         let seed = pb.param("seed", I64);
-        let salt = pb.auto_const("salt", I64, "derive_salt", [seed.into(), 1.5.into(), true.into()]);
+        let salt = pb.auto_const(
+            "salt",
+            I64,
+            "derive_salt",
+            [seed.into(), 1.5.into(), true.into()],
+        );
         let mut f = FnBuilder::new("m", F64);
         f.ret(builder::Expr::from(salt).cast(F64));
         let u = pb.finish_unit(f);
@@ -161,7 +178,10 @@ mod registry_tests {
         f.ret(twice(1));
         pb.finish_unit(f);
         let Err(errs) = pb.build() else { panic!() };
-        assert!(matches!(errs.0[0].kind, builder::BuildErrorKind::ArgumentType { index: 0, .. }));
+        assert!(matches!(
+            errs.0[0].kind,
+            builder::BuildErrorKind::ArgumentType { index: 0, .. }
+        ));
     }
 }
 

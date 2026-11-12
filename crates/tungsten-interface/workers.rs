@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use tungsten_ir::model::{
-    ComputeUnit, DensityInput, Expression, Function, HostInput, OptimizedProgram, Ref, Statement,
+    ComputeUnit, DensityInput, Expression, Function, HostInput, Program, Ref, Statement,
     VariableType,
 };
 
@@ -44,7 +44,7 @@ pub(crate) struct Workers {
 }
 
 impl Workers {
-    pub fn build(program: &OptimizedProgram, interface: &Interface) -> Self {
+    pub fn build(program: &Program, interface: &Interface) -> Self {
         let uses = transitive_uses(program);
         let mut workers = Workers {
             unindexed_reads: uses.iter().map(|(f, u)| (*f, u.unindexed.clone())).collect(),
@@ -82,7 +82,7 @@ fn in_arena_order<'a, T: 'a>(
     arena.map(|(r, _)| r).filter(|r| wanted.contains(r)).collect()
 }
 
-fn main_function(program: &OptimizedProgram, cu: Ref<ComputeUnit>) -> Ref<Function> {
+fn main_function(program: &Program, cu: Ref<ComputeUnit>) -> Ref<Function> {
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[cu];
     *function
 }
@@ -96,7 +96,7 @@ fn cells((x, y, z): (i32, i32, i32)) -> usize {
 
 /// The entry's output first, at offset 0 of pool 0, then the others in `instances` order.
 fn layout(
-    program: &OptimizedProgram,
+    program: &Program,
     instances: &[Instance],
     members: &HashSet<Instance>,
     target: Instance,
@@ -123,7 +123,7 @@ fn layout(
 }
 
 fn entry_hosts(
-    program: &OptimizedProgram,
+    program: &Program,
     units: &[Ref<ComputeUnit>],
     uses: &HashMap<Ref<Function>, Uses>,
 ) -> Vec<Ref<HostInput>> {
@@ -151,7 +151,7 @@ struct Uses {
 
 /// Each function's own reads plus those of everything it calls. Tolerates call cycles and stale
 /// callees, which only the checker rejects.
-fn transitive_uses(program: &OptimizedProgram) -> HashMap<Ref<Function>, Uses> {
+fn transitive_uses(program: &Program) -> HashMap<Ref<Function>, Uses> {
     let direct: HashMap<Ref<Function>, (Uses, HashSet<Ref<Function>>)> =
         program.functions.iter().map(|(r, f)| (r, direct_uses(f))).collect();
     direct
@@ -239,8 +239,8 @@ mod tests {
     use crate::naming::NamingRules;
     use tungsten_ir::model::{Arena, AxisFactor, DensityMapping, EntryPoint, Name};
 
-    fn empty() -> OptimizedProgram {
-        OptimizedProgram {
+    fn empty() -> Program {
+        Program {
             compute_units: Arena::new(),
             functions: Arena::new(),
             entry_points: vec![],
@@ -253,7 +253,7 @@ mod tests {
         }
     }
 
-    fn function(p: &mut OptimizedProgram, t: VariableType, body: Vec<Statement>) -> Ref<Function> {
+    fn function(p: &mut Program, t: VariableType, body: Vec<Statement>) -> Ref<Function> {
         p.functions.insert(Function {
             canonical_name: None,
             host_inputs: vec![],
@@ -265,7 +265,7 @@ mod tests {
         })
     }
 
-    fn unit(p: &mut OptimizedProgram, f: Ref<Function>, inputs: Vec<Ref<DensityInput>>) -> Ref<ComputeUnit> {
+    fn unit(p: &mut Program, f: Ref<Function>, inputs: Vec<Ref<DensityInput>>) -> Ref<ComputeUnit> {
         p.compute_units.insert(ComputeUnit::DensityFunction {
             function: f,
             density_inputs: inputs,
@@ -277,7 +277,7 @@ mod tests {
         })
     }
 
-    fn input(p: &mut OptimizedProgram, cu: Ref<ComputeUnit>, dims: (i32, i32, i32)) -> Ref<DensityInput> {
+    fn input(p: &mut Program, cu: Ref<ComputeUnit>, dims: (i32, i32, i32)) -> Ref<DensityInput> {
         p.density_inputs.insert(DensityInput {
             name: Name::Anonymous,
             density_function: cu,
@@ -289,7 +289,7 @@ mod tests {
         })
     }
 
-    fn entry(p: &mut OptimizedProgram, cu: Ref<ComputeUnit>, dims: (i32, i32, i32)) {
+    fn entry(p: &mut Program, cu: Ref<ComputeUnit>, dims: (i32, i32, i32)) {
         p.entry_points.push(EntryPoint {
             density_function: cu,
             dimensions: dims,
@@ -306,7 +306,7 @@ mod tests {
         vec![Statement::Return(e)]
     }
 
-    fn build(p: &OptimizedProgram) -> Interface {
+    fn build(p: &Program) -> Interface {
         Interface::build(p, &NamingRules::rust())
     }
 
@@ -317,7 +317,7 @@ mod tests {
     /// Entry 0 (`first`, f64) reads `leaf` (i32). Entry 1 (`second`, i32) reads `other` (f64) and
     /// `leaf`, so its own instance is discovered after instances of entry 0.
     struct Two {
-        p: OptimizedProgram,
+        p: Program,
         first: Ref<ComputeUnit>,
         second: Ref<ComputeUnit>,
         leaf: Ref<ComputeUnit>,
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(i.input_params(b), [d]);
     }
 
-    fn host(p: &mut OptimizedProgram, name: &str) -> Ref<HostInput> {
+    fn host(p: &mut Program, name: &str) -> Ref<HostInput> {
         p.host_inputs.insert(HostInput::Static {
             name: Name::Named(name.into()),
             t: VariableType::F64,
@@ -532,7 +532,7 @@ mod tests {
     }
 
     fn lerp_input(
-        p: &mut OptimizedProgram,
+        p: &mut Program,
         cu: Ref<ComputeUnit>,
         dims: (i32, i32, i32),
         factors: [AxisFactor; 3],
@@ -547,7 +547,7 @@ mod tests {
     fn lerp_program(
         t: VariableType,
         shapes: &[((i32, i32, i32), [AxisFactor; 3])],
-    ) -> (OptimizedProgram, Vec<Ref<DensityInput>>) {
+    ) -> (Program, Vec<Ref<DensityInput>>) {
         let mut p = empty();
         let f = function(&mut p, t, ret(Expression::Double(1.0)));
         let leaf = unit(&mut p, f, vec![]);
@@ -695,7 +695,7 @@ mod tests {
     /// as `@previous`, `detail`, and two frozen inputs (`column`, `coarse`). A `leaf` instance is only
     /// read by `coarse`, so it must be computed by `run`, too. Each unit reads one host of its own.
     struct Example {
-        p: OptimizedProgram,
+        p: Program,
         seed: Ref<ComputeUnit>,
         surface: Ref<ComputeUnit>,
         detail: Ref<ComputeUnit>,
@@ -712,7 +712,7 @@ mod tests {
             .iter()
             .map(|n| host(&mut p, n))
             .collect();
-        let unit_reading = |p: &mut OptimizedProgram, h: Ref<HostInput>, inputs: Vec<Ref<DensityInput>>| {
+        let unit_reading = |p: &mut Program, h: Ref<HostInput>, inputs: Vec<Ref<DensityInput>>| {
             let mut body: Vec<Statement> = inputs
                 .iter()
                 .map(|&d| Statement::Assign { target: dangling_var(), value: read(d) })

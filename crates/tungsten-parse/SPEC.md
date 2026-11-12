@@ -5,14 +5,14 @@ wins, and the TESTING.md example is updated to match (§13).
 
 ## 1. Summary
 
-`tungsten-parse` reads `.tw` test files and writes `OptimizedProgram`s back as text. It has three
+`tungsten-parse` reads `.tw` test files and writes `Program`s back as text. It has three
 stages:
 
 1. **`parse`**: text → syntax AST with spans. Pure syntax, no dependencies, never panics.
-2. **`elaborate`**: AST + `Env` → `OptimizedProgram` + `SourceMap` + envelope. Resolves names,
+2. **`elaborate`**: AST + `Env` → `Program` + `SourceMap` + envelope. Resolves names,
    derives the few omitted fields, expands `use`, and assigns arena slots. The `Env` supplies the
    extern registry and library sources (the prelude). The crate itself knows neither.
-3. **`print`**: `OptimizedProgram` → canonical text. Total over every structurally valid program,
+3. **`print`**: `Program` → canonical text. Total over every structurally valid program,
    including real tungsten-mc output. It needs no `Env`, and its output elaborates under `NoEnv`.
 
 The format has two layers: a lenient input language for people writing tests, and a canonical
@@ -74,18 +74,18 @@ pub fn elaborate(file: &ast::File, env: &dyn Env) -> Result<TestFile, Diagnostic
 /// parse + elaborate. The common entry point.
 pub fn load(src: &str, file: FileId, env: &dyn Env) -> Result<TestFile, Diagnostic>;
 
-pub fn print(program: &OptimizedProgram) -> String;
+pub fn print(program: &Program) -> String;
 pub fn print_test_file(t: &TestFile) -> String;
 /// Shared label table: inspect and error messages use the same names as the printed text.
 pub struct Labels { /* … */ }
 impl Labels {
-    pub fn new(program: &OptimizedProgram) -> Self;
+    pub fn new(program: &Program) -> Self;
     pub fn function(&self, f: Ref<Function>) -> &str;
     pub fn unit(&self, u: Ref<ComputeUnit>) -> &str;
     pub fn var(&self, f: Ref<Function>, v: Ref<Var>) -> &str;
     // … const, host, auto, input, entry
 }
-pub fn print_function(p: &OptimizedProgram, labels: &Labels, f: Ref<Function>) -> String;
+pub fn print_function(p: &Program, labels: &Labels, f: Ref<Function>) -> String;
 
 pub trait Env {
     fn extern_fn(&self, name: &str) -> Option<ExternSig>; // params, return type
@@ -477,7 +477,7 @@ value       = literal | "vec3" "(" value "," value "," value ")" | "pos3" "(" va
 
 ```rust
 pub struct TestFile {
-    pub program: OptimizedProgram,
+    pub program: Program,
     pub source_map: SourceMap,
     pub entry_labels: Vec<String>,          // index = entry_points index; informational only
     pub cases: Vec<Case>,                   // name, origin [f64; 3], params Vec<(Ref<AutoParam>, Value)>, hosts Vec<(Ref<HostInput>, Value)>
@@ -584,7 +584,7 @@ and cycles, and every envelope validation error.
 1. **TESTING.md §3 / §8**: `parse(&str) -> TestFile` becomes `load(src, file, env)`. The §8.2
    example is updated to this syntax (`;`, `const c = …` without a type, units with `main` and no
    return type, `ext`, `input` items and `density(d)`, `entry l = u`). §8 points here.
-2. **tungsten-ir**: `permute(&mut OptimizedProgram, seed)` next to `compact` / structural
+2. **tungsten-ir**: `permute(&mut Program, seed)` next to `compact` / structural
    equality (it reuses the `retag.rs` walker), for P7.
 3. **tungsten-checker**: lowering keeps each core node's `(fn, StmtPath, ExprPath)` origin (or
    builds a parallel table), so checker and interpreter errors can go through `SourceMap`.

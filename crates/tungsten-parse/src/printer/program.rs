@@ -8,10 +8,10 @@ use super::float::{f64_lit, quote_name, quote_string};
 use super::labels::Labels;
 use crate::stack;
 
-/// `OptimizedProgram` → canonical text. Total over programs whose refs resolve; a dangling ref
+/// `Program` → canonical text. Total over programs whose refs resolve; a dangling ref
 /// panics with a message naming the entity. Any depth prints, but text nested deeper than
 /// `ast::MAX_DEPTH` doesn't load again.
-pub fn print(p: &OptimizedProgram) -> String {
+pub fn print(p: &Program) -> String {
     let labels = Labels::new(p);
     let mut out = String::from("program {\n");
     let mut sections: Vec<String> = vec![];
@@ -166,7 +166,7 @@ fn mapping_text(m: DensityMapping) -> String {
     format!(" @{name}({x}, {y}, {z})")
 }
 
-fn refinement_text(p: &OptimizedProgram, labels: &Labels, r: &Refinement) -> String {
+fn refinement_text(p: &Program, labels: &Labels, r: &Refinement) -> String {
     assert!(
         r.entry < p.entry_points.len(),
         "refinement `{}` refers to an entry that is not in the program",
@@ -197,7 +197,7 @@ fn refinement_text(p: &OptimizedProgram, labels: &Labels, r: &Refinement) -> Str
     s
 }
 
-fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> String {
+fn unit_text(p: &Program, labels: &Labels, u: Ref<ComputeUnit>) -> String {
     let ComputeUnit::DensityFunction {
         function,
         density_inputs,
@@ -247,11 +247,11 @@ fn unit_text(p: &OptimizedProgram, labels: &Labels, u: Ref<ComputeUnit>) -> Stri
 }
 
 /// One function, as in `print`, but at indent 0 and with the labels of `labels`.
-pub fn print_function(p: &OptimizedProgram, labels: &Labels, f: Ref<Function>) -> String {
+pub fn print_function(p: &Program, labels: &Labels, f: Ref<Function>) -> String {
     function_text(p, labels, f, 0)
 }
 
-fn function_text(p: &OptimizedProgram, labels: &Labels, f: Ref<Function>, indent: usize) -> String {
+fn function_text(p: &Program, labels: &Labels, f: Ref<Function>, indent: usize) -> String {
     let func = &p.functions[f];
     let pad = "    ".repeat(indent);
     let slots: Vec<(Ref<Var>, &Var)> = func.variables.iter().collect();

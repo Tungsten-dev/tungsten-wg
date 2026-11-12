@@ -12,13 +12,13 @@ use crate::stack;
 use crate::tables::ambient_type;
 
 pub(super) struct Deriver<'a> {
-    p: &'a OptimizedProgram,
+    p: &'a Program,
     /// `None` while in progress, so a cycle derives nothing instead of looping.
     consts: RefCell<HashMap<Ref<Constant>, Option<VariableType>>>,
 }
 
 impl<'a> Deriver<'a> {
-    pub fn new(p: &'a OptimizedProgram) -> Self {
+    pub fn new(p: &'a Program) -> Self {
         Self {
             p,
             consts: RefCell::new(HashMap::new()),

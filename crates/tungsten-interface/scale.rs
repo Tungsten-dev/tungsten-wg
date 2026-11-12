@@ -24,8 +24,12 @@ impl Scale {
         }
     }
 
-    pub fn as_float(&self) -> (f32, f32, f32) {
+    pub fn as_f32(&self) -> (f32, f32, f32) {
         (self.rx as f32, self.ry as f32, self.rz as f32)
+    }
+
+    pub fn as_f64(&self) -> (f64, f64, f64) {
+        (self.rx, self.ry, self.rz)
     }
 
     pub fn as_int(&self) -> (i64, i64, i64) {

@@ -22,7 +22,7 @@ use crate::pools::{Pools, cells, unit_return_type, zero};
 use tungsten_interface::naming::{FactoryStyle, NamingRules, WorkerNames, sanitize_name, worker_names};
 use tungsten_interface::{DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::{
-    AutoConstArg, ComputeUnit, HostInput, OptimizedProgram, VariableType,
+    AutoConstArg, ComputeUnit, HostInput, Program, VariableType,
 };
 
 /// The private struct behind `Orchestration`'s `Arc`.
@@ -34,7 +34,7 @@ const INTERNAL: &str = "pub(super) ";
 
 /// Names of every entry's worker types and factory, in entry order. Shared with frontends and
 /// test drivers so they agree with the generated code.
-pub fn rust_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec<WorkerNames> {
+pub fn rust_worker_names(program: &Program, rules: &NamingRules) -> Vec<WorkerNames> {
     let mut types: HashSet<String> = [
         ORCHESTRATION_STRUCT_NAME,
         SHARED_STRUCT_NAME,
@@ -83,7 +83,7 @@ struct AutoConstSpec {
 }
 
 /// Params in declaration order, as (name, type).
-fn auto_params(program: &OptimizedProgram, interface: &Interface) -> Vec<(String, rcl::Type)> {
+fn auto_params(program: &Program, interface: &Interface) -> Vec<(String, rcl::Type)> {
     program
         .auto_params
         .iter()
@@ -91,7 +91,7 @@ fn auto_params(program: &OptimizedProgram, interface: &Interface) -> Vec<(String
         .collect()
 }
 
-fn auto_const_specs(program: &OptimizedProgram, interface: &Interface) -> Vec<AutoConstSpec> {
+fn auto_const_specs(program: &Program, interface: &Interface) -> Vec<AutoConstSpec> {
     program
         .auto_consts
         .iter()
@@ -140,7 +140,7 @@ fn self_path<'m>(path: &[&str]) -> rcl::Expression<'m> {
 
 /// `(name, type)` of every static host, in arena order.
 fn static_hosts<'p>(
-    program: &'p OptimizedProgram,
+    program: &'p Program,
     interface: &Interface,
     only: Option<&[tungsten_ir::model::Ref<HostInput>]>,
 ) -> Vec<(String, &'p VariableType)> {
@@ -233,7 +233,7 @@ fn worker_struct(names: &WorkerNames, refined: bool) -> rcl::Struct {
 /// `Orchestration::new(<params>)`: builds the autoconsts as one struct literal, each initializer
 /// called in arena order.
 fn new_fn<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     specs: &[AutoConstSpec],
 ) -> rcl::Function<'m> {
@@ -297,7 +297,7 @@ fn new_fn<'m>(
 /// `<factory>(&self) -> <Base>Worker`: one allocation per pool, sized for this entry. Pools the
 /// worker doesn't use are empty.
 fn factory_fn<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     pools: &Pools,
     entry: usize,
@@ -352,7 +352,7 @@ fn factory_fn<'m>(
 }
 
 /// Whether some refinement belongs to `entry`.
-fn refined(program: &OptimizedProgram, entry: usize) -> bool {
+fn refined(program: &Program, entry: usize) -> bool {
     program.refinements.iter().any(|r| r.entry == entry)
 }
 
@@ -366,7 +366,7 @@ fn refined(program: &OptimizedProgram, entry: usize) -> bool {
 ///
 /// Calls are `let _kernel_call_<wave>_<i>: () = ..` because RCL has no expression statements.
 fn run_fn<'m>(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     pools: &Pools,
     entry: usize,
@@ -541,7 +541,7 @@ impl<'a, 'm> OrchestrationCodegen<'a> for TransformRclOrchestration<'m> {
     /// Generates the kernels on the device side, then the structs, `Orchestration` and the
     /// workers. Calling it again replaces the orchestration model. `interface` must be the one the
     /// device codegen was built with.
-    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
+    fn convert_program(&mut self, program: &'a Program, interface: &Interface) {
         // Device code first: one kernel per scheduled instance (repeats are no-ops).
         for wave in interface.waves() {
             for inst in wave {

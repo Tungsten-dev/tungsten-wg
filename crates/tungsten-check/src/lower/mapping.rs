@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use tungsten_core::{Ambient, Axis, BinOp, Expr, FieldSel, InputId, Lit, Type};
 use tungsten_ir::{
-    AxisFactor, ComputeUnit, DensityInput, DensityMapping, Expression, OptimizedProgram, Ref, Statement,
+    AxisFactor, ComputeUnit, DensityInput, DensityMapping, Expression, Program as IrProgram, Ref, Statement,
     VariableType,
 };
 
@@ -28,14 +28,14 @@ pub(super) struct ReaderPair {
 }
 
 /// The return type of the main function of `unit`, if every ref resolves.
-pub(super) fn unit_return_type(p: &OptimizedProgram, unit: Ref<ComputeUnit>) -> Option<&VariableType> {
+pub(super) fn unit_return_type(p: &IrProgram, unit: Ref<ComputeUnit>) -> Option<&VariableType> {
     let ComputeUnit::DensityFunction { function, .. } = get(&p.compute_units, unit)?;
     get(&p.functions, *function).map(|f| &f.return_type)
 }
 
 /// The inputs a unit lists and resolves, in list order, without duplicates.
 pub(super) fn listed_inputs<'p>(
-    p: &'p OptimizedProgram,
+    p: &'p IrProgram,
     unit: Ref<ComputeUnit>,
 ) -> Vec<(Ref<DensityInput>, &'p DensityInput)> {
     let Some(ComputeUnit::DensityFunction { density_inputs, .. }) = get(&p.compute_units, unit) else {
@@ -51,7 +51,7 @@ pub(super) fn listed_inputs<'p>(
 
 /// The inputs that `unit`'s main function or one of its helpers reads, split by whether a read
 /// has an explicit index.
-pub(super) fn unit_reads(p: &OptimizedProgram, unit: Ref<ComputeUnit>) -> Reads {
+pub(super) fn unit_reads(p: &IrProgram, unit: Ref<ComputeUnit>) -> Reads {
     let mut reads = Reads::default();
     let Some(ComputeUnit::DensityFunction { function, helper_functions, .. }) = get(&p.compute_units, unit)
     else {
@@ -138,7 +138,7 @@ impl Reads {
 /// Every `(reading unit, dims, march)` reachable from the entries and from the refinements, in
 /// discovery order. The normal graph comes first, with march 0. `@previous` inputs add no edge.
 /// Pairs with dims below 1 are kept, and callers skip them.
-pub(super) fn reader_pairs(p: &OptimizedProgram) -> Vec<ReaderPair> {
+pub(super) fn reader_pairs(p: &IrProgram) -> Vec<ReaderPair> {
     let mut out: Vec<ReaderPair> = vec![];
     let mut seen: HashSet<ReaderPair> = HashSet::new();
     let push = |out: &mut Vec<ReaderPair>, seen: &mut HashSet<ReaderPair>, pair: ReaderPair| {

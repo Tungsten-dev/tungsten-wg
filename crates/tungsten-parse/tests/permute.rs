@@ -9,7 +9,7 @@ use tungsten_ir::{compact, isomorphic, permute};
 use tungsten_parse::*;
 
 /// Slot-order-independent summary: sorted multiset of per-function shapes.
-fn shape(p: &tungsten_ir::OptimizedProgram) -> Vec<String> {
+fn shape(p: &tungsten_ir::Program) -> Vec<String> {
     let mut v: Vec<String> = p
         .functions
         .values()

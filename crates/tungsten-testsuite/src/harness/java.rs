@@ -11,7 +11,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use tungsten_interface::naming::{WorkerNames, java_sanitize};
 use tungsten_interface::{Backend, BufferBounds, Interface};
 use tungsten_ir::VariableType;
-use tungsten_ir::model::{HostInput, OptimizedProgram};
+use tungsten_ir::model::{HostInput, Program};
 use tungsten_java::JavaConfig;
 use tungsten_java::orchestration::java_worker_names;
 
@@ -194,7 +194,7 @@ fn encode_stmts(out: &mut String, expr: &str, t: &VariableType, ids: &mut Ids, s
 /// its own entry's hosts), and then the case's refine calls, each on the worker of its
 /// refinement's entry.
 pub fn driver_source(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     id: &str,
     workers: &[WorkerNames],
@@ -278,14 +278,14 @@ fn encode_result(s: &mut String, e: &super::protocol::EntryIo, ids: &mut Ids, sp
 
 /// The files of one test (`Gen.java`, `Driver.java`) as a blob with paths relative to the test's
 /// package directory. Backend panics become an `Err`.
-pub fn generate_test(program: &OptimizedProgram, env: &TestEnv, id: &str) -> Result<String, String> {
+pub fn generate_test(program: &Program, env: &TestEnv, id: &str) -> Result<String, String> {
     generate_test_with(program, env, id, BufferBounds::PerBuffer)
 }
 
 /// [`generate_test`] with another bounds mode. Corpus tests compile with `BufferBounds::PerBuffer`,
 /// so bad indices fail where the interpreter's do.
 pub fn generate_test_with(
-    program: &OptimizedProgram,
+    program: &Program,
     env: &TestEnv,
     id: &str,
     bounds: BufferBounds,

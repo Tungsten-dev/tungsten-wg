@@ -11,7 +11,7 @@ use tungsten_interface::{Backend, Interface};
 use tungsten_ir::{ComputeUnit, isomorphic};
 use tungsten_rust::backend::{RustBackend, RustConfig};
 
-fn rust(p: &OptimizedProgram) -> String {
+fn rust(p: &Program) -> String {
     let b = RustBackend::new(RustConfig::default());
     let i = Interface::build(p, &b.naming_rules());
     b.generate(p, &i).unwrap().full_source

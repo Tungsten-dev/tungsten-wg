@@ -1,4 +1,4 @@
-//! Inspection backend: turns an `OptimizedProgram` into human-friendly outputs instead of
+//! Inspection backend: turns an `Program` into human-friendly outputs instead of
 //! executable code. See SPEC.md for the full design.
 //!
 //! Everything goes through one analysis model, [`Inspection`] (`model.rs`). `analyze` builds it

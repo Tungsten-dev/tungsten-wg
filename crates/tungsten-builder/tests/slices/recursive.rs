@@ -70,7 +70,7 @@ impl Lowering {
     }
 }
 
-fn build() -> Result<OptimizedProgram, BuildErrors> {
+fn build() -> Result<Program, BuildErrors> {
     let doubled = Cached(b(Mul(b(Cached(b(X))), b(Const(2)))));
     let tree = Add(
         b(doubled.clone()),

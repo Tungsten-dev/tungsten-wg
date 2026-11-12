@@ -20,7 +20,7 @@ use crate::model::codegen::JavaCodeGenerator;
 use tungsten_interface::naming::{FactoryStyle, NamingRules, WorkerNames, java_sanitize, unique, worker_names};
 use tungsten_interface::{BackendError, DeviceCodegen, Instance, Interface, OrchestrationCodegen};
 use tungsten_ir::model::AutoConstArg;
-use tungsten_ir::model::{ComputeUnit, HostInput, OptimizedProgram, VariableType};
+use tungsten_ir::model::{ComputeUnit, HostInput, Program, VariableType};
 use tungsten_rust::pools::cells;
 
 use java::Expression as J;
@@ -29,7 +29,7 @@ use java::Statement as S;
 /// Names of every entry's worker types and factory, in entry order. Shared with frontends and
 /// test drivers so they agree with the generated code. `rules` must be the backend's
 /// (`JavaBackend::naming_rules`), which reserves the generated class name.
-pub fn java_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec<WorkerNames> {
+pub fn java_worker_names(program: &Program, rules: &NamingRules) -> Vec<WorkerNames> {
     let mut types: HashSet<String> = [
         ORCHESTRATION_CLASS,
         HOST_CONSTS_CLASS,
@@ -73,20 +73,20 @@ pub fn java_worker_names(program: &OptimizedProgram, rules: &NamingRules) -> Vec
 }
 
 /// `<BASE>_LEN` of every entry, in entry order: unique among the generated class's fields.
-pub fn len_constant_names(program: &OptimizedProgram, interface: &Interface, rules: &NamingRules, names: &[WorkerNames]) -> Vec<String> {
+pub fn len_constant_names(program: &Program, interface: &Interface, rules: &NamingRules, names: &[WorkerNames]) -> Vec<String> {
     let mut used = rules.used_set();
     used.extend(program.constants.iter().map(|(c, _)| interface.constant(c).to_string()));
     names.iter().map(|n| unique(&mut used, format!("{}_LEN", n.base.to_ascii_uppercase()))).collect()
 }
 
 /// Whether some refinement belongs to `entry`.
-fn refined(program: &OptimizedProgram, entry: usize) -> bool {
+fn refined(program: &Program, entry: usize) -> bool {
     program.refinements.iter().any(|r| r.entry == entry)
 }
 
 /// `(name, type)` of every static host, in arena order, optionally only those in `only`.
 fn static_hosts<'p>(
-    program: &'p OptimizedProgram,
+    program: &'p Program,
     interface: &Interface,
     only: Option<&[tungsten_ir::model::Ref<HostInput>]>,
 ) -> Vec<(String, &'p VariableType)> {
@@ -124,7 +124,7 @@ fn host_consts_class(name: &str, hosts: &[(String, &VariableType)], public: bool
 
 /// `static final class AutoConsts`: values built once at creation, immutable and shareable. Only
 /// `Orchestration.create` builds it.
-fn auto_consts_class(program: &OptimizedProgram, interface: &Interface) -> java::Class {
+fn auto_consts_class(program: &Program, interface: &Interface) -> java::Class {
     let mut fields = Vec::new();
     let mut assignments = Vec::new();
     let params: Vec<(java::Type, String)> = program
@@ -210,7 +210,7 @@ fn internal_buffers_class(pools: &Pools) -> java::Class {
 /// `public static final class Orchestration`: global and immutable, so safe to share. It builds the
 /// autoconsts once and creates workers.
 fn orchestration_class(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     pools: &Pools,
     names: &[WorkerNames],
@@ -296,7 +296,7 @@ fn orchestration_class(
 /// `run` runs the worker's schedule and stores the origin when the entry has refinements. A refine
 /// call runs its refinement's waves with the stored origin and the offset.
 fn run_method(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     pools: &Pools,
     class_name: &str,
@@ -400,7 +400,7 @@ fn run_method(
 
 /// `public static final class <Base>Worker`: runs one entry on its own buffers.
 fn worker_class(
-    program: &OptimizedProgram,
+    program: &Program,
     interface: &Interface,
     pools: &Pools,
     class_name: &str,
@@ -521,7 +521,7 @@ impl<'a> TransformJavaOrchestration<'a> {
 impl<'a> OrchestrationCodegen<'a> for TransformJavaOrchestration<'a> {
     /// Generates the kernels on the device side, then the nested classes and the top-level class.
     /// Calling it again replaces the compilation unit.
-    fn convert_program(&mut self, program: &'a OptimizedProgram, interface: &Interface) {
+    fn convert_program(&mut self, program: &'a Program, interface: &Interface) {
         // Device code first: one kernel per scheduled instance (repeats are no-ops).
         let waves = self.device.naming().waves().to_vec();
         for wave in &waves {

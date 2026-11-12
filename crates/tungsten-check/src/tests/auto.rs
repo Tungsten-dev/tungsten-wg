@@ -26,11 +26,11 @@ fn reg() -> Registry {
         .unwrap()
 }
 
-fn base() -> OptimizedProgram {
+fn base() -> IrProgram {
     load(&snippet("", "return 1.0;"))
 }
 
-fn one(p: &OptimizedProgram) -> String {
+fn one(p: &IrProgram) -> String {
     let e = errs(p, &reg());
     assert_eq!(e.len(), 1, "{e:?}");
     e.into_iter().next().unwrap()

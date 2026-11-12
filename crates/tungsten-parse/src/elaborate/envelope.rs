@@ -25,7 +25,7 @@ pub(super) fn attr_f64(l: &ast::Lit) -> R<f64> {
 impl<'a> Ctx<'a> {
     pub(super) fn envelope(&mut self, file: &ast::File) -> R<TestFile> {
         let mut t = TestFile {
-            program: OptimizedProgram {
+            program: Program {
                 compute_units: Arena::new(),
                 functions: Arena::new(),
                 entry_points: vec![],
