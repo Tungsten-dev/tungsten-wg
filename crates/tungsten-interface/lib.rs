@@ -7,9 +7,9 @@ host inputs and auto consts. Computed once so callers and callees agree.
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use tungsten_ir::model::{AutoConst, AutoParam, AxisFactor,
-    ComputeUnit, Constant, DensityInput, DensityMapping, EntryPoint, Function, HostInput, Name,
-    Program, Ref, VariableType,
+use tungsten_ir::model::{
+    AutoConst, AutoParam, AxisFactor, ComputeUnit, Constant, DensityInput, DensityMapping,
+    EntryPoint, Function, HostInput, Name, Program, Ref, VariableType,
 };
 
 pub mod compiler;
@@ -221,15 +221,28 @@ pub struct Interface {
 impl Interface {
     /// Fixes every name with `rules`; reserved names are never produced.
     pub fn build(program: &Program, rules: &NamingRules) -> Self {
-        let walks: Vec<refine::Walk> = program.refinements.iter().map(|r| refine::walk(program, r)).collect();
+        let walks: Vec<refine::Walk> = program
+            .refinements
+            .iter()
+            .map(|r| refine::walk(program, r))
+            .collect();
         let (instances, dependencies) = discover_instances(program);
         // Instances only a refinement reruns have buffers, but no wave: `run` doesn't compute them.
         let scheduled = scheduled_instances(program, &walks, &dependencies);
-        let in_waves: Vec<Instance> = instances.iter().filter(|i| scheduled.contains(i)).copied().collect();
-        let wave_deps = dependencies.iter().filter(|(i, _)| scheduled.contains(i)).map(|(i, d)| (*i, d.clone()));
+        let in_waves: Vec<Instance> = instances
+            .iter()
+            .filter(|i| scheduled.contains(i))
+            .copied()
+            .collect();
+        let wave_deps = dependencies
+            .iter()
+            .filter(|(i, _)| scheduled.contains(i))
+            .map(|(i, d)| (*i, d.clone()));
         let waves = arrange_waves(&in_waves, wave_deps.collect());
-        let refine_waves: Vec<Vec<Vec<RefineRun>>> =
-            walks.iter().map(|w| refine::refine_waves(program, &w.running)).collect();
+        let refine_waves: Vec<Vec<Vec<RefineRun>>> = walks
+            .iter()
+            .map(|w| refine::refine_waves(program, &w.running))
+            .collect();
         let mut with_dims: Vec<(Ref<ComputeUnit>, (i32, i32, i32))> = vec![];
         for run in walks.iter().flat_map(|w| &w.running) {
             let key = (run.unit, run.target.dimensions);
@@ -366,7 +379,11 @@ impl Interface {
                 .collect(),
             refinement_names: {
                 let mut used = HashSet::new();
-                program.refinements.iter().map(|r| unique(&mut used, (rules.sanitize)(&r.name))).collect()
+                program
+                    .refinements
+                    .iter()
+                    .map(|r| unique(&mut used, (rules.sanitize)(&r.name)))
+                    .collect()
             },
             refine_methods: naming::refinement_method_names(program, rules, &HashSet::new()),
             refine_waves,
@@ -447,7 +464,9 @@ impl Interface {
         let element = &self.unit_elements[&input.density_function];
         self.lerp_helpers
             .iter()
-            .find(|h| h.dimensions == input.dimensions && h.factors == factors && h.element == *element)
+            .find(|h| {
+                h.dimensions == input.dimensions && h.factors == factors && h.element == *element
+            })
             .map(|h| h.name.as_str())
             .unwrap_or_else(|| panic!("no lerp helper for {:?} of {:?}", factors, input.dimensions))
     }
@@ -497,8 +516,18 @@ impl Interface {
     /// dims of the targets it replaces.
     pub fn dimensions_of(&self, cu: Ref<ComputeUnit>) -> Vec<(i32, i32, i32)> {
         let mut dims = Vec::new();
-        let refined = self.with_dims.iter().filter(|(c, _)| *c == cu).map(|(_, d)| *d);
-        for d in self.instances.iter().filter(|i| i.cu == cu).map(|i| i.dimensions).chain(refined) {
+        let refined = self
+            .with_dims
+            .iter()
+            .filter(|(c, _)| *c == cu)
+            .map(|(_, d)| *d);
+        for d in self
+            .instances
+            .iter()
+            .filter(|i| i.cu == cu)
+            .map(|i| i.dimensions)
+            .chain(refined)
+        {
             if !dims.contains(&d) {
                 dims.push(d);
             }
@@ -552,17 +581,25 @@ fn collect_lerp_helpers(
     let mut helpers: Vec<LerpHelper> = vec![];
     let refined = interface.with_dims.iter().map(|(cu, _)| *cu);
     for cu in interface.instances.iter().map(|i| i.cu).chain(refined) {
-        let ComputeUnit::DensityFunction { function, density_inputs, .. } = &program.compute_units[cu];
+        let ComputeUnit::DensityFunction {
+            function,
+            density_inputs,
+            ..
+        } = &program.compute_units[cu];
         let read = &interface.workers.unindexed_reads[function];
         for &r in density_inputs {
             let d = &program.density_inputs[r];
-            let DensityMapping::Lerp(factors) = d.mapping else { continue };
+            let DensityMapping::Lerp(factors) = d.mapping else {
+                continue;
+            };
             let element = &interface.unit_elements[&d.density_function];
             let valid = matches!(element, VariableType::F32 | VariableType::F64)
-                && factors.iter().all(|f| !matches!(f, AxisFactor::Factor(n) if *n < 1));
-            let known = helpers
-                .iter()
-                .any(|h| h.dimensions == d.dimensions && h.factors == factors && h.element == *element);
+                && factors
+                    .iter()
+                    .all(|f| !matches!(f, AxisFactor::Factor(n) if *n < 1));
+            let known = helpers.iter().any(|h| {
+                h.dimensions == d.dimensions && h.factors == factors && h.element == *element
+            });
             if !read.contains(&r) || !valid || known {
                 continue;
             }
@@ -576,7 +613,11 @@ fn collect_lerp_helpers(
                 factor(factors[0]),
                 factor(factors[1]),
                 factor(factors[2]),
-                if *element == VariableType::F32 { "f32" } else { "f64" },
+                if *element == VariableType::F32 {
+                    "f32"
+                } else {
+                    "f64"
+                },
             );
             helpers.push(LerpHelper {
                 name: unique(used, (rules.sanitize)(&name)),
@@ -591,9 +632,7 @@ fn collect_lerp_helpers(
 
 /// Everything reachable from the entry points (breadth-first), then what only refinements need,
 /// with each instance's direct inputs. `@previous` inputs add no dependency.
-fn discover_instances(
-    program: &Program,
-) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
+fn discover_instances(program: &Program) -> (Vec<Instance>, HashMap<Instance, Vec<Instance>>) {
     let mut instances = Vec::new();
     let mut dependencies: HashMap<Instance, Vec<Instance>> = HashMap::new();
     let mut queue: Vec<Instance> = program
@@ -646,7 +685,10 @@ fn scheduled_instances(
 }
 
 /// `seeds` and everything they transitively depend on.
-fn closure(dependencies: &HashMap<Instance, Vec<Instance>>, seeds: &[Instance]) -> HashSet<Instance> {
+fn closure(
+    dependencies: &HashMap<Instance, Vec<Instance>>,
+    seeds: &[Instance],
+) -> HashSet<Instance> {
     let mut needed = HashSet::new();
     let mut stack = seeds.to_vec();
     while let Some(i) = stack.pop() {

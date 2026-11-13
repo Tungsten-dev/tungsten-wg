@@ -29,7 +29,7 @@ fn find_top_surface(
 ) -> Unit {
     let y_dim = height / cell_height;
     let layers = Grid::new((work.dims.0, y_dim, work.dims.2))
-        .position_scale((1.0, cell_height as f64, 1.0));
+        .position_scale(Scale::new(1.0, cell_height as f64, 1.0));
     let density = pb.input(density, layers);
     let upper = pb.input(upper_bound, Grid::new(work.dims));
 

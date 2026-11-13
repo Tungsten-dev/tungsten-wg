@@ -9,6 +9,7 @@ description = "Builds valid-by-construction tungsten-ir programs from Rust."
 [dependencies]
 thiserror.workspace = true
 tungsten-ir.workspace = true
+tungsten-interface.workspace = true
 
 [dev-dependencies]
 tungsten-check.workspace = true

@@ -1,5 +1,6 @@
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Mul;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Scale {
@@ -105,3 +106,18 @@ impl PartialEq for Scale {
 }
 
 impl Eq for Scale {}
+
+impl Mul for Scale {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            x: self.x * rhs.x,
+            y: self.y * rhs.y,
+            z: self.z * rhs.z,
+            rx: self.rx * rhs.rx,
+            ry: self.ry * rhs.ry,
+            rz: self.rz * rhs.rz,
+        }
+    }
+}

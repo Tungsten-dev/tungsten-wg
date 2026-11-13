@@ -3,9 +3,11 @@
 use std::collections::HashMap;
 use std::panic::Location;
 
+use tungsten_interface::Scale;
 use tungsten_ir::{
-    Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput, DensityMapping, EntryPoint, Expression,
-    Function, HostInput, Name, Program, OwnerTag, Ref, Refinement, Rerun, UnaryOperator, VariableType,
+    Arena, AutoConst, AutoConstArg, AutoParam, ComputeUnit, ConstExpr, DensityInput,
+    DensityMapping, EntryPoint, Expression, Function, HostInput, Name, OwnerTag, Program, Ref,
+    Refinement, Rerun, UnaryOperator, VariableType,
 };
 
 use crate::derive::{Summary, const_deps, summarize};
@@ -126,11 +128,11 @@ pub struct Constant {
 }
 
 /// Dimensions and scales of an entry or an input.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Grid {
     pub(crate) dimensions: (i32, i32, i32),
-    pub(crate) scaled_origin: (f64, f64, f64),
-    pub(crate) scaled_position: (f64, f64, f64),
+    pub(crate) scaled_origin: Scale,
+    pub(crate) scaled_position: Scale,
 }
 
 impl Grid {
@@ -138,17 +140,17 @@ impl Grid {
     pub fn new(dims: (i32, i32, i32)) -> Self {
         Self {
             dimensions: dims,
-            scaled_origin: (1.0, 1.0, 1.0),
-            scaled_position: (1.0, 1.0, 1.0),
+            scaled_origin: Scale::ones(),
+            scaled_position: Scale::ones(),
         }
     }
 
-    pub fn origin_scale(mut self, s: (f64, f64, f64)) -> Self {
+    pub fn origin_scale(mut self, s: Scale) -> Self {
         self.scaled_origin = s;
         self
     }
 
-    pub fn position_scale(mut self, s: (f64, f64, f64)) -> Self {
+    pub fn position_scale(mut self, s: Scale) -> Self {
         self.scaled_position = s;
         self
     }
@@ -157,13 +159,10 @@ impl Grid {
         self.dimensions
     }
 
-    fn key(&self) -> ((i32, i32, i32), [u64; 6]) {
-        let (o, p) = (self.scaled_origin, self.scaled_position);
-        (
-            self.dimensions,
-            [o.0, o.1, o.2, p.0, p.1, p.2].map(f64::to_bits),
-        )
-    }
+    // fn key(&self) -> ((i32, i32, i32), Scale, Scale) {
+    //     let (o, p) = (self.scaled_origin, self.scaled_position);
+    //     (self.dimensions, o, p)
+    // }
 }
 
 /// Everything that describes an input.
@@ -230,7 +229,7 @@ impl RerunSpec {
     }
 }
 
-type InputKey = (Ref<ComputeUnit>, (i32, i32, i32), [u64; 6], DensityMapping, bool);
+type InputKey = (Ref<ComputeUnit>, Grid, DensityMapping, bool);
 
 /// Builds an [`Program`]. Errors from every function and declaration collect here, and
 /// [`build`](Self::build) returns them all.
@@ -278,7 +277,12 @@ impl ProgramBuilder {
         }
     }
 
-    fn error(&mut self, kind: BuildErrorKind, function: Option<String>, at: &'static Location<'static>) {
+    fn error(
+        &mut self,
+        kind: BuildErrorKind,
+        function: Option<String>,
+        at: &'static Location<'static>,
+    ) {
         let mut e = BuildError::new(kind, at);
         e.function = function;
         self.errors.push(e);
@@ -345,15 +349,18 @@ impl ProgramBuilder {
         let source_hash = f.source_hash;
         let (function, ret) = self.finish(f, at);
         let s = &self.summaries[&function];
-        let r = self.program.compute_units.insert(ComputeUnit::DensityFunction {
-            function,
-            density_inputs: s.inputs.clone(),
-            auto_consts: s.autos.clone(),
-            host_inputs: s.hosts.clone(),
-            helper_functions: s.helpers.clone(),
-            constants: s.consts.clone(),
-            source_hash,
-        });
+        let r = self
+            .program
+            .compute_units
+            .insert(ComputeUnit::DensityFunction {
+                function,
+                density_inputs: s.inputs.clone(),
+                auto_consts: s.autos.clone(),
+                host_inputs: s.hosts.clone(),
+                helper_functions: s.helpers.clone(),
+                constants: s.consts.clone(),
+                source_hash,
+            });
         Unit { r, ret }
     }
 
@@ -385,8 +392,8 @@ impl ProgramBuilder {
         self.program.entry_points.push(EntryPoint {
             density_function: unit.r,
             dimensions: grid.dimensions,
-            scaled_origin: grid.scaled_origin,
-            scaled_position: grid.scaled_position,
+            scaled_origin: grid.scaled_origin.as_f64(),
+            scaled_position: grid.scaled_position.as_f64(),
         });
         handle
     }
@@ -407,8 +414,14 @@ impl ProgramBuilder {
             return;
         }
         let reruns: Vec<RerunSpec> = reruns.into_iter().collect();
-        let units = reruns.iter().flat_map(|r| [Some(r.target), r.with]).flatten();
-        if units.into_iter().any(|u| !self.program.compute_units.contains(u.r)) {
+        let units = reruns
+            .iter()
+            .flat_map(|r| [Some(r.target), r.with])
+            .flatten();
+        if units
+            .into_iter()
+            .any(|u| !self.program.compute_units.contains(u.r))
+        {
             self.foreign("a unit", at);
             return;
         }
@@ -421,8 +434,8 @@ impl ProgramBuilder {
                 .map(|r| Rerun {
                     cu: r.target.r,
                     dimensions: r.grid.dimensions,
-                    scaled_origin: r.grid.scaled_origin,
-                    scaled_position: r.grid.scaled_position,
+                    scaled_origin: r.grid.scaled_origin.as_f64(),
+                    scaled_position: r.grid.scaled_position.as_f64(),
                     with: r.with.map(|u| u.r),
                 })
                 .collect(),
@@ -456,16 +469,16 @@ impl ProgramBuilder {
         if !self.program.compute_units.contains(spec.source.r) {
             self.foreign("a unit", Location::caller());
         }
-        let (dims, bits) = spec.grid.key();
-        let key = (spec.source.r, dims, bits, spec.mapping, spec.previous);
+        // let (dims, bits) = spec.grid.key();
+        let key = (spec.source.r, spec.grid, spec.mapping, spec.previous);
         if let Some(r) = self.inputs.get(&key) {
             return Input { r: *r, ty };
         }
         let r = self.program.density_inputs.insert(DensityInput {
             name: spec.name.map_or(Name::Anonymous, Name::Named),
             density_function: spec.source.r,
-            scaled_origin: spec.grid.scaled_origin,
-            scaled_position: spec.grid.scaled_position,
+            scaled_origin: spec.grid.scaled_origin.as_f64(),
+            scaled_position: spec.grid.scaled_position.as_f64(),
             dimensions: spec.grid.dimensions,
             mapping: spec.mapping,
             previous: spec.previous,
@@ -521,7 +534,10 @@ impl ProgramBuilder {
             return p;
         }
         let ty = intern(t.clone());
-        let r = self.program.auto_params.insert(AutoParam { name: name_.to_string(), t });
+        let r = self.program.auto_params.insert(AutoParam {
+            name: name_.to_string(),
+            t,
+        });
         let p = Param { r, ty };
         self.params.insert(name_.to_string(), p);
         p
@@ -598,7 +614,11 @@ impl ProgramBuilder {
         }
         let ok = found.is_none() && !foreign;
         let cexpr = cexpr.unwrap_or(ConstExpr::Bool(false));
-        let deps = if ok { const_deps(self, &cexpr) } else { Vec::new() };
+        let deps = if ok {
+            const_deps(self, &cexpr)
+        } else {
+            Vec::new()
+        };
         let r = self.program.constants.insert(tungsten_ir::Constant {
             value: cexpr,
             name: name_.to_string(),

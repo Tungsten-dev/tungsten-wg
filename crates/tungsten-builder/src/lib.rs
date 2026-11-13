@@ -37,6 +37,7 @@ pub mod prelude {
     };
     // `pos3` above brings both the ambient function and the `pos3!` macro.
     pub use crate::{array, auto_initializers, body, build, extern_fns, record_decls, vec3, vt};
+    pub use tungsten_interface::Scale;
     pub use tungsten_ir::Program;
     pub use tungsten_ir::VariableType::{
         self, Bool, F32, F64, I8, I32, I64, Handle, Pos3, Vec3,

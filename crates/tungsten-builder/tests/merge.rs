@@ -31,10 +31,9 @@ fn equal_inputs_merge() {
     let distinct = [
         pb.input(other, g),
         pb.input(b, Grid::new((2, 2, 1))),
-        pb.input(b, g.origin_scale((2.0, 1.0, 1.0))),
-        pb.input(b, g.position_scale((1.0, 1.0, 0.5))),
-        pb.input(b, g.origin_scale((1.0, -0.0, 1.0))),
-        pb.input(b, g.origin_scale((1.0, 0.0, 1.0))),
+        pb.input(b, g.origin_scale(Scale::new(2.0, 1.0, 1.0))),
+        pb.input(b, g.position_scale(Scale::new(1.0, 1.0, 0.5))),
+        pb.input(b, g.origin_scale(Scale::new(1.0, 0.0, 1.0))),
     ];
     for (i, x) in distinct.iter().enumerate() {
         assert_ne!(*x, a1, "{i}");
@@ -42,11 +41,14 @@ fn equal_inputs_merge() {
             assert_ne!(x, y, "{i}");
         }
     }
-    // Scales compare by bits: -0.0 and 0.0 are two inputs, but each merges with itself.
-    assert_eq!(pb.input(b, g.origin_scale((1.0, -0.0, 1.0))), distinct[4]);
+    // Scales compare by fixed-point value: -0.0 and 0.0 are the same input.
+    assert_eq!(
+        pb.input(b, g.origin_scale(Scale::new(1.0, -0.0, 1.0))),
+        distinct[4]
+    );
 
     let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
-    assert_eq!(p.density_inputs.iter().count(), 7);
+    assert_eq!(p.density_inputs.iter().count(), 6);
     let names: Vec<_> = p.density_inputs.values().map(|d| d.name.clone()).collect();
     assert_eq!(names[0], Name::Named("first".into()), "the first name wins");
     assert_eq!(names[1], Name::Anonymous);
@@ -87,11 +89,20 @@ fn autoconsts_merge_by_value() {
     };
     let a = h(&mut pb, "first", "make", vec![seed.into(), 1i64.into()]);
     // Equal type, initializer and arguments: the existing one, and the first name wins.
-    assert_eq!(a, h(&mut pb, "second", "make", vec![seed.into(), 1i64.into()]));
+    assert_eq!(
+        a,
+        h(&mut pb, "second", "make", vec![seed.into(), 1i64.into()])
+    );
     assert_ne!(a, h(&mut pb, "a", "make", vec![seed.into(), 2i64.into()]));
     assert_ne!(a, h(&mut pb, "a", "make", vec![other.into(), 1i64.into()]));
-    assert_ne!(a, h(&mut pb, "a", "other_init", vec![seed.into(), 1i64.into()]));
-    assert_ne!(a, pb.auto_const("a", Handle("Other"), "make", [seed.into(), 1i64.into()]));
+    assert_ne!(
+        a,
+        h(&mut pb, "a", "other_init", vec![seed.into(), 1i64.into()])
+    );
+    assert_ne!(
+        a,
+        pb.auto_const("a", Handle("Other"), "make", [seed.into(), 1i64.into()])
+    );
     let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(p.auto_consts.iter().count(), 5);
     assert_eq!(p.auto_consts.values().next().unwrap().name, "first");
@@ -104,8 +115,13 @@ fn params_merge_by_name() {
     assert_eq!(a, pb.param("seed", I64));
     assert_ne!(a, pb.param("salt", I64));
     pb.param("seed", F64);
-    let Err(errs) = pb.build() else { panic!("a conflicting param type must be an error") };
-    assert!(matches!(errs.0[0].kind, BuildErrorKind::AutoParamConflict { .. }), "{errs}");
+    let Err(errs) = pb.build() else {
+        panic!("a conflicting param type must be an error")
+    };
+    assert!(
+        matches!(errs.0[0].kind, BuildErrorKind::AutoParamConflict { .. }),
+        "{errs}"
+    );
 }
 
 #[test]
@@ -155,7 +171,11 @@ fn merged_input_read_by_two_units_blocks_inlining() {
     let p = checked(pb);
     assert_eq!(p.density_inputs.iter().count(), 1);
     let r = unit(&p, "b");
-    let verdict = explain_inline(&p).into_iter().find(|(u, _)| *u == r).unwrap().1;
+    let verdict = explain_inline(&p)
+        .into_iter()
+        .find(|(u, _)| *u == r)
+        .unwrap()
+        .1;
     assert_eq!(
         verdict,
         InlineVerdict::Rejected(InlineRejection::MultipleUses(2))
@@ -189,7 +209,11 @@ fn value_autoconsts_are_read_like_expressions_and_listed() {
     pb.entry(u, Grid::new((1, 1, 1)));
     let p = pb.build().unwrap_or_else(|e| panic!("{e}"));
     let ComputeUnit::DensityFunction { auto_consts, .. } = p.compute_units.values().next().unwrap();
-    assert_eq!(auto_consts.len(), 1, "the unit lists the autoconst its function reads");
+    assert_eq!(
+        auto_consts.len(),
+        1,
+        "the unit lists the autoconst its function reads"
+    );
 }
 
 #[test]
@@ -214,12 +238,22 @@ fn mapping_and_previous_separate_inputs() {
     }
 
     // Equal specs still merge, and an explicit `Identity` is the default.
-    assert_eq!(expanded, pb.input_with(InputSpec::new(b, g).mapping(cell_zero)));
+    assert_eq!(
+        expanded,
+        pb.input_with(InputSpec::new(b, g).mapping(cell_zero))
+    );
     assert_eq!(previous, pb.input_with(InputSpec::new(b, g).previous()));
-    assert_eq!(plain, pb.input_with(InputSpec::new(b, g).mapping(DensityMapping::Identity)));
+    assert_eq!(
+        plain,
+        pb.input_with(InputSpec::new(b, g).mapping(DensityMapping::Identity))
+    );
 
     let p = pb.build().unwrap();
-    let stored: Vec<_> = p.density_inputs.values().map(|d| (d.mapping, d.previous)).collect();
+    let stored: Vec<_> = p
+        .density_inputs
+        .values()
+        .map(|d| (d.mapping, d.previous))
+        .collect();
     assert_eq!(
         stored,
         [
@@ -235,20 +269,32 @@ fn mapping_and_previous_separate_inputs() {
 #[test]
 fn refinement_is_recorded_as_written() {
     let mut pb = ProgramBuilder::new();
-    let (seed, detail, surface) = (base(&mut pb, "seed"), base(&mut pb, "detail"), base(&mut pb, "surface"));
-    let g = Grid::new((16, 1, 16)).position_scale((1.0, 8.0, 1.0));
+    let (seed, detail, surface) = (
+        base(&mut pb, "seed"),
+        base(&mut pb, "detail"),
+        base(&mut pb, "surface"),
+    );
+    let g = Grid::new((16, 1, 16)).position_scale(Scale::new(1.0, 8.0, 1.0));
     pb.entry(detail, Grid::new((1, 1, 1)));
     let entry = pb.entry(seed, g);
     pb.refinement(
         "step",
         entry,
         (0, 383, 0),
-        [RerunSpec::new(seed, g).with(surface), RerunSpec::new(detail, g)],
+        [
+            RerunSpec::new(seed, g).with(surface),
+            RerunSpec::new(detail, g),
+        ],
     );
     let p = pb.build().unwrap();
 
-    let [r] = &p.refinements[..] else { panic!("one refinement") };
-    assert_eq!((r.name.as_str(), r.entry, r.march), ("step", 1, (0, 383, 0)));
+    let [r] = &p.refinements[..] else {
+        panic!("one refinement")
+    };
+    assert_eq!(
+        (r.name.as_str(), r.entry, r.march),
+        ("step", 1, (0, 383, 0))
+    );
     let unit_ref = |name: &str| -> Ref<ComputeUnit> {
         p.compute_units
             .iter()
@@ -279,8 +325,18 @@ fn refinement_rejects_foreign_handles() {
     let entry = pb.entry(b, g);
     pb.refinement("a", foreign_entry, (0, 0, 0), [RerunSpec::new(b, g)]);
     pb.refinement("b", entry, (0, 0, 0), [RerunSpec::new(foreign_unit, g)]);
-    pb.refinement("c", entry, (0, 0, 0), [RerunSpec::new(b, g).with(foreign_unit)]);
+    pb.refinement(
+        "c",
+        entry,
+        (0, 0, 0),
+        [RerunSpec::new(b, g).with(foreign_unit)],
+    );
     let errors = pb.build().err().expect("three foreign handles").0;
     assert_eq!(errors.len(), 3, "{errors:?}");
-    assert!(errors.iter().all(|e| matches!(e.kind, BuildErrorKind::ForeignHandle { .. })), "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .all(|e| matches!(e.kind, BuildErrorKind::ForeignHandle { .. })),
+        "{errors:?}"
+    );
 }

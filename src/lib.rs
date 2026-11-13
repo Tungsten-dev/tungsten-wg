@@ -194,3 +194,8 @@ pub struct BuilderReadme;
 #[cfg(doctest)]
 #[doc = include_str!("../README.md")]
 pub struct Readme;
+
+/// Compiles the book's getting-started snippets as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../book/src/getting-started.md")]
+pub struct BookGettingStarted;

@@ -72,6 +72,10 @@ impl FnBuilder {
         self.ret
     }
 
+    pub fn set_return_type(&mut self, ret: VariableType) {
+        self.ret = intern(ret);
+    }
+
     /// Sets the function's `source_hash` (default 0).
     pub fn source_hash(&mut self, hash: u64) {
         self.source_hash = hash;
@@ -209,10 +213,7 @@ impl FnBuilder {
         if let Some(found) = ty
             && *found != VariableType::Bool
         {
-            self.error(
-                BuildErrorKind::ConditionType { found: name(found) },
-                at,
-            );
+            self.error(BuildErrorKind::ConditionType { found: name(found) }, at);
         }
         cond
     }
@@ -338,7 +339,10 @@ fn foreign_in_stmt(vars: &Arena<Var>, s: &Statement) -> bool {
             else_branch,
         } => {
             foreign_local(vars, condition)
-                || then_branch.iter().chain(else_branch).any(|s| foreign_in_stmt(vars, s))
+                || then_branch
+                    .iter()
+                    .chain(else_branch)
+                    .any(|s| foreign_in_stmt(vars, s))
         }
         Statement::While { condition, body } => {
             foreign_local(vars, condition) || body.iter().any(|s| foreign_in_stmt(vars, s))
