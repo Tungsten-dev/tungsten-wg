@@ -726,6 +726,59 @@ pub fn eval(
     out
 }
 
+// ---- select --------------------------------------------------------------------------------
+
+/// The types `select` can choose between (CHECK.md §4.1): scalars, `vec3` and `pos3`.
+fn selectable(t: &VariableType) -> bool {
+    is_numeric(t) || matches!(t, VariableType::Bool | VariableType::Vec3 | VariableType::Pos3)
+}
+
+/// `select(c, a, b)`: `a` if `c`, else `b`. All three are evaluated (eager), so an error in
+/// either arm fails the cell, and both arms count as read. `c` is a `bool`; `a` and `b` have the
+/// same scalar, `vec3` or `pos3` type, which is the result. When one arm's type is unknown, the
+/// result has the other's.
+#[track_caller]
+pub fn select(c: impl Into<Expr>, a: impl Into<Expr>, b: impl Into<Expr>) -> Expr {
+    let at = Location::caller();
+    let (mut c, mut a, mut b) = (c.into(), a.into(), b.into());
+    let take = |e: &mut Expr| Box::new(std::mem::replace(&mut e.node, Expression::Bool(false)));
+    let mut out = Expr::typed(
+        Expression::Select {
+            cond: take(&mut c),
+            then: take(&mut a),
+            otherwise: take(&mut b),
+        },
+        None,
+    );
+    out.take(&mut c);
+    out.take(&mut a);
+    out.take(&mut b);
+    if let Some(t) = c.ty
+        && *t != VariableType::Bool
+    {
+        out.problem(BuildErrorKind::SelectCond { found: name(t) }, at);
+    }
+    out.ty = match (a.ty, b.ty) {
+        (Some(x), Some(y)) if x != y => {
+            out.problem(
+                BuildErrorKind::SelectMismatch {
+                    then: name(x),
+                    otherwise: name(y),
+                },
+                at,
+            );
+            None
+        }
+        (Some(t), _) | (None, Some(t)) if !selectable(t) => {
+            out.problem(BuildErrorKind::SelectType { found: name(t) }, at);
+            None
+        }
+        (t, None) | (None, t) => t,
+        (Some(t), Some(_)) => Some(t),
+    };
+    out
+}
+
 /// [`eval`] with the scales of `grid`. Its dims are ignored.
 #[track_caller]
 pub fn eval_on(unit: Unit, p: impl Into<Expr>, grid: &Grid) -> Expr {

@@ -1,0 +1,17 @@
+// Nested selects, and a select in a while condition. x = 0 loops 3 times (100 + 10 + 1), x = 1
+// loops 5 times (100 + 10 + 1 + 1 + 1).
+program {
+    fn run() -> i32 {
+        let i: i32 = 0;
+        let n: i32 = 0;
+        while (i < select((ambient(pos3).x == 0), 3, 5)) {
+            n = (n + select((i < 2), select((i == 0), 100, 10), 1));
+            i = (i + 1);
+        }
+        return n;
+    }
+    unit u { main run; }
+    entry u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" u = [111, 113]

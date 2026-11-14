@@ -195,6 +195,10 @@ look up an id, lower the children, build the core variant. A few to know about:
   the checker.
 - **`DensityVariable(r, _)`** finds `r` in `map.inputs`. Inputs are program-wide, so this is the same input whichever unit or shared helper does the read.
 - **`Field`** calls `field_sel` (below).
+- **`Select`** maps one-to-one to `core::Expr::Select`, with no desugar and no folding of a
+  literal cond (`specs/select.md` §3.3). Its children are at `arg 0..2`. Every walker here
+  (`lower/mapping.rs`, `lower/unit_eval.rs`) recurses into all three, so an `eval` in an arm that is
+  never chosen is still desugared and reached: select is eager.
 - **`Construct` / `ConstructExtern`** → `construct` / `construct_extern`. Vec3/Pos3 need exactly
   3 args. A record by position becomes fields `0..n`; a record by name looks up each field
   index. Written order and duplicates are kept.

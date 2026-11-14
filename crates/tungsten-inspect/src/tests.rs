@@ -472,3 +472,43 @@ fn inspects_evals() {
     assert!(edges.iter().all(|l| l.contains("dotted")), "{dep}");
     assert!(edges.iter().any(|l| l.contains("eval ×4")) && edges.iter().any(|l| l.contains("eval unbounded")), "{dep}");
 }
+
+const SELECTED: &str = r#"
+program {
+    fn base_main() -> f64 { return 1.0; }
+    unit base { main base_main; }
+    input b = base @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn top_main() -> f64 {
+        return select((ambient(pos3).x == 0), density(b), (density(b) * 2.0));
+    }
+    unit top { main top_main; inputs [b]; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// `specs/select.md` §5.4: IR text, and a `select` node with an edge from each operand. Both arms
+/// are read, so both density reads count.
+#[test]
+fn inspects_selects() {
+    let program = program(SELECTED);
+    let views = Views { dataflow: true, ..Views::default() };
+    let out = inspect(&program, &InspectConfig { views, ..InspectConfig::default() });
+    let parsed: serde_json::Value =
+        serde_json::from_str(&out.files[std::path::Path::new("inspection.json")]).unwrap();
+    let f = parsed["functions"].as_array().unwrap().iter().find(|f| f["display"] == "top_main").unwrap();
+    let ir = f["ir"].as_str().unwrap();
+    assert!(ir.contains("select((ambient(Pos3).x == 0), b, (b * 2.0))"), "{ir}");
+
+    let dag = &f["dag"];
+    let nodes = dag["nodes"].as_array().unwrap();
+    let select = nodes.iter().find(|n| n["kind"] == "select").unwrap_or_else(|| panic!("{nodes:?}"));
+    let ports: Vec<&str> = dag["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["to"] == select["id"])
+        .map(|e| e["port"].as_str().unwrap())
+        .collect();
+    assert_eq!(ports, ["c", "a", "b"], "{dag}");
+    assert_eq!(dag["summary"]["density_reads"]["b"], 2, "{dag}");
+}

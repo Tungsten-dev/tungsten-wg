@@ -154,6 +154,12 @@ pub enum CheckErrorKind {
     BadBinary { op: BinOp, left: Type, right: Type },
     BadUnary { op: UnOp, operand: Type },
     BadCast { from: Type, to: Type },
+    /// A `Select` whose cond isn't `Bool`.
+    SelectCond { found: Type },
+    /// A `Select` whose arms have different types.
+    SelectMismatch { then: Type, otherwise: Type },
+    /// A `Select` arm that is a record, array or handle.
+    SelectType { found: Type },
     Arity { expected: usize, found: usize },
     /// An `ExternCall` annotation differs from the registry decl.
     ExternSignature { ext: ExternId },
@@ -273,6 +279,9 @@ impl Clone for CheckErrorKind {
             CheckErrorKind::BadBinary { op, left, right } => CheckErrorKind::BadBinary { op: op.clone(), left: left.clone(), right: right.clone() },
             CheckErrorKind::BadUnary { op, operand } => CheckErrorKind::BadUnary { op: op.clone(), operand: operand.clone() },
             CheckErrorKind::BadCast { from, to } => CheckErrorKind::BadCast { from: from.clone(), to: to.clone() },
+            CheckErrorKind::SelectCond { found } => CheckErrorKind::SelectCond { found: found.clone() },
+            CheckErrorKind::SelectMismatch { then, otherwise } => CheckErrorKind::SelectMismatch { then: then.clone(), otherwise: otherwise.clone() },
+            CheckErrorKind::SelectType { found } => CheckErrorKind::SelectType { found: found.clone() },
             CheckErrorKind::Arity { expected, found } => CheckErrorKind::Arity { expected: *expected, found: *found },
             CheckErrorKind::ExternSignature { ext } => CheckErrorKind::ExternSignature { ext: *ext },
             CheckErrorKind::FieldAnnotation { annotated, actual } => CheckErrorKind::FieldAnnotation { annotated: annotated.clone(), actual: actual.clone() },

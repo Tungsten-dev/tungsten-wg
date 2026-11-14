@@ -124,6 +124,12 @@ pub enum BuildErrorKind {
     UnitHasParams { params: usize },
     #[error("eval position: expected `pos3`, found `{found}`")]
     EvalPosition { found: String },
+    #[error("select condition: expected `bool`, found `{found}`")]
+    SelectCond { found: String },
+    #[error("select arms have different types: `{then}` and `{otherwise}`")]
+    SelectMismatch { then: String, otherwise: String },
+    #[error("select can't choose between `{found}` values (only scalars, vec3 and pos3)")]
+    SelectType { found: String },
 }
 
 fn field_message(field: &str, base: &str, problem: &FieldProblem) -> String {

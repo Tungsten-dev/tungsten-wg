@@ -483,3 +483,28 @@ fn workers_without_refinements_are_unchanged() {
     let text = generate(AMBIENTS).full_source;
     assert!(!text.contains("self.origin") && !text.contains("refine_"), "{text}");
 }
+
+/// `select` on a scalar and on a vector (`specs/select.md` §5.1).
+const SELECT: &str = r#"
+program {
+    fn s_main() -> f64 {
+        return select((ambient(pos3).x == 0), 1.5, -2.0);
+    }
+    fn v_main() -> vec3 {
+        return select(false, ambient(origin), vec3(1.0, 2.0, 3.0));
+    }
+    unit s { main s_main; }
+    unit v { main v_main; }
+    entry s @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry v @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+#[test]
+fn select_is_select_unpredictable() {
+    let out = generate(SELECT);
+    assert_contains(&out.density_module, &[
+        "::core::hint::select_unpredictable((p.pos.x == 0_i32), 1.5_f64, -2_f64)",
+        "::core::hint::select_unpredictable(false, config.origin, Vec3::new(1_f64, 2_f64, 3_f64))",
+    ]);
+}

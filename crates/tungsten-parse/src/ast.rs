@@ -439,6 +439,8 @@ pub enum ExprKind {
     },
     Array(Vec<Expr>),
     Cast(Box<Expr>, Ty),
+    /// `select(c, a, b)`: eager, all three are evaluated.
+    Select(Box<Expr>, Box<Expr>, Box<Expr>),
     Unary(UnaryOperator, Box<Expr>),
     Binary(BinaryOperator, Box<Expr>, Box<Expr>),
 }
@@ -464,6 +466,11 @@ impl ExprKind {
             ExprKind::Index { base: l, index: r } | ExprKind::Binary(_, l, r) => {
                 f(l);
                 f(r);
+            }
+            ExprKind::Select(c, a, b) => {
+                f(c);
+                f(a);
+                f(b);
             }
         }
     }

@@ -715,6 +715,14 @@ pub enum Expression {
         origin_scale: (f64, f64, f64),
         position_scale: (f64, f64, f64),
     },
+    /// `then` if `cond` is true, else `otherwise`. All three are evaluated, in this order (eager).
+    /// `cond` is `Bool`; both arms have the same scalar, `Vec3` or `Pos3` type, which is the result.
+    /// After `Eval`, so existing discriminants (and source hashes) stay stable.
+    Select {
+        cond: Box<Expression>,
+        then: Box<Expression>,
+        otherwise: Box<Expression>,
+    },
 }
 
 /// What identifies an evaluated function: the unit and the bits of both scales. Two `eval` sites

@@ -17,6 +17,9 @@ use tungsten_ir::model::{AmbientKind, AxisFactor, BinaryOperator, ConstExpr, Den
 
 use java::Expression as J;
 
+/// The method a `select` calls; one overload per operand type (`function::select_helper`).
+pub const SELECT_FN: &str = "tw$select";
+
 /// `ConstExpr` as an ordinary expression, so constants share the expression conversion.
 pub fn const_to_expression(e: &ConstExpr) -> Expression {
     let b = |e: &ConstExpr| Box::new(const_to_expression(e));
@@ -246,6 +249,30 @@ impl<'a> FunctionConverter<'a> {
                 }
                 J::call(None, self.naming.eval_fn(*unit, *origin_scale, *position_scale), args)
             }
+            // Eager by being a call (never `?:`, which is lazy); C2 inlines the helper.
+            Expression::Select { cond, then, otherwise } => {
+                let t = self
+                    .derive_type(expr)
+                    .unwrap_or_else(|| panic!("cannot derive the type of a select's arms"));
+                if !self.used_selects.contains(&t) {
+                    self.used_selects.push(t.clone());
+                }
+                let c = self.convert_expression(cond);
+                let a = self.select_arm(then, &t);
+                let b = self.select_arm(otherwise, &t);
+                J::call(None, SELECT_FN, vec![c, a, b])
+            }
+        }
+    }
+
+    /// A select arm of type `t`. Java widens a `byte` operand to `int`, which would pick the
+    /// `int` overload, so `byte` arms are cast back.
+    fn select_arm(&mut self, e: &Expression, t: &VariableType) -> java::Expression {
+        let v = self.convert_expression(e);
+        match (t, &v) {
+            (VariableType::I8, J::Cast { to: java::Type::Byte, .. }) => v,
+            (VariableType::I8, _) => J::cast(java::Type::Byte, v),
+            _ => v,
         }
     }
 

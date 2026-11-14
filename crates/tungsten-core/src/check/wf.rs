@@ -245,6 +245,17 @@ fn wf_expr(p: &Program, nlocals: usize, e: &Expr, w: &mut W)
             wf_expr(p, nlocals, operand, w);
             pop(w);
         },
+        Expr::Select { cond, then, otherwise } => {
+            w.path.push(CoreStep::Arg(0));
+            wf_expr(p, nlocals, cond, w);
+            pop(w);
+            w.path.push(CoreStep::Arg(1));
+            wf_expr(p, nlocals, then, w);
+            pop(w);
+            w.path.push(CoreStep::Arg(2));
+            wf_expr(p, nlocals, otherwise, w);
+            pop(w);
+        },
     }
 }
 

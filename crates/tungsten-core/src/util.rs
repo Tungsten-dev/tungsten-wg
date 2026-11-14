@@ -462,6 +462,11 @@ pub fn clone_expr(e: &Expr) -> Expr
             to: clone_type(to),
             operand: Box::new(clone_expr(operand)),
         },
+        Expr::Select { cond, then, otherwise } => Expr::Select {
+            cond: Box::new(clone_expr(cond)),
+            then: Box::new(clone_expr(then)),
+            otherwise: Box::new(clone_expr(otherwise)),
+        },
     }
 }
 

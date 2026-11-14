@@ -363,6 +363,22 @@ impl<'a> Ctx<'a> {
                     Some(to),
                 )
             }
+            ExprKind::Select(c, a, b) => {
+                if sc.f.is_none() {
+                    return err(e.span, "select is not allowed in constants");
+                }
+                let (c, _) = self.child(sc, c, path, ExprStep::Arg(0))?;
+                let (a, at) = self.child(sc, a, path, ExprStep::Arg(1))?;
+                let (b, bt) = self.child(sc, b, path, ExprStep::Arg(2))?;
+                (
+                    Expression::Select {
+                        cond: Box::new(c),
+                        then: Box::new(a),
+                        otherwise: Box::new(b),
+                    },
+                    at.or(bt),
+                )
+            }
             ExprKind::Unary(op, inner) => {
                 let (x, t) = self.child(sc, inner, path, ExprStep::Operand)?;
                 (

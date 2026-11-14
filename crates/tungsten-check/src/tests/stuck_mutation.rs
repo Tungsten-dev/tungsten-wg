@@ -153,7 +153,9 @@ impl M<'_> {
                 self.expr(array);
                 self.expr(index);
             }
-            Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } => {
+            Expr::MakeVec3 { x, y, z }
+            | Expr::MakePos3 { x, y, z }
+            | Expr::Select { cond: x, then: y, otherwise: z } => {
                 self.expr(x);
                 self.expr(y);
                 self.expr(z);

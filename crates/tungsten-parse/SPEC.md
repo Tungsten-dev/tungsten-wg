@@ -118,7 +118,7 @@ program is compact by construction: no holes, and every generation is 0.
   comes from textual order.
 - **Strings**: `"…"` with `\\ \" \n \t \u{hex}`. Used for `@name`, case names and reasons.
 - **Keywords**: `program fn unit main input entry host param auto const use let vars return break
-  if else while repeat true false as new extern ext mut dynamic density ambient eval
+  if else while repeat true false as new extern ext mut dynamic density ambient eval select
   helpers autos hosts consts inputs inf nan` and the type names (§5.4). `table`, `tables`,
   `perlin`, `base3d` and `none` are gone, with no compatibility form.
 
@@ -211,7 +211,13 @@ block     = "{" stmt* "}" ;
 eval_expr = "eval" "(" label "," expr ")" eval_attrs ;   (* a primary expression *)
 eval_attrs= ( "@origin_scale" "(" num "," num "," num ")"
             | "@position_scale" "(" num "," num "," num ")" )* ;   (* any order, each exactly once *)
+select_expr = "select" "(" expr "," expr "," expr ")" ;   (* a primary expression *)
 ```
+
+`select_expr` (`specs/select.md` §3.5): `select(c, a, b)` is `a` if `c`, else `b`, with all three
+evaluated (eager, unlike `&&`/`||`). It's a primary expression, so it adds no precedence level.
+`select` is a reserved word: a function or extern named `select` must be quoted. In a `const`
+initializer it's an `ElabError` ("select is not allowed in constants").
 
 `eval_expr` (`specs/unit-eval.md` §3.4): `label` names a unit. Both attributes are required, are
 never defaulted, and bind to the call, tighter than any binary operator. `@dims` is an error.
@@ -317,6 +323,7 @@ they're binary ops, §10).
 | `DensityVariable(d, Some(i))` | `density(d, i)` | `density(d, i)` |
 | `Ambient(k)` | `ambient(origin \| pos3 \| origin_scale \| position_scale)` | same |
 | `Eval { unit, position, .. }` | `eval(u, p) @origin_scale(..) @position_scale(..)`, attributes in either order | `eval(u, p) @origin_scale(..) @position_scale(..)` |
+| `Select { cond, then, otherwise }` | `select(c, a, b)` | `select(c, a, b)` |
 | `FunctionCall` | `f(a, …)` | `f(a, …)` |
 | `ExternCall` | `ext name(a, …)` (signature from `Env`) or `ext name::<(T, …) -> R>(a, …)` | always with `::<…>` |
 | `Field` | `e.x` (field and base type derived), `e.x::<T>` (base type derived), `e.x::<T; B>` | `e.x::<T>`, or `e.x::<T; B>` when `type_of(e)` isn't `B` |
@@ -389,6 +396,7 @@ These are the only derivations. Anything else that's missing is a syntax error.
 | index | `[T; n]` → `T`, `vec3` → `f64`, `pos3` → `i32` |
 | construct / construct-extern / cast | `t` / `t` / target |
 | array literal | `[type_of(first); len]` |
+| `select(c, a, b)` | `type_of(a)`, else `type_of(b)` |
 
 Any other case (for example `i32 + f64`, an empty array literal, a field on `f64`) is
 **underivable**. Only an underivable type that is actually needed causes an `ElabError`. Reject

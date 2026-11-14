@@ -82,6 +82,32 @@ fn clones_read_the_position_and_fold_the_scales() {
 }
 
 #[test]
+fn eval_in_a_select_arm_is_desugared_and_reached() {
+    let src = format!(
+        "program {{
+            fn probe_main() -> f64 {{ return (ambient(pos3).x as f64); }}
+            unit probe {{ main probe_main; }}
+            fn top_main() -> f64 {{
+                return select(true, 1.0, eval(probe, pos3(3, 0, 0)) {S});
+            }}
+            unit top {{ main top_main; }}
+            entry top {G};
+        }}"
+    );
+    let l = ok(&load(&src), &registry());
+    // The unselected arm runs, so its eval gets a clone and the reader lists it.
+    assert_eq!(l.map.eval_fns.len(), 1);
+    let clone = l.map.eval_fns[0].id;
+    let top = l.map.units.iter().find(|(_, _, n)| *n == "top_main").unwrap().0;
+    assert!(l.program.units[top.0].helpers.contains(&clone));
+    let main = fn_id(&l, "top_main");
+    let Some(Stmt::Return(Expr::Select { otherwise, .. })) = l.program.functions[main.0].body.last() else {
+        panic!("top_main doesn't return a select");
+    };
+    assert!(matches!(&**otherwise, Expr::Call { func, .. } if *func == clone), "{otherwise:?}");
+}
+
+#[test]
 fn deterministic() {
     let p = load(&program());
     assert!(crate::lower(&p, &registry()).unwrap() == crate::lower(&p, &registry()).unwrap());

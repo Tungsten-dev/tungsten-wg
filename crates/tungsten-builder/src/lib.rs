@@ -16,7 +16,7 @@ mod program;
 
 pub use decls::{AutoInitializerDecl, Decls, ExternDecl, RecordDecl};
 pub use error::{BuildError, BuildErrorKind, BuildErrors, FieldProblem};
-pub use expr::{Expr, eval, eval_on, origin, origin_scale, pos3, position_scale};
+pub use expr::{Expr, eval, eval_on, origin, origin_scale, pos3, position_scale, select};
 pub use function::{Block, FnBuilder, Local};
 pub use program::{
     Auto, AutoArg, Constant, Entry, Grid, Helper, Host, Input, InputSpec, Param, ProgramBuilder, RerunSpec, Unit,
@@ -33,7 +33,7 @@ pub mod prelude {
     pub use crate::{
         Auto, AutoArg, AxisFactor, Block, BuildError, BuildErrors, Constant, DensityMapping, Entry, Expr, FnBuilder,
         Grid, Helper, Host, Input, InputSpec, Local, Param, ProgramBuilder, RerunSpec, Unit, eval, eval_on, origin,
-        origin_scale, pos3, position_scale,
+        origin_scale, pos3, position_scale, select,
     };
     // `pos3` above brings both the ambient function and the `pos3!` macro.
     pub use crate::{array, auto_initializers, body, build, extern_fns, record_decls, vec3, vt};

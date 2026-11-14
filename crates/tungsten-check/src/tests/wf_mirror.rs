@@ -49,7 +49,9 @@ fn wf_expr(p: &Program, nlocals: usize, e: &Expr) -> bool {
         Expr::Unary { operand, .. } => w(operand),
         Expr::Field { base, sel, ty } => w(base) && wf_sel(p, sel) && wf_type(p, ty),
         Expr::Index { array, index } => w(array) && w(index),
-        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } => w(x) && w(y) && w(z),
+        Expr::MakeVec3 { x, y, z }
+        | Expr::MakePos3 { x, y, z }
+        | Expr::Select { cond: x, then: y, otherwise: z } => w(x) && w(y) && w(z),
         Expr::MakeRecord { record, fields } => {
             record.0 < p.records.len()
                 && fields

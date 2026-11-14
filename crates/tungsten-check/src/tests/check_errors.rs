@@ -57,6 +57,25 @@ fn errors_dont_cascade() {
 }
 
 #[test]
+fn select_errors() {
+    one("", "return select(1, p, p);", "fn `top` › stmt 0 › value: `select` needs a `bool` condition, found `i32`");
+    one("", "return select(true, p, 1);", "fn `top` › stmt 0 › value: `select` arms have different types: `f64` and `i32`");
+    // No promotion between vectors either.
+    one(
+        "",
+        "let v: vec3 = select(true, vec3(p, p, p), pos3(1, 2, 3)); return p;",
+        "fn `top` › stmt 0 › value: `select` arms have different types: `vec3` and `pos3`",
+    );
+    one(
+        "",
+        "let a: [f64; 1] = select(true, [p], [p]); return p;",
+        "fn `top` › stmt 0 › value: `select` can't choose between `[f64; 1]` values (only scalars, vec3 and pos3)",
+    );
+    // An arm's own error is reported once; the select stays quiet.
+    one("", "return select(true, (p + 1), p);", "fn `top` › stmt 0 › value › arg 1: `+` can't be applied to `f64` and `i32`");
+}
+
+#[test]
 fn bad_unary() {
     one("", "return !p;", "fn `top` › stmt 0 › value: `!` can't be applied to `f64`");
 }

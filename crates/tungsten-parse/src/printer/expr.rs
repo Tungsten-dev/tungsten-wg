@@ -246,6 +246,15 @@ impl ExprPrinter<'_> {
                     f64_lit(s.2)
                 ));
             }
+            Select { cond, then, otherwise } => {
+                out.push_str("select(");
+                self.expr(cond, out);
+                out.push_str(", ");
+                self.expr(then, out);
+                out.push_str(", ");
+                self.expr(otherwise, out);
+                out.push(')');
+            }
         }
     }
 }

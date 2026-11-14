@@ -195,6 +195,7 @@ guarantee.
 | `MakeRecord { record, fields }` | Evaluates the field values **in the order they are written**, then stores each in its declared slot. The record value is always in declaration order |
 | `ArrayLit(es)` | Evaluates the elements in order and builds an array |
 | `Cast { to, operand }` | Evaluates the operand, then converts it (§6.5) |
+| `Select { cond, then, otherwise }` | Evaluates `cond`, then `then`, then `otherwise`, and is `then` if `cond` is `true`, else `otherwise`. The chosen value's bits are returned unchanged (NaN payloads, `-0.0`) |
 
 A few things worth spelling out:
 
@@ -202,6 +203,10 @@ A few things worth spelling out:
   evaluate `b` when `a` is `true`. So `false && (1 / 0 == 0)` is `false`, not `DivByZero`. The
   bitwise operators `&` and `|` on `Bool` are **not** short-circuit: both sides are always
   evaluated.
+- **Select is not lazy.** Unlike `&&`/`||` (and C's `?:`), `select(c, a, b)` always evaluates
+  all three operands, so an error in the arm that isn't chosen still fails the cell, and if both
+  arms fail, the `then` error is the one reported. This is what lets every backend lower it to a
+  branchless instruction: the arms are call arguments and really run (§10.4).
 - **Record construction order.** `new Pair { b: f(), a: g() }` calls `f` before `g`, because
   that's the written order. The resulting value still stores `a` first, because that's the
   declaration order.

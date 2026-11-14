@@ -35,6 +35,8 @@ pub struct Converted {
     pub constants: Vec<Ref<Constant>>,
     /// Lerp helpers called by the body that the caller must still generate.
     pub lerps: Vec<LerpHelper>,
+    /// Operand types of the `tw_select` overloads the body calls.
+    pub selects: Vec<VariableType>,
     pub warnings: Vec<String>,
 }
 
@@ -71,7 +73,42 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<cuda
 }
 
 fn finish(conv: FunctionConverter<'_>, function: cuda::Function) -> Converted {
-    Converted { function, called: conv.called, constants: conv.used_constants, lerps: conv.used_lerps, warnings: conv.warnings }
+    Converted {
+        function,
+        called: conv.called,
+        constants: conv.used_constants,
+        lerps: conv.used_lerps,
+        selects: conv.used_selects,
+        warnings: conv.warnings,
+    }
+}
+
+/// The `tw_select` overload for operands of type `t` (a scalar, `double3` or `int3`). Vectors
+/// select per component, so each component is its own `selp` and nothing goes through memory.
+pub fn select_helper(t: &VariableType) -> cuda::Function {
+    let dt = device_type(t);
+    let body = match t {
+        VariableType::Vec3 | VariableType::Pos3 => {
+            format!("{}{{ c ? a.x : b.x, c ? a.y : b.y, c ? a.z : b.z }}", dt_name(&dt))
+        }
+        _ => "c ? a : b".to_string(),
+    };
+    cuda::Function {
+        doc: None,
+        qualifiers: "__device__ __forceinline__".into(),
+        return_type: dt.clone(),
+        attributes: String::new(),
+        name: super::expression::SELECT_FN.into(),
+        params: vec![(cuda::Type::Bool, "c".into()), (dt.clone(), "a".into()), (dt, "b".into())],
+        body: Some(vec![S::Return(Some(C::raw(body)))]),
+    }
+}
+
+fn dt_name(t: &cuda::Type) -> &str {
+    match t {
+        cuda::Type::Named(n) => n,
+        _ => unreachable!("vectors are named types"),
+    }
 }
 
 /// Converts a helper function: uniform parameters, then its own parameters, then the body.

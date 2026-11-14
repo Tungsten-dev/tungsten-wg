@@ -70,6 +70,7 @@ const TOKENS: &[&str] = &[
     "handle",
     "density",
     "ambient",
+    "select",
     "helpers",
     "autos",
     "hosts",

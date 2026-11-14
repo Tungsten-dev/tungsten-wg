@@ -723,5 +723,6 @@ fn to_const(
         Expression::Ambient(_) => return not(found, "an ambient"),
         Expression::ConstructExtern { .. } => return not(found, "a record construction"),
         Expression::Eval { .. } => return not(found, "an eval"),
+        Expression::Select { .. } => return not(found, "a select"),
     })
 }

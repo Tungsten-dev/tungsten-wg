@@ -249,7 +249,7 @@ pub fn gen_expr(rng: &mut Rng, sc: &Scope, depth: usize) -> Expression {
             .map(|_| gen_expr(rng, sc, depth - 1))
             .collect()
     };
-    match rng.below(14) {
+    match rng.below(15) {
         0..=3 => Expression::BinaryOp {
             op: gen_op(rng),
             left: Box::new(sub(rng)),
@@ -308,6 +308,11 @@ pub fn gen_expr(rng: &mut Rng, sc: &Scope, depth: usize) -> Expression {
                 .collect(),
         },
         12 => Expression::ArrayLiteral(subs(rng, 3)),
+        13 => Expression::Select {
+            cond: Box::new(sub(rng)),
+            then: Box::new(sub(rng)),
+            otherwise: Box::new(sub(rng)),
+        },
         _ => Expression::ExplicitCast {
             to: gen_type(rng, 1, false),
             expr: Box::new(sub(rng)),

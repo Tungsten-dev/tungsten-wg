@@ -194,7 +194,7 @@ fn scope_expr(cx: &SCx, e: &Expr, seen: &mut Vec<Seen>, path: &mut Vec<CoreStep>
             scope_expr(cx, index, seen, path, errs);
             let _ = path.pop();
         },
-        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } => {
+        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } | Expr::Select { cond: x, then: y, otherwise: z } => {
             path.push(CoreStep::Arg(0));
             scope_expr(cx, x, seen, path, errs);
             let _ = path.pop();

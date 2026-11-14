@@ -181,6 +181,12 @@ impl Walk<'_> {
                     self.foreign("a unit");
                 }
             }
+            // Both arms count as read: select is eager.
+            Expression::Select { cond, then, otherwise } => {
+                self.expr(cond);
+                self.expr(then);
+                self.expr(otherwise);
+            }
         }
     }
 }
@@ -275,6 +281,11 @@ pub(crate) fn each_child(e: &Expression, f: &mut dyn FnMut(&Expression)) {
         }
         Expression::ExplicitCast { expr, .. } => each_child(expr, f),
         Expression::Eval { position, .. } => each_child(position, f),
+        Expression::Select { cond, then, otherwise } => {
+            each_child(cond, f);
+            each_child(then, f);
+            each_child(otherwise, f);
+        }
         _ => {}
     }
 }

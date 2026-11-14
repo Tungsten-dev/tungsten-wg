@@ -201,6 +201,12 @@ impl Printer<'_, '_> {
                 super::fmt_triple(*origin_scale),
                 super::fmt_triple(*position_scale)
             ),
+            Expression::Select { cond, then, otherwise } => format!(
+                "select({}, {}, {})",
+                self.expr(cond),
+                self.expr(then),
+                self.expr(otherwise)
+            ),
         }
     }
 }

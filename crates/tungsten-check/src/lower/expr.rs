@@ -192,6 +192,11 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 origin_scale,
                 position_scale,
             } => self.eval_expr(*unit, position, *origin_scale, *position_scale),
+            Expression::Select { cond, then, otherwise } => Expr::Select {
+                cond: self.boxed(Step::Arg(0), cond),
+                then: self.boxed(Step::Arg(1), then),
+                otherwise: self.boxed(Step::Arg(2), otherwise),
+            },
         }
     }
 

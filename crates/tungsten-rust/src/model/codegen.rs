@@ -95,6 +95,7 @@ impl RustCodeGenerator {
         p.line(&format!("pub mod {} {{", module_name));
         p.indent();
         p.line("// Auto-generated inline Rust module from RCL");
+        p.line("// Needs Rust 1.88 or later (`select` uses `core::hint::select_unpredictable`).");
         p.line("#[allow(dead_code)]");
         p.line("#[allow(unused_variables)]");
         p.line("#[allow(unused_imports)]");

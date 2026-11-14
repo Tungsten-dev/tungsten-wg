@@ -467,6 +467,8 @@ pub enum NodeKind {
         fields: Vec<String>,
     },
     ArrayLiteral,
+    /// `select(c, a, b)`: both arms are inputs, since both are evaluated.
+    Select,
     Cast {
         ty: String,
     },

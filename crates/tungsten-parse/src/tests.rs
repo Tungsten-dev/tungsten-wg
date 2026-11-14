@@ -2419,3 +2419,43 @@ fn eval_is_a_keyword() {
     round_trips(&tf);
     assert!(print(&tf.program).contains("fn `eval`()"));
 }
+
+/// `select(c, a, b)` (`specs/select.md` §3.5): a primary expression, so it nests anywhere without
+/// parentheses of its own and adds no precedence level; printed back canonically.
+#[test]
+fn select_parses_and_prints() {
+    let tf = load_ok(&with_units(
+        "fn top() -> f64 {
+             let x: f64 = select(ambient(pos3).x < 0, -1.0, select(true, 2.0, 3.0)) * 2.0;
+             while select(x < 1.0, false, true) { x = (x - 1.0); }
+             return x;
+         }",
+    ));
+    let (_, top) = find_fn(&tf, "top");
+    let Statement::Assign { value: Expression::BinaryOp { left, .. }, .. } = &top.body[0] else {
+        panic!("{:?}", top.body[0])
+    };
+    let Expression::Select { otherwise, .. } = &**left else { panic!("{left:?}") };
+    assert!(matches!(&**otherwise, Expression::Select { .. }), "{otherwise:?}");
+    let text = print(&tf.program);
+    assert!(text.contains("(select((ambient(pos3).x::<i32> < 0), -1.0, select(true, 2.0, 3.0)) * 2.0)"), "{text}");
+    assert!(text.contains("while select((x < 1.0), false, true)"), "{text}");
+    round_trips(&tf);
+}
+
+#[test]
+fn select_takes_three_arguments_and_no_constants() {
+    let body = |e: &str| with_units(&format!("fn top() -> f64 {{ return {e}; }}"));
+    fails(&body("select(true, 1.0)"), "");
+    fails(&body("select(true, 1.0, 2.0, 3.0)"), "");
+    fails(&with_units("const c = select(true, 1.0, 2.0);"), "select is not allowed in constants");
+}
+
+/// `select` is a reserved word: unquoted it can't name a function, quoted it loads and prints back.
+#[test]
+fn select_is_a_keyword() {
+    fails(&with_units("fn select() -> f64 { return 1.0; }"), "");
+    let tf = load_ok(&with_units("fn `select`() -> f64 { return 1.0; } fn top() -> f64 { return `select`(); }"));
+    round_trips(&tf);
+    assert!(print(&tf.program).contains("fn `select`()"));
+}

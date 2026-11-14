@@ -128,6 +128,8 @@ pub const JAVA_RESERVED: &[&str] = &[
     "iy",
     "iz",
     "create",
+    // generated helpers
+    "tw$select",
 ];
 
 /// C++20 keywords and alternative tokens, CUDA built-ins used unqualified, and names the generated
@@ -156,6 +158,8 @@ pub const CUDA_RESERVED: &[&str] = &[
     "AutoConsts", "BufferLayout", "Orchestration", "Status", "Vec3", "Pos3", "Array", "Impl",
     // uniform parameters and kernel locals
     "p", "ctx", "local", "origin", "buffers", "auto_constants", "host_consts", "r", "config",
+    // device helpers
+    "tw_select",
 ];
 
 /// The checked buffer read the Rust backend generates next to the density functions.

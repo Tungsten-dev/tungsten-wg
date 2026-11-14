@@ -195,6 +195,9 @@ impl<'a> FunctionConverter<'a> {
             }
             E::ExplicitCast { to, .. } => to.clone(),
             E::Eval { unit, .. } => self.unit_return_type(*unit).clone(),
+            E::Select { then, otherwise, .. } => {
+                self.derive_type(then).or_else(|| self.derive_type(otherwise))?
+            }
         })
     }
 }

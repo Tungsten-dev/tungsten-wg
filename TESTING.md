@@ -315,6 +315,7 @@ The full format (grammar, elaboration, printer, envelope) is specified in
   `nan(0x7ff8000000000000)`. Integers: `1b`, `1`, `1L`.
 - `eval(u, p)` prints both scale attributes, origin first (`specs/unit-eval.md` §3.4); the
   parser takes them in either order.
+- `select(c, a, b)` prints as written, and `select` is a reserved word (`specs/select.md` §3.5).
 - Required only within the nesting limit (256 levels of expressions, blocks, types and values;
   SPEC §6.2). Deeper programs print, but the text doesn't load.
 

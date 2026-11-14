@@ -177,6 +177,8 @@ pub enum Expr {
     MakeRecord { record: RecordId, fields: Vec<FieldInit> },
     ArrayLit(Vec<Expr>),
     Cast { to: Type, operand: Box<Expr> },
+    /// `then` if `cond` is true, else `otherwise`. All three are evaluated, in this order (eager).
+    Select { cond: Box<Expr>, then: Box<Expr>, otherwise: Box<Expr> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

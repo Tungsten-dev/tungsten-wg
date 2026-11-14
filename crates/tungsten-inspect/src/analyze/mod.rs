@@ -616,6 +616,7 @@ pub(crate) fn expr_children(e: &Expression) -> Vec<&Expression> {
         Expression::ArrayLiteral(items) => items.iter().collect(),
         Expression::ExplicitCast { expr, .. } => vec![expr],
         Expression::Eval { position, .. } => vec![position],
+        Expression::Select { cond, then, otherwise } => vec![cond, then, otherwise],
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)

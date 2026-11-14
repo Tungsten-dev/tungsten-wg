@@ -7,7 +7,7 @@ This repository only contains the backend and code generation side. The end-to-e
 ## Features
 
 - Several targets from one source. Each compile uses one backend through `Compiler`, and returns that backend's own output type. A frontend that targets several languages builds one `Compiler` per backend.
-  - Rust (tungsten-rust): CPU code, enabled by default
+  - Rust (tungsten-rust): CPU code, enabled by default. The generated code needs Rust 1.88 or later.
   - CUDA C++ (tungsten-cuda): GPU kernels, behind the cuda feature
   - Java (tungsten-java): behind the java feature
   - Inspect (tungsten-inspect): doesn't generate code, but renders the program and its schedule for debugging (IR text, DOT/SVG graphs, diffs). Behind the inspect feature.

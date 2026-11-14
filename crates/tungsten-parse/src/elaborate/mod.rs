@@ -761,6 +761,7 @@ impl<'a> Ctx<'a> {
             | Call { .. }
             | ExtCall { .. }
             | ConstructExtern { .. } => err(e.span, "not allowed in a constant expression"),
+            Select(..) => err(e.span, "select is not allowed in constants"),
             _ => Ok(()),
         };
         check(e)?;

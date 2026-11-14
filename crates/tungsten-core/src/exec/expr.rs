@@ -1,6 +1,7 @@
 //! Expressions (§7.2, §7.4, §7.5). Left to right: call and extern arguments, binary operands
 //! (`And` / `Or` short-circuit; everything else is eager, `BitAnd` / `BitOr` on `Bool` too),
-//! `Make*` and array-literal elements in written order, `MakeRecord` fields in written order.
+//! `Make*` and array-literal elements in written order, `MakeRecord` fields in written order,
+//! `Select` cond then both arms (eager, unlike `And` / `Or`).
 //! The first error ends the cell.
 
 use vstd::prelude::*;
@@ -296,6 +297,13 @@ pub fn eval_expr<E: Externs>(env: &Env<E>, rank: usize, ctx: &Ctx, frame: &mut F
         Expr::Cast { to, operand } => {
             let v = eval_expr(env, rank, ctx, frame, operand, memo)?;
             cast(to, &v)
+        },
+        Expr::Select { cond: c, then, otherwise } => {
+            // Eager: both arms run even though only one is returned (SEMANTICS.md §5).
+            let c = eval_expr(env, rank, ctx, frame, c, memo)?;
+            let t = eval_expr(env, rank, ctx, frame, then, memo)?;
+            let o = eval_expr(env, rank, ctx, frame, otherwise, memo)?;
+            if cond(c)? { Ok(t) } else { Ok(o) }
         },
     }
 }

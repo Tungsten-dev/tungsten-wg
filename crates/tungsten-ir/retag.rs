@@ -254,6 +254,11 @@ fn walk_expr(e: &mut Expression, v: &mut impl RefVisitor) {
             v.compute_unit(unit);
             walk_expr(position, v);
         }
+        Expression::Select { cond, then, otherwise } => {
+            walk_expr(cond, v);
+            walk_expr(then, v);
+            walk_expr(otherwise, v);
+        }
         Expression::Float(_)
         | Expression::Double(_)
         | Expression::Byte(_)

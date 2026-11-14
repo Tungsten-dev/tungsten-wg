@@ -143,6 +143,31 @@ pb.entry(vein, Grid::new((16, 96, 16)));
 The evaluated unit's inputs, hosts and helpers stay in its own lists, not the reader's: lowering
 and the backends follow `eval` themselves. A unit that is only evaluated needs no entry or input.
 
+## Select
+
+`select(c, a, b)` is `a` when `c` is true and `b` otherwise, as one expression, with no `if` and no
+branch (`specs/select.md`). `c` is a `bool`; `a` and `b` have the same scalar, `vec3` or `pos3`
+type, which is the result. A non-`bool` cond is `SelectCond`, different arm types are
+`SelectMismatch` (no promotion, not even `vec3`/`pos3`), and a record or array arm is `SelectType`.
+When one arm's type is unknown, the result takes the other's.
+
+```rust
+# use tungsten_wg::builder::prelude::*;
+# let mut pb = ProgramBuilder::new();
+let mut f = FnBuilder::new("clamped", F64);
+let d = (pos3().x().cast(F64) * 0.5).reusable();
+let floor = (pos3().y().cast(F64) * -0.01).reusable();
+f.ret(select(d().lt(floor()), floor(), d())); // max(d, floor) without a branch
+let clamped = pb.finish_unit(f);
+pb.entry(clamped, Grid::new((16, 96, 16)));
+```
+
+Unlike `&&`, `||` and C's `?:`, **all three operands are evaluated**, so both arms count as read
+in the derived lists, and an error in the arm that isn't chosen still fails the cell. That is what
+lets every backend emit it branchless. So don't guard a fallible read with a select:
+`select(i.lt(4), d.at(i), 0.0)` still reads `d` at an out-of-range `i` and fails. Clamp the index
+instead. A select can't appear in a constant (`NotConstant`).
+
 ## Merging and names
 
 | Item | Merged when | On a match |
@@ -253,6 +278,7 @@ overlap, and leaves conflicts for the registry to report.
 | `tests/macros.rs` | Each macro form against its method equivalent, and recursion inside macro blocks |
 | `tests/determinism.rs` | Building twice gives the same program and Rust code, and duplicate names stay unique |
 | `tests/eval.rs` | `eval` typing, poisoning, `eval_on`, foreign units, and lists that don't absorb the evaluated unit's items |
+| `tests/select.rs` | `select` typing over every allowed type, each `Select*` error, poisoning, lists from both arms, and rejection in constants |
 | `tests/slices/` | Real frontend patterns, each `isomorphic` to a twin in `tungsten-testsuite/corpus` that runs on every backend. `REVIEW.md` lists what they found |
 
 ```text

@@ -211,6 +211,11 @@ fn float_bits(p: &Program) -> Vec<u64> {
                 }
                 expr(position, out)
             }
+            Expression::Select { cond, then, otherwise } => {
+                expr(cond, out);
+                expr(then, out);
+                expr(otherwise, out);
+            }
             Expression::Constant(_)
             | Expression::Variable(_)
             | Expression::Byte(_)

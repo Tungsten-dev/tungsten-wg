@@ -82,7 +82,7 @@ pub fn refs_expr(e: &Expr, r: &mut Refs)
             refs_expr(array, r);
             refs_expr(index, r);
         },
-        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } => {
+        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } | Expr::Select { cond: x, then: y, otherwise: z } => {
             refs_expr(x, r);
             refs_expr(y, r);
             refs_expr(z, r);

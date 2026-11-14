@@ -217,6 +217,9 @@ fn direct_uses(program: &Program, f: &Function) -> (Uses, HashSet<Ref<Function>>
             Expression::ConstructExtern { args, .. } => exprs.extend(args.iter().map(|(_, a)| a)),
             Expression::BinaryOp { left, right, .. } => exprs.extend([&**left, &**right]),
             Expression::ArrayAccess { array, index } => exprs.extend([&**array, &**index]),
+            Expression::Select { cond, then, otherwise } => {
+                exprs.extend([&**cond, &**then, &**otherwise])
+            }
             Expression::UnaryOp { operand: x, .. }
             | Expression::Field { base: x, .. }
             | Expression::ExplicitCast { expr: x, .. } => exprs.push(x),

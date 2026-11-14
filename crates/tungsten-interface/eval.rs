@@ -49,6 +49,10 @@ pub(crate) fn each_expr<'a>(body: &'a [Statement], f: &mut dyn FnMut(&'a Express
                 Expression::ConstructExtern { args, .. } => exprs.extend(args.iter().map(|(_, a)| a)),
                 Expression::BinaryOp { left, right, .. } => exprs.extend([&**left, &**right]),
                 Expression::ArrayAccess { array, index } => exprs.extend([&**array, &**index]),
+                // Both arms run (eager), so an `eval` in either is reached.
+                Expression::Select { cond, then, otherwise } => {
+                    exprs.extend([&**cond, &**then, &**otherwise])
+                }
                 Expression::UnaryOp { operand: x, .. }
                 | Expression::Field { base: x, .. }
                 | Expression::ExplicitCast { expr: x, .. }

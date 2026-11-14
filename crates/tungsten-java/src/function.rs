@@ -33,6 +33,8 @@ pub struct Converted {
     pub constants: Vec<Ref<Constant>>,
     /// Lerp helpers called by the body that the caller must still generate.
     pub lerps: Vec<LerpHelper>,
+    /// Operand types of the `tw$select` overloads the body calls.
+    pub selects: Vec<VariableType>,
 }
 
 /// Name of a kernel's own slot offset.
@@ -63,7 +65,32 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java
 }
 
 fn finish(conv: FunctionConverter<'_>, method: java::Method) -> Converted {
-    Converted { method, called: conv.called, constants: conv.used_constants, lerps: conv.used_lerps }
+    Converted {
+        method,
+        called: conv.called,
+        constants: conv.used_constants,
+        lerps: conv.used_lerps,
+        selects: conv.used_selects,
+    }
+}
+
+/// `private static T tw$select(boolean c, T a, T b) { return c ? a : b; }`. Both arms are
+/// already evaluated as arguments. `Vec3` and `Pos3` are immutable, so the chosen reference is
+/// returned without a copy.
+pub fn select_helper(t: &VariableType) -> java::Method {
+    let jt = convert_type(t);
+    java::Method {
+        doc: None,
+        modifiers: "private static".into(),
+        return_type: Some(jt.clone()),
+        name: super::expression::SELECT_FN.into(),
+        params: vec![(java::Type::Boolean, "c".into()), (jt.clone(), "a".into()), (jt, "b".into())],
+        body: vec![java::Statement::Return(Some(J::Conditional {
+            cond: Box::new(J::name("c")),
+            then: Box::new(J::name("a")),
+            other: Box::new(J::name("b")),
+        }))],
+    }
 }
 
 /// Converts a helper function: uniform parameters and offsets, then its own parameters, then the body.

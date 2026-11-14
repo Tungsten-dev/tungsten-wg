@@ -586,6 +586,7 @@ impl DagRenderer<'_, '_> {
                 (format!("{ty}{{ {} }}", fields.join(", ")), "ellipse")
             }
             NodeKind::ArrayLiteral => ("[..]".into(), "ellipse"),
+            NodeKind::Select => ("select".into(), "ellipse"),
             NodeKind::Cast { ty } => (format!("as {ty}"), "ellipse"),
             NodeKind::Extern {
                 name,

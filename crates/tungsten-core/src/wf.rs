@@ -114,6 +114,11 @@ pub open spec fn wf_expr(p: &Program, nlocals: nat, e: &Expr) -> bool
             &&& wf_type(p, to)
             &&& wf_expr(p, nlocals, &**operand)
         },
+        Expr::Select { cond, then, otherwise } => {
+            &&& wf_expr(p, nlocals, &**cond)
+            &&& wf_expr(p, nlocals, &**then)
+            &&& wf_expr(p, nlocals, &**otherwise)
+        },
     }
 }
 

@@ -1,0 +1,41 @@
+// select on every scalar type: `then` where x == 0, `otherwise` elsewhere. The i8 and bool arms
+// are computed, so a promoting operator (`+` on i8, `&` on bool) still picks the right overload.
+program {
+    fn f64_main() -> f64 {
+        return select((ambient(pos3).x == 0), 1.5, -2.25);
+    }
+    fn f32_main() -> f32 {
+        return select((ambient(pos3).x == 0), 0.5f, ((ambient(pos3).x as f32) * 3.0f));
+    }
+    fn i8_main() -> i8 {
+        return select((ambient(pos3).x == 0), ((ambient(pos3).x as i8) + 5b), -100b);
+    }
+    fn i32_main() -> i32 {
+        return select((ambient(pos3).x == 0), (ambient(pos3).x + 10), -7);
+    }
+    fn i64_main() -> i64 {
+        return select((ambient(pos3).x == 0), 9000000000L, ((ambient(pos3).x as i64) - 2L));
+    }
+    fn bool_main() -> bool {
+        return select((ambient(pos3).x == 0), ((ambient(pos3).x == 0) & true), (ambient(pos3).x == 5));
+    }
+    unit uf64 { main f64_main; }
+    unit uf32 { main f32_main; }
+    unit ui8 { main i8_main; }
+    unit ui32 { main i32_main; }
+    unit ui64 { main i64_main; }
+    unit ubool { main bool_main; }
+    entry uf64 @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry uf32 @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry ui8 @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry ui32 @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry ui64 @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry ubool @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" uf64 = [1.5, -2.25]
+@expect "c" uf32 = [0.5f, 3.0f]
+@expect "c" ui8 = [5b, -100b]
+@expect "c" ui32 = [10, -7]
+@expect "c" ui64 = [9000000000L, -1L]
+@expect "c" ubool = [true, false]

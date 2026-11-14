@@ -35,6 +35,11 @@ fn each_expr_mut(body: &mut [Statement], f: &mut dyn FnMut(&mut Expression)) {
             | Expression::Field { base: x, .. }
             | Expression::ExplicitCast { expr: x, .. }
             | Expression::Eval { position: x, .. } => expr(x, f),
+            Expression::Select { cond, then, otherwise } => {
+                expr(cond, f);
+                expr(then, f);
+                expr(otherwise, f);
+            }
             _ => {}
         }
     }

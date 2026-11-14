@@ -31,7 +31,7 @@ use std::collections::{HashMap, HashSet};
 
 use tungsten_interface::naming::NamingRules;
 use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
-use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref, VariableType};
 
 use crate::model as cuda;
 use crate::model::codegen::CudaCodeGenerator;
@@ -154,6 +154,8 @@ pub struct CudaCodegen<'a> {
     functions: Vec<cuda::Function>,
     /// Lerp helpers, which every function that reads one needs declared first.
     lerp_helpers: Vec<cuda::Function>,
+    /// `tw_select` overloads, one per operand type the program selects between, emitted first.
+    select_helpers: Vec<cuda::Function>,
     kernel_bodies: Vec<cuda::Function>,
     kernel_wrappers: Vec<cuda::Function>,
     /// Converted constants; emitted in dependency order.
@@ -164,6 +166,7 @@ pub struct CudaCodegen<'a> {
     done_kernels: HashSet<Instance>,
     done_refine_kernels: HashSet<RefineRun>,
     done_lerps: HashSet<String>,
+    done_selects: Vec<VariableType>,
 }
 
 impl<'a> CudaCodegen<'a> {
@@ -179,6 +182,7 @@ impl<'a> CudaCodegen<'a> {
             namespace_names,
             functions: Vec::new(),
             lerp_helpers: Vec::new(),
+            select_helpers: Vec::new(),
             kernel_bodies: Vec::new(),
             kernel_wrappers: Vec::new(),
             constants: HashMap::new(),
@@ -188,6 +192,7 @@ impl<'a> CudaCodegen<'a> {
             done_kernels: HashSet::new(),
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
+            done_selects: Vec::new(),
         };
         codegen.generate_eval_fns();
         codegen
@@ -200,6 +205,7 @@ impl<'a> CudaCodegen<'a> {
             self.functions.push(converted.function);
             self.warnings.extend(converted.warnings);
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             for h in converted.called {
                 self.generate_helper(h);
             }
@@ -226,6 +232,16 @@ impl<'a> CudaCodegen<'a> {
         }
     }
 
+    /// Generates the `tw_select` overload of each type once.
+    fn generate_selects(&mut self, selects: Vec<VariableType>) {
+        for t in selects {
+            if !self.done_selects.contains(&t) {
+                self.select_helpers.push(function::select_helper(&t));
+                self.done_selects.push(t);
+            }
+        }
+    }
+
     /// Generates `f`, the helpers it calls, and the constants those use.
     fn generate_helper(&mut self, f: Ref<Function>) {
         let mut pending = vec![f];
@@ -237,6 +253,7 @@ impl<'a> CudaCodegen<'a> {
             self.functions.push(converted.function);
             self.warnings.extend(converted.warnings);
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             pending.extend(converted.called);
             for c in converted.constants {
                 self.generate_constant(c);
@@ -308,7 +325,7 @@ impl<'a> CudaCodegen<'a> {
             items.extend(self.functions.iter().map(|f| cuda::Item::Function(f.declaration())));
             items.push(cuda::Item::Blank);
         }
-        for f in self.lerp_helpers.iter().chain(&self.functions).chain(&self.kernel_bodies).chain(&self.kernel_wrappers) {
+        for f in self.select_helpers.iter().chain(&self.lerp_helpers).chain(&self.functions).chain(&self.kernel_bodies).chain(&self.kernel_wrappers) {
             items.push(cuda::Item::Function(f.clone()));
             items.push(cuda::Item::Blank);
         }
@@ -347,6 +364,7 @@ impl DeviceCodegen for CudaCodegen<'_> {
             self.functions.push(converted.function);
             self.warnings.extend(converted.warnings);
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             for h in converted.called {
                 self.generate_helper(h);
             }

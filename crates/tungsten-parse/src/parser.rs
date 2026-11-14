@@ -1299,6 +1299,17 @@ impl Parser {
                 }
                 ExprKind::Eval { unit, position, scales }
             }
+            Tok::Kw(Kw::Select) => {
+                self.bump();
+                self.expect(Tok::LParen)?;
+                let c = Box::new(self.expr()?);
+                self.expect(Tok::Comma)?;
+                let a = Box::new(self.expr()?);
+                self.expect(Tok::Comma)?;
+                let b = Box::new(self.expr()?);
+                self.expect(Tok::RParen)?;
+                ExprKind::Select(c, a, b)
+            }
             Tok::Kw(Kw::Ambient) => {
                 self.bump();
                 self.expect(Tok::LParen)?;

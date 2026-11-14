@@ -130,7 +130,7 @@ fn flow_expr(cx: &mut FCx, st: &FState, e: &Expr, path: &mut Vec<CoreStep>, errs
             flow_expr(cx, st, index, path, errs);
             let _ = path.pop();
         },
-        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } => {
+        Expr::MakeVec3 { x, y, z } | Expr::MakePos3 { x, y, z } | Expr::Select { cond: x, then: y, otherwise: z } => {
             path.push(CoreStep::Arg(0));
             flow_expr(cx, st, x, path, errs);
             let _ = path.pop();

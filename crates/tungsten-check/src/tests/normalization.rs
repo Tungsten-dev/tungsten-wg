@@ -38,6 +38,15 @@ fn literals() {
 }
 
 #[test]
+fn select_is_one_to_one() {
+    // No desugar and no folding of a literal cond.
+    assert_eq!(
+        ret("return select(true, p, 1.5);"),
+        Expr::Select { cond: b(Expr::Lit(Lit::Bool(true))), then: b(p()), otherwise: b(f64_lit(1.5)) }
+    );
+}
+
+#[test]
 fn references() {
     assert_eq!(ret("return p;"), p());
     assert_eq!(ret("return const(c);"), Expr::Const(ConstId(0)));

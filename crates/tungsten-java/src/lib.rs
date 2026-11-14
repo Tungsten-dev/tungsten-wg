@@ -42,7 +42,7 @@ use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineR
 use crate::pools::Pools;
 use crate::model as java;
 use crate::model::codegen::JavaCodeGenerator;
-use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
+use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref, VariableType};
 
 pub mod backend;
 #[doc(hidden)]
@@ -125,6 +125,7 @@ pub struct JavaCodegen<'a> {
     done_kernels: HashSet<Instance>,
     done_refine_kernels: HashSet<RefineRun>,
     done_lerps: HashSet<String>,
+    done_selects: Vec<VariableType>,
 }
 
 impl<'a> JavaCodegen<'a> {
@@ -153,6 +154,7 @@ impl<'a> JavaCodegen<'a> {
             done_kernels: HashSet::new(),
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
+            done_selects: Vec::new(),
         };
         codegen.generate_eval_fns();
         codegen
@@ -168,6 +170,7 @@ impl<'a> JavaCodegen<'a> {
                 self.generate_helper(h);
             }
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             for c in converted.constants {
                 self.generate_constant(c);
             }
@@ -218,8 +221,19 @@ impl<'a> JavaCodegen<'a> {
             self.functions.push(converted.method);
             pending.extend(converted.called);
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             for c in converted.constants {
                 self.generate_constant(c);
+            }
+        }
+    }
+
+    /// Generates the `tw$select` overload of each type a converted function calls, once each.
+    fn generate_selects(&mut self, selects: Vec<VariableType>) {
+        for t in selects {
+            if !self.done_selects.contains(&t) {
+                self.functions.push(function::select_helper(&t));
+                self.done_selects.push(t);
             }
         }
     }
@@ -288,6 +302,7 @@ impl DeviceCodegen for JavaCodegen<'_> {
                 self.generate_helper(h);
             }
             self.generate_lerps(converted.lerps);
+            self.generate_selects(converted.selects);
             for c in converted.constants {
                 self.generate_constant(c);
             }

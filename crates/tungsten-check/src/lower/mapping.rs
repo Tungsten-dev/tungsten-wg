@@ -121,6 +121,11 @@ impl Reads {
             Expression::ConstructExtern { args, .. } => args.iter().for_each(|(_, a)| self.expr(a)),
             Expression::ExplicitCast { expr, .. } => self.expr(expr),
             Expression::Eval { position, .. } => self.expr(position),
+            Expression::Select { cond, then, otherwise } => {
+                self.expr(cond);
+                self.expr(then);
+                self.expr(otherwise);
+            }
             Expression::Constant(_)
             | Expression::Variable(_)
             | Expression::Float(_)

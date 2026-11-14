@@ -358,6 +358,24 @@ impl<'a> FunctionConverter<'a> {
                     arguments,
                 }
             }
+            // Eager by being a call: all three arguments are evaluated, and the hint asks LLVM
+            // for a `cmov`/`csel` rather than a branch. Needs Rust 1.88.
+            Expression::Select { cond, then, otherwise } => {
+                let t = self
+                    .derive_type(expr)
+                    .expect("select: the arms' type can't be derived");
+                let t = convert_type(&t);
+                R::LateBoundCall {
+                    function_name: "::core::hint::select_unpredictable".to_string(),
+                    argument_types: vec![rcl::Type::Bool, t.clone(), t.clone()],
+                    return_type: t,
+                    arguments: vec![
+                        self.convert_expression(cond),
+                        self.convert_expression(then),
+                        self.convert_expression(otherwise),
+                    ],
+                }
+            }
         }
     }
 

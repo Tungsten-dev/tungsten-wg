@@ -666,6 +666,11 @@ fn visit_expr(e: &Expression, f: &mut dyn FnMut(&Expression)) {
         }
         Expression::ExplicitCast { expr, .. } => visit_expr(expr, f),
         Expression::Eval { position, .. } => visit_expr(position, f),
+        Expression::Select { cond, then, otherwise } => {
+            visit_expr(cond, f);
+            visit_expr(then, f);
+            visit_expr(otherwise, f);
+        }
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)
@@ -744,6 +749,11 @@ fn visit_expr_mut(e: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
         }
         Expression::ExplicitCast { expr, .. } => visit_expr_mut(expr, f),
         Expression::Eval { position, .. } => visit_expr_mut(position, f),
+        Expression::Select { cond, then, otherwise } => {
+            visit_expr_mut(cond, f);
+            visit_expr_mut(then, f);
+            visit_expr_mut(otherwise, f);
+        }
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)

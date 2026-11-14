@@ -500,3 +500,33 @@ fn an_entry_without_refinements_stores_no_origin() {
     assert!(!output.orchestration_source.contains("s.origin"));
     assert!(!output.public_header.contains("enqueue_refine"));
 }
+
+/// `select` on two types (`specs/select.md` §5.2).
+const SELECT: &str = r#"
+program {
+    fn s_main() -> i8 {
+        return select((ambient(pos3).x == 0), ((ambient(pos3).x as i8) + 1b), 2b);
+    }
+    fn v_main() -> vec3 {
+        return select(false, ambient(origin), vec3(1.0, 2.0, 3.0));
+    }
+    unit s { main s_main; }
+    unit v { main v_main; }
+    entry s @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry v @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// A `__forceinline__` overload per type the program uses; vectors select per component.
+#[test]
+fn select_is_an_overloaded_helper() {
+    let out = generate(SELECT, CudaConfig::default());
+    let src = &out.density_source;
+    assert_contains("density.cu", src, &[
+        "__device__ __forceinline__ signed char tw_select(bool c, signed char a, signed char b) {\n    return c ? a : b;\n}",
+        "__device__ __forceinline__ double3 tw_select(bool c, double3 a, double3 b) {\n    return double3{ c ? a.x : b.x, c ? a.y : b.y, c ? a.z : b.z };\n}",
+        "tw_select(p.pos.x == 0, (signed char)(",
+        "tw_select(false, ctx.config.origin, double3{1.0, 2.0, 3.0})",
+    ]);
+    assert_eq!(src.matches(" tw_select(bool").count(), 2, "only the overloads used:\n{src}");
+}

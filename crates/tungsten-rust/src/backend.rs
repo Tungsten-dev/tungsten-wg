@@ -38,6 +38,8 @@ impl RustConfig {
 }
 
 /// Generated Rust source, returned by [`Backend::generate`] and `Compiler::compile`.
+///
+/// It needs Rust 1.88 or later: `select` is emitted as `core::hint::select_unpredictable`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RustOutput {
     /// The density module (`density_function` by default).

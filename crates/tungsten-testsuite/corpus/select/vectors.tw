@@ -1,0 +1,16 @@
+// select between whole vectors: the cond is evaluated once and the chosen vector comes back.
+program {
+    fn v_main() -> vec3 {
+        return select((ambient(pos3).x == 0), vec3(1.0, 2.0, 3.0), (ambient(origin) + ambient(pos3)));
+    }
+    fn p_main() -> pos3 {
+        return select((ambient(pos3).x != 0), ambient(pos3), pos3(-1, -2, -3));
+    }
+    unit v { main v_main; }
+    unit p { main p_main; }
+    entry v @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry p @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" v = [vec3(1.0, 2.0, 3.0), vec3(1.0, 0.0, 0.0)]
+@expect "c" p = [pos3(-1, -2, -3), pos3(1, 0, 0)]

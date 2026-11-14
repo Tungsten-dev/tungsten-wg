@@ -87,6 +87,9 @@ impl<'a> Deriver<'a> {
                 let ComputeUnit::DensityFunction { function, .. } = self.p.compute_units.try_get(*unit)?;
                 self.p.functions.try_get(*function)?.return_type.clone()
             }
+            Expression::Select { then, otherwise, .. } => {
+                return self.expr(f, then).or_else(|| self.expr(f, otherwise));
+            }
         })
     }
 }

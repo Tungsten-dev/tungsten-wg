@@ -61,6 +61,11 @@ fn expr(e: &Expression, f: &mut dyn FnMut(&Expression)) {
         Expression::ConstructExtern { args, .. } => args.iter().for_each(|(_, a)| expr(a, f)),
         Expression::ExplicitCast { expr: e, .. } => expr(e, f),
         Expression::Eval { position, .. } => expr(position, f),
+        Expression::Select { cond, then, otherwise } => {
+            expr(cond, f);
+            expr(then, f);
+            expr(otherwise, f);
+        }
         Expression::DensityVariable(_, None)
         | Expression::Constant(_)
         | Expression::Variable(_)

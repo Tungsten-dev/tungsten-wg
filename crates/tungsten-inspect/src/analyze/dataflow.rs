@@ -638,6 +638,16 @@ impl DagBuilder<'_> {
                 let v = self.expr(expr, region);
                 self.op(NodeKind::Cast { ty: ty(to) }, vec![("0".into(), v)], region)
             }
+            Expression::Select { cond, then, otherwise } => {
+                let c = self.expr(cond, region);
+                let a = self.expr(then, region);
+                let b = self.expr(otherwise, region);
+                self.op(
+                    NodeKind::Select,
+                    vec![("c".into(), c), ("a".into(), a), ("b".into(), b)],
+                    region,
+                )
+            }
         }
     }
 

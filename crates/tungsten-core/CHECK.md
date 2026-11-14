@@ -158,6 +158,7 @@ the annotations the program carries.
 | `MakeRecord { record, fields }` | Every field of the record exactly once (`RecordFieldMissing`, `RecordFieldRepeated`); each value has its field's type | `Record(record)` |
 | `ArrayLit(es)` | Not empty (`EmptyArray`); every element has the type of the first | `Array(T, len)` |
 | `Cast { to, operand }` | See §4.3 (`BadCast`) | `to` |
+| `Select { cond, then, otherwise }` | `cond` is a `Bool`, with no int truthiness (`SelectCond`); `then` and `otherwise` have the same type, with no promotion (`SelectMismatch`); that type is a scalar (numeric or `Bool`), `Vec3` or `Pos3`, not a record, array or handle (`SelectType`) | The arms' type |
 
 **Explanations:**
 
@@ -173,6 +174,10 @@ the annotations the program carries.
   would leave the value incomplete. A repeated one would make it unclear which value wins.
 - **No empty arrays.** An empty array literal has no element to take the type from, and arrays
   of length 0 are useless in density code anyway.
+- **Select arms are scalars or vectors.** The point of `select` is a branchless choice, and the
+  hardware chooses scalars (`Vec3`/`Pos3` become three choices). A record or array would need a
+  copy or a branch. A bad cond still gives the arms' type; mismatched or unselectable arms give
+  none. The children's paths are `arg 0`, `arg 1` and `arg 2`, as for a three-argument call.
 - **Errors still give a type where it's clear.** A call with the wrong arity still has the
   callee's return type, and a `MakeRecord` with a missing field is still a `Record(record)`. This
   keeps one mistake from causing errors in the surrounding code.
@@ -511,6 +516,9 @@ Messages are as `tungsten-check` renders them; names come from its `LowerMap`.
 | `FieldAnnotation { annotated, actual }` | ``field annotated as `f32`, but it is `f64` `` |
 | `BadFieldBase { sel, found }` | ``field `x` needs a `pos3` base, found `vec3` `` |
 | `NotArray { found }` | ``indexing needs an array, found `vec3` `` |
+| `SelectCond { found }` | `` `select` needs a `bool` condition, found `i32` `` |
+| `SelectMismatch { then, otherwise }` | `` `select` arms have different types: `f64` and `i32` `` |
+| `SelectType { found }` | `` `select` can't choose between `Pair` values (only scalars, vec3 and pos3) `` |
 | `RecordFieldMissing { record, field }` | ``field `b` of `Pair` is missing`` |
 | `RecordFieldRepeated { record, field }` | ``field `a` of `Pair` is given more than once`` |
 | `EmptyArray` | `empty array literal` |

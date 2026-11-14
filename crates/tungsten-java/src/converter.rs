@@ -31,6 +31,8 @@ pub struct FunctionConverter<'a> {
     pub used_constants: Vec<Ref<Constant>>,
     /// Lerp helpers called by the converted code, still to be generated.
     pub used_lerps: Vec<LerpHelper>,
+    /// Operand types of the `tw$select` overloads the converted code calls.
+    pub used_selects: Vec<VariableType>,
     /// The inputs the function reads, directly or through helpers (`Interface::input_params`): one
     /// `int` offset parameter each, after the uniform parameters.
     pub offsets: Vec<Ref<DensityInput>>,
@@ -62,6 +64,7 @@ impl<'a> FunctionConverter<'a> {
             called: Vec::new(),
             used_constants: Vec::new(),
             used_lerps: Vec::new(),
+            used_selects: Vec::new(),
             offsets: Vec::new(),
             pre: Vec::new(),
             post: Vec::new(),
@@ -164,6 +167,9 @@ impl<'a> FunctionConverter<'a> {
             }
             E::ExplicitCast { to, .. } => to.clone(),
             E::Eval { unit, .. } => unit_return_type(self.program, *unit).clone(),
+            E::Select { then, otherwise, .. } => {
+                self.derive_type(then).or_else(|| self.derive_type(otherwise))?
+            }
         })
     }
 

@@ -218,6 +218,16 @@ impl Names<'_> {
             ),
             K::BadUnary { op, operand } => format!("`{}` can't be applied to `{}`", unop(op), self.ty(operand)),
             K::BadCast { from, to } => format!("can't cast `{}` to `{}`", self.ty(from), self.ty(to)),
+            K::SelectCond { found } => format!("`select` needs a `bool` condition, found `{}`", self.ty(found)),
+            K::SelectMismatch { then, otherwise } => format!(
+                "`select` arms have different types: `{}` and `{}`",
+                self.ty(then),
+                self.ty(otherwise)
+            ),
+            K::SelectType { found } => format!(
+                "`select` can't choose between `{}` values (only scalars, vec3 and pos3)",
+                self.ty(found)
+            ),
             K::Arity { expected, found } => format!("expected {expected} arguments, found {found}"),
             K::ExternSignature { ext } => {
                 let name = self.ext(*ext);

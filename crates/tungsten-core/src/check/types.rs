@@ -125,6 +125,14 @@ pub fn unary_type(op: &UnOp, t: &Type) -> Option<Type> {
     }
 }
 
+/// The types `select` can choose between: scalars, `Vec3` and `Pos3`. Not records, arrays or handles.
+pub fn selectable(t: &Type) -> bool {
+    match t {
+        Type::Bool | Type::I8 | Type::I32 | Type::I64 | Type::F32 | Type::F64 | Type::Vec3 | Type::Pos3 => true,
+        _ => false,
+    }
+}
+
 /// Numeric → numeric (identity included), `Bool` → integer, `Pos3` → `Vec3`.
 pub fn cast_ok(from: &Type, to: &Type) -> bool {
     if is_numeric(from) && is_numeric(to) {
@@ -488,6 +496,48 @@ pub fn type_expr(cx: &TCx, e: &Expr, path: &mut Vec<CoreStep>, errs: &mut Vec<Ch
                     }
                 },
                 None => None,
+            }
+        },
+        Expr::Select { cond, then, otherwise } => {
+            path.push(CoreStep::Arg(0));
+            let c = type_expr(cx, cond, path, errs);
+            let _ = path.pop();
+            path.push(CoreStep::Arg(1));
+            let t = type_expr(cx, then, path, errs);
+            let _ = path.pop();
+            path.push(CoreStep::Arg(2));
+            let o = type_expr(cx, otherwise, path, errs);
+            let _ = path.pop();
+            match c {
+                Some(Type::Bool) => {},
+                Some(c) => report(errs, CheckErrorKind::SelectCond { found: c }, cx.item, path),
+                None => {},
+            }
+            match (t, o) {
+                (Some(t), Some(o)) => {
+                    if !type_eq(&t, &o) {
+                        report(errs, CheckErrorKind::SelectMismatch { then: t, otherwise: o }, cx.item, path);
+                        None
+                    } else if !selectable(&t) {
+                        report(errs, CheckErrorKind::SelectType { found: t }, cx.item, path);
+                        None
+                    } else {
+                        Some(t)
+                    }
+                },
+                (Some(t), None) => {
+                    if !selectable(&t) {
+                        report(errs, CheckErrorKind::SelectType { found: t }, cx.item, path);
+                    }
+                    None
+                },
+                (None, Some(o)) => {
+                    if !selectable(&o) {
+                        report(errs, CheckErrorKind::SelectType { found: o }, cx.item, path);
+                    }
+                    None
+                },
+                (None, None) => None,
             }
         },
     }

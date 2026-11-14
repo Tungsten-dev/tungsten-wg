@@ -555,3 +555,32 @@ fn workers_without_refinements_are_unchanged() {
     let java = java(&program(AMBIENTS));
     assert!(!java.contains("origin_x;") && !java.contains("refine_") && !java.contains("ox"), "{java}");
 }
+
+/// `select` on two types (`specs/select.md` §5.3).
+const SELECT: &str = r#"
+program {
+    fn s_main() -> i8 {
+        return select((ambient(pos3).x == 0), ((ambient(pos3).x as i8) + 1b), 2b);
+    }
+    fn v_main() -> vec3 {
+        return select(false, ambient(origin), vec3(1.0, 2.0, 3.0));
+    }
+    unit s { main s_main; }
+    unit v { main v_main; }
+    entry s @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    entry v @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// A call of a `private static` overload per type it uses, never a lazy `?:` at the use site.
+#[test]
+fn select_is_an_overloaded_helper() {
+    let java = java(&program(SELECT));
+    assert_contains(&java, &[
+        "tw$select(p.pos.x == 0, (byte) (",
+        "private static byte tw$select(boolean c, byte a, byte b) {\n        return c ? a : b;\n    }",
+        "private static Vec3 tw$select(boolean c, Vec3 a, Vec3 b) {",
+    ]);
+    assert_eq!(java.matches(" tw$select(boolean").count(), 2, "only the overloads used:\n{java}");
+    assert_eq!(java.matches(" ? ").count(), 2, "`?:` only inside the helpers:\n{java}");
+}

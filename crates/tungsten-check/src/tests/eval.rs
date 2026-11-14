@@ -203,6 +203,38 @@ fn short_circuit() {
 }
 
 #[test]
+fn select_every_type() {
+    is("f64", "select(true, 1.5, 2.5)", f64v(1.5));
+    is("f32", "select(false, 1.5f, 2.5f)", Value::F32(2.5f32.to_bits()));
+    is("i8", "select(true, -3b, 4b)", Value::I8(-3));
+    is("i32", "select(false, 1, 2)", Value::I32(2));
+    is("i64", "select(true, 5L, 6L)", Value::I64(5));
+    is("bool", "select(false, true, false)", Value::Bool(false));
+    is("vec3", "select(true, vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))", Value::Vec3(F64x3 { x: 1.0f64.to_bits(), y: 2.0f64.to_bits(), z: 3.0f64.to_bits() }));
+    is("pos3", "select(false, pos3(1, 2, 3), pos3(4, 5, 6))", Value::Pos3(I32x3 { x: 4, y: 5, z: 6 }));
+    is("i32", "select((1 < 2), select(false, 10, 20), 30)", Value::I32(20));
+}
+
+#[test]
+fn select_is_eager() {
+    // The unselected arm still runs, and its error fails the cell. A literal cond isn't folded.
+    assert_eq!(val("i32", "select(true, 1, (1 / 0))"), Err(EvalError::DivByZero));
+    assert_eq!(val("i32", "select(false, [1][5], 2)"), Err(EvalError::OutOfBounds));
+    // Both arms fail: left to right, the `then` error wins.
+    assert_eq!(val("i32", "select(true, (1 / 0), [1][5])"), Err(EvalError::DivByZero));
+    assert_eq!(val("i32", "select(false, [1][5], (1 / 0))"), Err(EvalError::OutOfBounds));
+    // The cond runs first.
+    assert_eq!(val("i32", "select(([1][5] == 0), (1 / 0), 1)"), Err(EvalError::OutOfBounds));
+}
+
+#[test]
+fn select_keeps_bits() {
+    is("f64", "select(true, -0.0, 0.0)", f64v(-0.0));
+    is("f32", "select(false, 0.0f, -0.0f)", Value::F32((-0.0f32).to_bits()));
+    is("f64", "select(false, 1.0, nan(0x7ff8000000000001))", Value::F64(0x7ff8_0000_0000_0001));
+}
+
+#[test]
 fn records_arrays_index() {
     is("f64", "new extern Pair { b: 3, a: 1.5 }.a", f64v(1.5));
     is("i32", "new extern Pair(1.5, 7).b", Value::I32(7));
