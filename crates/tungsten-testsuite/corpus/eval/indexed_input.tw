@@ -1,0 +1,17 @@
+// An evaluated body reads a buffered input by index. The reader doesn't list it, so the buffer
+// comes from what the reader reaches through `eval`, and is scheduled before it.
+program {
+    fn base_main() -> i32 { return ((ambient(pos3).x * 10) + ambient(pos3).y); }
+    unit base { main base_main; }
+    input b = base @dims(4, 2, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn look(i: i32) -> i32 { return density(b, i); }
+    fn probe_main() -> i32 { return (look((ambient(pos3).x + (4 * ambient(pos3).y))) * 2); }
+    unit probe { main probe_main; helpers [look]; inputs [b]; }
+    fn top_main() -> i32 {
+        return eval(probe, pos3((3 - ambient(pos3).x), ambient(pos3).z, 0)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+    unit top { main top_main; }
+    entry top @dims(4, 1, 2) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" top = [60, 40, 20, 0, 62, 42, 22, 2]

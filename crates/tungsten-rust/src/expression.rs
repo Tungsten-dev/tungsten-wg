@@ -12,8 +12,8 @@ use crate::model as rcl;
 use tungsten_interface::naming::sanitize_name;
 use tungsten_interface::{BufferBounds, Interface};
 use tungsten_ir::model::{
-    AmbientKind, AxisFactor, BinaryOperator, ConstExpr, Constant, DensityMapping, Expression,
-    Program, Ref, VariableType,
+    AmbientKind, AxisFactor, BinaryOperator, ComputeUnit, ConstExpr, Constant, DensityMapping,
+    Expression, Program, Ref, VariableType,
 };
 
 /// A read of element `index` of the input at `offset` in `pool`, whose length is `len`
@@ -329,6 +329,35 @@ impl<'a> FunctionConverter<'a> {
                 expr: Box::new(self.convert_expression(expr)),
                 to_type: convert_type(to),
             },
+            // A call of the key's eval function with the caller's origin and context, and the
+            // offsets the evaluated body reads (the caller has them: `input_params` is
+            // transitive through `eval`).
+            Expression::Eval { unit, position, origin_scale, position_scale } => {
+                let program: &'a Program = self.program;
+                let ComputeUnit::DensityFunction { function: main, .. } = &program.compute_units[*unit];
+                let mut arguments = vec![
+                    self.convert_expression(position),
+                    field(&self.uniform.config, "origin"),
+                    R::Variable(self.uniform.buffers.clone()),
+                    R::Variable(self.uniform.auto_consts.clone()),
+                    R::Variable(self.uniform.host_consts.clone()),
+                ];
+                let mut argument_types = vec![
+                    rcl::Type::Struct("Pos3".to_string()),
+                    rcl::Type::Struct("Vec3".to_string()),
+                ];
+                argument_types.extend(super::uniform_parameters().into_iter().skip(2).map(|p| p.t));
+                for &d in self.naming.input_params(*main) {
+                    arguments.push(R::Variable(self.offset(d)));
+                    argument_types.push(rcl::Type::Usize);
+                }
+                R::LateBoundCall {
+                    function_name: self.naming.eval_fn(*unit, *origin_scale, *position_scale).to_string(),
+                    argument_types,
+                    return_type: convert_type(self.unit_return_type(*unit)),
+                    arguments,
+                }
+            }
         }
     }
 

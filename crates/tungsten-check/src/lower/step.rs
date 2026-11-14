@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use tungsten_core::{Ambient, Axis, BinOp, Expr, FieldSel, HostId, Lit, Type};
 use tungsten_ir::{ComputeUnit, DensityInput, Program as IrProgram, Ref};
 
-use super::mapping::{listed_inputs, unit_return_type};
+use super::mapping::unit_return_type;
+use super::unit_eval::reached_inputs;
 use super::refine::{Inst, RefineGraph, Run};
 use super::{Ctx, get};
 
@@ -47,7 +48,7 @@ impl StepCfg {
         let mut buffer_insts: Vec<Inst> = vec![];
         let mut hosts = vec![offset];
         for run in &walk.running {
-            for (r, d) in listed_inputs(p, run.unit) {
+            for (r, d) in reached_inputs(p, run.unit) {
                 let inst = Inst::of_input(d);
                 let rerun = walk.running.iter().find(|x| x.target == inst);
                 match rerun {

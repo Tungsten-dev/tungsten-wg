@@ -118,7 +118,7 @@ program is compact by construction: no holes, and every generation is 0.
   comes from textual order.
 - **Strings**: `"…"` with `\\ \" \n \t \u{hex}`. Used for `@name`, case names and reasons.
 - **Keywords**: `program fn unit main input entry host param auto const use let vars return break
-  if else while repeat true false as new extern ext mut dynamic density ambient
+  if else while repeat true false as new extern ext mut dynamic density ambient eval
   helpers autos hosts consts inputs inf nan` and the type names (§5.4). `table`, `tables`,
   `perlin`, `base3d` and `none` are gone, with no compatibility form.
 
@@ -207,7 +207,14 @@ stmt      = "let" label ":" type ("=" expr)? ";"
           | "while" expr block
           | "repeat" UINT block ;
 block     = "{" stmt* "}" ;
+
+eval_expr = "eval" "(" label "," expr ")" eval_attrs ;   (* a primary expression *)
+eval_attrs= ( "@origin_scale" "(" num "," num "," num ")"
+            | "@position_scale" "(" num "," num "," num ")" )* ;   (* any order, each exactly once *)
 ```
+
+`eval_expr` (`specs/unit-eval.md` §3.4): `label` names a unit. Both attributes are required, are
+never defaulted, and bind to the call, tighter than any binary operator. `@dims` is an error.
 
 `num` in `grid_attrs` is an attribute position: an int literal is accepted for an f64 (§4.1, §2).
 `input` inside a unit is an `ElabError` that points to the top-level form, and `@var` is an unknown attribute.
@@ -309,6 +316,7 @@ they're binary ops, §10).
 | `DensityVariable(d, None)` | `density(d)` | `density(d)` |
 | `DensityVariable(d, Some(i))` | `density(d, i)` | `density(d, i)` |
 | `Ambient(k)` | `ambient(origin \| pos3 \| origin_scale \| position_scale)` | same |
+| `Eval { unit, position, .. }` | `eval(u, p) @origin_scale(..) @position_scale(..)`, attributes in either order | `eval(u, p) @origin_scale(..) @position_scale(..)` |
 | `FunctionCall` | `f(a, …)` | `f(a, …)` |
 | `ExternCall` | `ext name(a, …)` (signature from `Env`) or `ext name::<(T, …) -> R>(a, …)` | always with `::<…>` |
 | `Field` | `e.x` (field and base type derived), `e.x::<T>` (base type derived), `e.x::<T; B>` | `e.x::<T>`, or `e.x::<T; B>` when `type_of(e)` isn't `B` |
@@ -369,6 +377,7 @@ These are the only derivations. Anything else that's missing is a syntax error.
 | var / const / host | declared type / `type_of(const expr)` / declared type |
 | literal, `Ambient` | its type (`origin`, `origin_scale`, `position_scale`: `vec3`; `pos3`: `pos3`) |
 | `density(…)`, with or without index | return type of the target unit's main fn |
+| `eval(u, …)` | return type of `u`'s main fn |
 | `auto(…)` | the autoconst's type |
 | fn call / ext call | return type |
 | binary arithmetic | identical operand types → that type. `vec3`∘`pos3` either way → `vec3` |

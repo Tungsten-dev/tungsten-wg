@@ -81,6 +81,7 @@ impl Backend for JavaBackend {
         interface: &Interface,
     ) -> Result<JavaOutput, BackendError> {
         tungsten_rust::mapping::check_emittable(program, interface)?;
+        interface.check_evals(program)?;
         tungsten_rust::backend::check_slots(program, interface)?;
         let class_name = java_sanitize(&self.config.class_name);
         let naming_rules = self.naming_rules();

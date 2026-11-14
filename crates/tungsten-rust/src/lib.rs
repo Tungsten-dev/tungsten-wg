@@ -182,7 +182,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
     ) -> Self {
         let mut model = rcl::RCL::new();
         model.raw_items.push(READ_HELPER_SOURCE.to_string());
-        Self {
+        let mut codegen = Self {
             source,
             naming: interface,
             pools,
@@ -194,6 +194,24 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
             done_kernels: HashSet::new(),
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
+        };
+        codegen.generate_eval_fns();
+        codegen
+    }
+
+    /// One function per eval key, with what they call (`specs/unit-eval.md` §5.4).
+    fn generate_eval_fns(&mut self) {
+        for e in self.naming.eval_fns() {
+            let converted = function::convert_eval(self.source, self.naming, self.pools, e);
+            let func = self.intern(converted.function);
+            self.model.functions.push(func);
+            for h in converted.called {
+                self.generate_helper(h);
+            }
+            self.generate_lerps(converted.lerps);
+            for c in converted.constants {
+                self.generate_constant(c);
+            }
         }
     }
 

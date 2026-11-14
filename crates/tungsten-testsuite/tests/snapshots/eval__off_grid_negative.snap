@@ -1,0 +1,553 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                0,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [
+                HostId(
+                    0,
+                ),
+            ],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                1,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [
+                HostId(
+                    0,
+                ),
+            ],
+            helpers: [
+                FnId(
+                    2,
+                ),
+            ],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [],
+            ret: F64,
+            hosts: [
+                HostId(
+                    0,
+                ),
+            ],
+            body: [
+                Return(
+                    Cast {
+                        to: F64,
+                        operand: Binary {
+                            op: Subtract,
+                            left: Binary {
+                                op: Add,
+                                left: Binary {
+                                    op: Multiply,
+                                    left: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            X,
+                                        ),
+                                        ty: I32,
+                                    },
+                                    right: Lit(
+                                        I32(
+                                            1000,
+                                        ),
+                                    ),
+                                },
+                                right: Binary {
+                                    op: Multiply,
+                                    left: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            Y,
+                                        ),
+                                        ty: I32,
+                                    },
+                                    right: Host(
+                                        HostId(
+                                            0,
+                                        ),
+                                    ),
+                                },
+                            },
+                            right: Field {
+                                base: Ambient(
+                                    Pos3,
+                                ),
+                                sel: Pos3(
+                                    Z,
+                                ),
+                                ty: I32,
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [
+                F64,
+                I32,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Lit(
+                        F64(
+                            0,
+                        ),
+                    ),
+                },
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: Lit(
+                        I32(
+                            0,
+                        ),
+                    ),
+                },
+                Repeat {
+                    count: 5,
+                    body: [
+                        Assign {
+                            target: LocalId(
+                                0,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                                right: Call {
+                                    func: FnId(
+                                        2,
+                                    ),
+                                    args: [
+                                        MakePos3 {
+                                            x: Binary {
+                                                op: Subtract,
+                                                left: Field {
+                                                    base: Ambient(
+                                                        Pos3,
+                                                    ),
+                                                    sel: Pos3(
+                                                        X,
+                                                    ),
+                                                    ty: I32,
+                                                },
+                                                right: Binary {
+                                                    op: Multiply,
+                                                    left: Local(
+                                                        LocalId(
+                                                            1,
+                                                        ),
+                                                    ),
+                                                    right: Lit(
+                                                        I32(
+                                                            7,
+                                                        ),
+                                                    ),
+                                                },
+                                            },
+                                            y: Lit(
+                                                I32(
+                                                    -1000000,
+                                                ),
+                                            ),
+                                            z: Binary {
+                                                op: Subtract,
+                                                left: Local(
+                                                    LocalId(
+                                                        1,
+                                                    ),
+                                                ),
+                                                right: Lit(
+                                                    I32(
+                                                        2,
+                                                    ),
+                                                ),
+                                            },
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                        Assign {
+                            target: LocalId(
+                                1,
+                            ),
+                            value: Binary {
+                                op: Add,
+                                left: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                right: Lit(
+                                    I32(
+                                        1,
+                                    ),
+                                ),
+                            },
+                        },
+                    ],
+                },
+                Return(
+                    Local(
+                        LocalId(
+                            0,
+                        ),
+                    ),
+                ),
+            ],
+        },
+        Function {
+            params: 1,
+            locals: [
+                Pos3,
+            ],
+            ret: F64,
+            hosts: [
+                HostId(
+                    0,
+                ),
+            ],
+            body: [
+                Return(
+                    Cast {
+                        to: F64,
+                        operand: Binary {
+                            op: Subtract,
+                            left: Binary {
+                                op: Add,
+                                left: Binary {
+                                    op: Multiply,
+                                    left: Field {
+                                        base: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        sel: Pos3(
+                                            X,
+                                        ),
+                                        ty: I32,
+                                    },
+                                    right: Lit(
+                                        I32(
+                                            1000,
+                                        ),
+                                    ),
+                                },
+                                right: Binary {
+                                    op: Multiply,
+                                    left: Field {
+                                        base: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        sel: Pos3(
+                                            Y,
+                                        ),
+                                        ty: I32,
+                                    },
+                                    right: Host(
+                                        HostId(
+                                            0,
+                                        ),
+                                    ),
+                                },
+                            },
+                            right: Field {
+                                base: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                                sel: Pos3(
+                                    Z,
+                                ),
+                                ty: I32,
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [
+        HostDecl {
+            ty: I32,
+        },
+    ],
+    tables: [],
+    inputs: [],
+    entries: [
+        Entry {
+            unit: UnitId(
+                1,
+            ),
+            dims: Dims {
+                x: 3,
+                y: 1,
+                z: 1,
+            },
+            origin_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+            position_scale: F64x3 {
+                x: 4607182418800017408,
+                y: 4607182418800017408,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        0,
+                    ),
+                ),
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        1,
+                    ),
+                ),
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}

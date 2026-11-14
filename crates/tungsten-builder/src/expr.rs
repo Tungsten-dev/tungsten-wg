@@ -14,7 +14,7 @@ use tungsten_ir::{
 
 use crate::error::{BuildError, BuildErrorKind, FieldProblem};
 use crate::function::Local;
-use crate::program::{Auto, Constant, Helper, Host, Input};
+use crate::program::{Auto, Constant, Grid, Helper, Host, Input, Unit};
 
 /// An interned type. Handles stay `Copy` because they hold these instead of `VariableType`s.
 pub(crate) type Ty = &'static VariableType;
@@ -692,6 +692,44 @@ impl Helper {
         };
         out
     }
+}
+
+// ---- unit evaluation -----------------------------------------------------------------------
+
+/// `eval(unit, p) @origin_scale(..) @position_scale(..)`: `unit`'s main function evaluated at
+/// `p` (a `pos3`), with these scales and the run's origin. Its type is the unit's return type.
+/// The evaluated unit's own inputs, hosts and helpers are not added to the reader's lists.
+#[track_caller]
+pub fn eval(
+    unit: Unit,
+    p: impl Into<Expr>,
+    origin_scale: (f64, f64, f64),
+    position_scale: (f64, f64, f64),
+) -> Expr {
+    let at = Location::caller();
+    let mut p = p.into();
+    let mut out = Expr::typed(
+        Expression::Eval {
+            unit: unit.r,
+            position: Box::new(std::mem::replace(&mut p.node, Expression::Bool(false))),
+            origin_scale,
+            position_scale,
+        },
+        Some(unit.ret),
+    );
+    out.take(&mut p);
+    if let Some(t) = p.ty
+        && *t != VariableType::Pos3
+    {
+        out.problem(BuildErrorKind::EvalPosition { found: name(t) }, at);
+    }
+    out
+}
+
+/// [`eval`] with the scales of `grid`. Its dims are ignored.
+#[track_caller]
+pub fn eval_on(unit: Unit, p: impl Into<Expr>, grid: &Grid) -> Expr {
+    eval(unit, p, grid.scaled_origin.as_f64(), grid.scaled_position.as_f64())
 }
 
 // ---- methods shared by Expr and the handles ------------------------------------------------

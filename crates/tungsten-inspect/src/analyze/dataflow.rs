@@ -559,6 +559,15 @@ impl DagBuilder<'_> {
                 let args = self.args(&parameters.iter().collect::<Vec<_>>(), region);
                 self.op(NodeKind::Call { function }, args, region)
             }
+            Expression::Eval { unit, position, origin_scale, position_scale } => {
+                let p = self.expr(position, region);
+                let kind = NodeKind::Eval {
+                    unit: self.ctx.unit_id(*unit),
+                    origin_scale: *origin_scale,
+                    position_scale: *position_scale,
+                };
+                self.op(kind, vec![("pos".into(), p)], region)
+            }
             Expression::ExternCall {
                 function_name,
                 parameters,

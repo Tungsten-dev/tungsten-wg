@@ -120,6 +120,7 @@ impl Reads {
             }
             Expression::ConstructExtern { args, .. } => args.iter().for_each(|(_, a)| self.expr(a)),
             Expression::ExplicitCast { expr, .. } => self.expr(expr),
+            Expression::Eval { position, .. } => self.expr(position),
             Expression::Constant(_)
             | Expression::Variable(_)
             | Expression::Float(_)
@@ -168,7 +169,7 @@ pub(super) fn reader_pairs(p: &IrProgram) -> Vec<ReaderPair> {
     while i < out.len() {
         let pair = out[i];
         i += 1;
-        for (_, d) in listed_inputs(p, pair.unit) {
+        for (_, d) in super::unit_eval::reached_inputs(p, pair.unit) {
             if d.previous {
                 continue;
             }

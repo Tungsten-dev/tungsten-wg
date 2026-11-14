@@ -121,6 +121,28 @@ First use follows evaluation order and enters a callee at its first call, after 
 arguments. A read decides: a read in dead code still lists the input, and an input nobody reads is
 never listed.
 
+## Evaluating a unit
+
+`eval(unit, p, origin_scale, position_scale)` is `unit`'s main function at `p` (a `pos3`), with
+those scales and the run's origin, computed where it's read with no buffer behind it
+(`specs/unit-eval.md`). Its type is the unit's return type; a non-`pos3` `p` is `EvalPosition`.
+`eval_on(unit, p, &grid)` takes the scales from a `Grid` and ignores its dims.
+
+```rust
+# use tungsten_wg::builder::prelude::*;
+# let mut pb = ProgramBuilder::new();
+# let mut f = FnBuilder::new("noise", F64);
+# f.ret(pos3().x().cast(F64));
+# let noise = pb.finish_unit(f);
+let mut f = FnBuilder::new("vein", F64);
+f.ret(eval(noise, pos3!(pos3().x(), pos3().y() + 32, pos3().z()), (1.0, 1.0, 1.0), (1.0, 1.0, 1.0)));
+let vein = pb.finish_unit(f);
+pb.entry(vein, Grid::new((16, 96, 16)));
+```
+
+The evaluated unit's inputs, hosts and helpers stay in its own lists, not the reader's: lowering
+and the backends follow `eval` themselves. A unit that is only evaluated needs no entry or input.
+
 ## Merging and names
 
 | Item | Merged when | On a match |
@@ -230,6 +252,7 @@ overlap, and leaves conflicts for the registry to report.
 | `tests/errors.rs` | One error per mistake at the right line, every error kind, `ForeignHandle`, no panics |
 | `tests/macros.rs` | Each macro form against its method equivalent, and recursion inside macro blocks |
 | `tests/determinism.rs` | Building twice gives the same program and Rust code, and duplicate names stay unique |
+| `tests/eval.rs` | `eval` typing, poisoning, `eval_on`, foreign units, and lists that don't absorb the evaluated unit's items |
 | `tests/slices/` | Real frontend patterns, each `isomorphic` to a twin in `tungsten-testsuite/corpus` that runs on every backend. `REVIEW.md` lists what they found |
 
 ```text

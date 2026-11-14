@@ -1,0 +1,25 @@
+// An indexed read inside an evaluated body in a refine step: `frozen`'s buffer isn't rerun and
+// keeps `run`'s values; `moving` is rerun with the offset.
+program {
+    fn frozen_main() -> i32 { return (ambient(pos3).y * 10); }
+    unit frozen { main frozen_main; }
+    fn moving_main() -> i32 { return (ambient(pos3).y * 1000); }
+    unit moving { main moving_main; }
+    input f = frozen @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    input m = moving @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn probe_main() -> i32 { return (density(f, ambient(pos3).x) + density(m, ambient(pos3).x)); }
+    unit probe { main probe_main; inputs [f, m]; }
+    fn top_main() -> i32 {
+        return (ambient(pos3).y + eval(probe, pos3((1 - ambient(pos3).x), 0, 0)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1));
+    }
+    unit top { main top_main; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of top @march(0, 4, 0) {
+        rerun top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        rerun moving @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 2, 0)
+@expect "c" top = [0, 0]
+@expect "c" after(1) top = [2002, 2002]

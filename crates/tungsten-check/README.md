@@ -45,6 +45,18 @@ refinement becomes one more core program, a *refine step* (`lower/refine.rs`, `l
 Both come with validation, which is the second table below. See `specs/density-mappings.md` and
 `specs/refinement.md`.
 
+**`eval(unit, p)` is desugared here too** (`lower/unit_eval.rs`, `specs/unit-eval.md` §5.1). Each
+eval key (unit and the bits of both scales) gets a clone of the unit's main and of every helper it
+reaches through calls, after the program's own functions. A clone takes the position as an extra
+first parameter (`LocalId(0)`) and reads it where the source reads `Pos3`, the scale ambients become
+`MakeVec3` literals, and calls inside it go to the clones of the same key. `Eval` lowers to a call of
+the key's main clone. A reader unit's lists gain the clones, the inputs read inside the bodies it
+evaluates, and the evaluated units' hosts, autoconsts and constants. `LowerMap::eval_fns` records
+each clone with its source; `map.functions` names a clone after its source, and the position
+parameter has no `Ref` in `map.locals`. The refine graph, the refine steps and the mapping rules use
+what a unit *reaches* (its listed inputs plus those of its evaluated bodies). Errors inside a clone
+are its source's and are reported once, there.
+
 ### What is a lowering error, and what isn't
 
 | `LowerErrorKind` | When |
@@ -70,6 +82,9 @@ can't express, so they belong here and not in the checker:
 | `RefineTypeMismatch`, `RefineMarchScaleMismatch`, `RefineCycle` | A `with` unit returns another type than its target, targets differ in position scale on a marched axis, or the running instances form a cycle (ignoring `@previous`). |
 | `RefinedUnitInNormalGraph` | A `with` unit is also an entry, or a normal unit reads it. |
 | `PreviousOutsideRefinedUnit`, `PreviousNotTarget`, `PreviousMapped`, `PreviousIndexed` | A `@previous` input is listed by a unit that no refinement runs as `with`, doesn't name the rerun's own target, has a mapping, or is read with an index. |
+| `EvalUnknownUnit`, `EvalBadScale` | An `eval` names a unit that isn't in the program, or has a non-finite scale component. At the first site of each eval key. |
+| `EvalUnindexedRead`, `EvalPrevious` | A body that some `eval` evaluates (its main and the helpers it calls) reads an input without an index, or a `@previous` input. Once per eval key and input, under the evaluated unit. |
+| `EvalCycle` | Units evaluate each other, or evaluate a unit that reads them, in a cycle with at least one `eval` edge. Under the program, naming the cycle. Input-only cycles stay the checker's. |
 
 **Not** lowering errors (kept for the checker): every type mismatch, missing or duplicate
 record fields, a positional record construct with too few args, empty array literals, dims
@@ -96,6 +111,7 @@ src/
     mapping.rs    mapping validation and the desugaring of mapped reads
     refine.rs     refinement validation, and which instances each refine call runs
     step.rs       lowering one refine call to an ordinary core program
+    unit_eval.rs  eval keys, their clones, reached inputs, and the eval validation
   map.rs          LowerMap: core id ↔ tungsten-ir Ref, plus names
   error.rs        LowerError, LowerErrorKind, Location (Item + path of Steps)
   tests/          see "Tests" below
@@ -353,6 +369,7 @@ the result. `tests/mod.rs` has the helpers:
 | `check_errors.rs` | One reject test per `CheckErrorKind` (both hints), with its rendered location; hand-built core programs for wf and forbidden const inits |
 | `check_rejects.rs` | The lowering tests whose programs the checker rejects on purpose, with reasons |
 | `eval.rs` | Interpreter results computed by hand (operators × types, overflow, shifts, casts, `-0.0`, short-circuit, loops, fuel, consts, density inputs, eager failures, canonical errors, externs) and the `prepare`/`Prepared`/`evaluate` API |
+| `unit_eval.rs` | The eval desugar (clones, folded scales, reader lists), determinism, and every `Eval*` error with its location |
 | `stuck_mutation.rs` | proptest: checker-accepted programs mutated on the core IR; those still accepted never get `Stuck` |
 | `memo.rs` | proptest: memo on == memo off; results are monotone in fuel per cell |
 | `wf_mirror.rs` | A plain-Rust copy of `tungsten-core/src/wf.rs`, and the proptest that `check_wf` agrees with it |

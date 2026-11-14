@@ -200,6 +200,17 @@ fn float_bits(p: &Program) -> Vec<u64> {
             }
             Expression::ConstructExtern { args, .. } => args.iter().for_each(|(_, e)| expr(e, out)),
             Expression::ExplicitCast { expr: e, .. } => expr(e, out),
+            Expression::Eval {
+                position,
+                origin_scale,
+                position_scale,
+                ..
+            } => {
+                for (x, y, z) in [origin_scale, position_scale] {
+                    out.extend([x.to_bits(), y.to_bits(), z.to_bits()]);
+                }
+                expr(position, out)
+            }
             Expression::Constant(_)
             | Expression::Variable(_)
             | Expression::Byte(_)

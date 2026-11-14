@@ -229,6 +229,23 @@ impl<'a> FunctionConverter<'a> {
                     _ => J::cast(convert_type(to), converted),
                 }
             }
+            // A call of the key's eval method with the caller's origin and context, and the
+            // offsets the evaluated body reads (the caller has them: `input_params` is
+            // transitive through `eval`).
+            Expression::Eval { unit, position, origin_scale, position_scale } => {
+                let program = self.program;
+                let tungsten_ir::model::ComputeUnit::DensityFunction { function: main, .. } =
+                    &program.compute_units[*unit];
+                let mut args = vec![
+                    self.convert_expression(position),
+                    J::field(J::name(PARAM_CONFIG), "origin"),
+                ];
+                args.extend(uniform_arguments().into_iter().skip(2));
+                for &d in self.naming.input_params(*main) {
+                    args.push(J::name(self.offset(d)));
+                }
+                J::call(None, self.naming.eval_fn(*unit, *origin_scale, *position_scale), args)
+            }
         }
     }
 

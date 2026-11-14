@@ -1,0 +1,18 @@
+// Evals in a rerun unit under a march (`specs/unit-eval.md` §4.2): `p` is built from the marched
+// `pos3`, and the evaluated body sees `p` with no further offset.
+program {
+    fn probe_main() -> i32 { return (ambient(pos3).x + (100 * ambient(pos3).y)); }
+    unit probe { main probe_main; }
+    fn top_main() -> i32 {
+        return eval(probe, (ambient(pos3) + pos3(0, 1, 0))) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+    unit top { main top_main; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    refinement step of top @march(0, 5, 0) {
+        rerun top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+}
+@case "c" origin(0, 0, 0)
+@refine "c" step offset(0, 3, 0)
+@expect "c" top = [100, 101]
+@expect "c" after(1) top = [400, 401]

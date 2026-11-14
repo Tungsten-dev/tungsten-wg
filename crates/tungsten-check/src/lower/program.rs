@@ -11,6 +11,7 @@ use tungsten_ir::{
 };
 
 use super::refine::{Inst, RefineGraph};
+use super::unit_eval::EvalPlan;
 use super::step::StepCfg;
 use super::{Ctx, get};
 use crate::error::{EntityKind, Item, LowerError, LowerErrorKind, ParameterProblem, Step};
@@ -50,10 +51,13 @@ pub(crate) fn run_step(p: &IrProgram, reg: &Registry, refinement: usize) -> Outp
 }
 
 fn lower_with(p: &IrProgram, reg: &Registry, refinement: Option<usize>) -> Output {
+    let mut map = build_ids(p);
+    let eval = EvalPlan::new(p, map.functions.len());
+    eval.register(&mut map);
     let mut cx = Ctx {
         p,
         reg,
-        map: build_ids(p),
+        map,
         errors: vec![],
         item: Item::Registry,
         path: vec![],
@@ -62,6 +66,9 @@ fn lower_with(p: &IrProgram, reg: &Registry, refinement: Option<usize>) -> Outpu
         handles: reg.handle_names.clone(),
         auto_reads: vec![],
         step: None,
+        eval,
+        eval_clone: None,
+        eval_reported: HashSet::new(),
     };
     cx.auto_params();
     let (tables, auto_hosts) = cx.auto_consts();
@@ -80,6 +87,7 @@ fn lower_with(p: &IrProgram, reg: &Registry, refinement: Option<usize>) -> Outpu
     if refinement.is_none() {
         cx.refinements();
         cx.mapping_readers();
+        cx.eval_checks();
     }
     let (offset, buffers) = match &cx.step {
         Some(cfg) => (
@@ -424,14 +432,27 @@ impl<'p, 'r> Ctx<'p, 'r> {
         let p = self.p;
         let mut out = vec![];
         for (i, (_, f)) in p.functions.iter().enumerate() {
-            out.push(self.function(FnId(i), f));
+            out.push(self.function(FnId(i), f, None));
+        }
+        // The eval clones, after every function of the program. Their errors are the source's,
+        // already reported.
+        for k in 0..self.eval.keys.len() {
+            for j in 0..self.eval.keys[k].fns.len() {
+                let (source, id) = self.eval.keys[k].fns[j];
+                let Some(f) = get(&p.functions, source) else { continue };
+                let errors = self.errors.len();
+                out.push(self.function(id, f, Some(k)));
+                self.errors.truncate(errors);
+            }
         }
         self.func = None;
         self.locals.clear();
         out
     }
 
-    fn function(&mut self, id: FnId, f: &'p Function) -> core::Function {
+    /// Lowers `f` as `id`. With `clone`, as the clone of `f` for that eval key: the position is
+    /// an extra first parameter.
+    fn function(&mut self, id: FnId, f: &'p Function, clone: Option<usize>) -> core::Function {
         let name = self.map.functions.name(id).unwrap_or_default().to_string();
         self.enter(Item::Function {
             id: Some(id),
@@ -443,6 +464,10 @@ impl<'p, 'r> Ctx<'p, 'r> {
         let mut locals: IdMap<tungsten_ir::Var, LocalId> = IdMap::default();
         let mut types = vec![];
         let mut seen = HashSet::new();
+        if clone.is_some() {
+            locals.push_hole("eval position".to_string());
+            types.push(core::Type::Pos3);
+        }
         for (i, &r) in f.parameters.iter().enumerate() {
             self.path = vec![Step::Param(i)];
             let Some(v) = get(&f.variables, r) else {
@@ -488,7 +513,9 @@ impl<'p, 'r> Ctx<'p, 'r> {
             .map(|(i, &h)| self.at(Step::List { list: "hosts", index: i }, |cx| cx.host_ref(h)))
             .collect();
         self.auto_reads.clear();
+        self.eval_clone = clone;
         let body = self.block(&f.body, Step::Stmt);
+        self.eval_clone = None;
         let mut hosts: Vec<HostId> = hosts;
         for h in std::mem::take(&mut self.auto_reads) {
             if !hosts.contains(&h) {
@@ -511,7 +538,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
     fn units(&mut self) -> Vec<core::Unit> {
         let p = self.p;
         let mut out = vec![];
-        for (i, (_, u)) in p.compute_units.iter().enumerate() {
+        for (i, (unit_ref, u)) in p.compute_units.iter().enumerate() {
             let id = UnitId(i);
             let name = self.map.units.name(id).unwrap_or_default().to_string();
             self.enter(Item::Unit { id: Some(id), name });
@@ -529,12 +556,36 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 .iter()
                 .map(|r| self.step.as_ref().is_some_and(|c| c.buffers.contains_key(r)))
                 .collect();
-            let inputs = density_inputs
+            let mut inputs: Vec<InputId> = density_inputs
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !buffered[*i])
                 .map(|(i, &r)| self.at(Step::List { list: "inputs", index: i }, |cx| cx.input_ref(r)))
                 .collect();
+            // What the bodies this unit evaluates use joins its lists (`specs/unit-eval.md` §5.1).
+            let extras = self.eval_extras(unit_ref);
+            for r in &extras.inputs {
+                let buffered = self.step.as_ref().is_some_and(|c| c.buffers.contains_key(r));
+                if let Some(id) = self.map.inputs.id(*r)
+                    && !buffered
+                    && !inputs.contains(&id)
+                {
+                    inputs.push(id);
+                }
+            }
+            let mut auto_consts = auto_consts.clone();
+            let mut host_inputs = host_inputs.clone();
+            let mut constants = constants.clone();
+            for &e in &extras.units {
+                let Some(ComputeUnit::DensityFunction { auto_consts: a, host_inputs: h, constants: c, .. }) =
+                    get(&p.compute_units, e)
+                else {
+                    continue;
+                };
+                extend_unique(&mut auto_consts, a);
+                extend_unique(&mut host_inputs, h);
+                extend_unique(&mut constants, c);
+            }
             let mut tables = vec![];
             let mut auto_hosts = vec![];
             for (i, &r) in auto_consts.iter().enumerate() {
@@ -558,11 +609,16 @@ impl<'p, 'r> Ctx<'p, 'r> {
             if let Some(cfg) = &self.step {
                 hosts.extend(cfg.hosts.iter().copied());
             }
-            let helpers = helper_functions
+            let mut helpers: Vec<FnId> = helper_functions
                 .iter()
                 .enumerate()
                 .map(|(i, &r)| self.at(Step::List { list: "helpers", index: i }, |cx| cx.fn_ref(r)))
                 .collect();
+            for id in extras.helpers {
+                if !helpers.contains(&id) {
+                    helpers.push(id);
+                }
+            }
             let consts = constants
                 .iter()
                 .enumerate()
@@ -658,6 +714,14 @@ impl<'p, 'r> Ctx<'p, 'r> {
             dims: i.dims,
             origin_scale: i.origin,
             position_scale: i.position,
+        }
+    }
+}
+
+fn extend_unique<T: Copy + PartialEq>(dst: &mut Vec<T>, src: &[T]) {
+    for x in src {
+        if !dst.contains(x) {
+            dst.push(*x);
         }
     }
 }

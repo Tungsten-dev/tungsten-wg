@@ -11,7 +11,7 @@ use super::types::convert_type;
 use super::{CONFIG_STRUCT_NAME, uniform_kernel_parameters, uniform_parameters};
 use crate::model as rcl;
 use crate::pools::Pools;
-use tungsten_interface::{BufferBounds, Instance, Interface, LerpHelper, RefineRun};
+use tungsten_interface::{BufferBounds, EvalFn, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{
     ComputeUnit, Constant, Function, Program, Ref,
 };
@@ -110,6 +110,84 @@ pub fn convert_density<'a, 'm>(
         out.add_variable(v);
     }
     out.body = conv.convert_block(&func.body);
+    out.inline = true;
+
+    Converted {
+        function: out,
+        called: conv.called,
+        constants: conv.used_constants,
+        lerps: conv.used_lerps,
+    }
+}
+
+/// The function of one eval key (`specs/unit-eval.md` §5.4):
+/// `fn <eval>(pos: Pos3, origin: Vec3, buffers, auto_constants, host_consts, off_..) -> T`.
+///
+/// It rebuilds the uniform `p` and `config` from its parameters, with `pos` as the position and
+/// the key's scales as literals, then runs the evaluated main's body unchanged. Helpers take
+/// `p` and `config` as parameters, so the ones it calls see the evaluated ambients and can be
+/// shared with kernels.
+pub fn convert_eval<'a, 'm>(
+    program: &'a Program,
+    naming: &'a Interface,
+    pools: &'a Pools,
+    eval: &EvalFn,
+) -> Converted<'m> {
+    use rcl::Expression as E;
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[eval.key.unit];
+    let func = &program.functions[*function];
+    let mut conv = FunctionConverter::new(program, naming, pools, *function);
+    let mut out = rcl::Function::new(Some(eval.name.clone()), Some(convert_type(&func.return_type)));
+    let s = |n: &str| rcl::Type::Struct(n.to_string());
+    let var = |name: String, t: rcl::Type| Rc::new(rcl::Variable { name: Some(name), t, mutable: false });
+    let pos = var(conv.fresh_name("pos"), s("Pos3"));
+    let origin = var(conv.fresh_name("origin"), s("Vec3"));
+    out.add_parameter(pos.name.clone().unwrap(), pos.t.clone());
+    out.add_parameter(origin.name.clone().unwrap(), origin.t.clone());
+    let uniform = uniform_parameters();
+    for p in &uniform[2..] {
+        out.add_parameter(p.name.clone(), p.t.clone());
+    }
+    for (_, v) in &conv.offsets {
+        out.add_parameter(v.name.clone().unwrap(), v.t.clone());
+    }
+
+    let vec3_new = |(x, y, z): (f64, f64, f64)| E::LateBoundCall {
+        function_name: "Vec3::new".to_string(),
+        argument_types: vec![rcl::Type::F64; 3],
+        return_type: s("Vec3"),
+        arguments: vec![E::F64Literal(x), E::F64Literal(y), E::F64Literal(z)],
+    };
+    out.add_statement(rcl::Statement::Declare {
+        variable: conv.uniform.it.clone(),
+        init: Some(E::StructInit {
+            struct_name: "PositionIterator".to_string(),
+            fields: vec![
+                ("pos".to_string(), E::Variable(pos.clone())),
+                ("idx".to_string(), E::UsizeLiteral(0)),
+            ],
+        }),
+        mutable: false,
+    });
+    out.add_statement(rcl::Statement::Declare {
+        variable: conv.uniform.config.clone(),
+        init: Some(E::Ref(Box::new(E::StructInit {
+            struct_name: CONFIG_STRUCT_NAME.to_string(),
+            fields: vec![
+                ("origin".to_string(), E::Variable(origin.clone())),
+                ("origin_scale".to_string(), vec3_new(eval.key.origin_scale())),
+                ("position_scale".to_string(), vec3_new(eval.key.position_scale())),
+                ("dimensions".to_string(), E::TupleInit(vec![E::I32Literal(0); 3])),
+            ],
+        }))),
+        mutable: false,
+    });
+    for (r, _) in func.variables.iter() {
+        let v = conv.declare_var(r);
+        out.add_variable(v);
+    }
+    let body = conv.convert_block(&func.body);
+    out.body.extend(body);
     out.inline = true;
 
     Converted {

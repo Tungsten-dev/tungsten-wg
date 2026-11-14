@@ -238,6 +238,7 @@ impl Backend for CudaBackend {
     }
 
     fn generate(&self, program: &Program, interface: &Interface) -> Result<CudaOutput, BackendError> {
+        interface.check_evals(program)?;
         let naming_rules = self.naming_rules();
         let device = CudaCodegen::new(program, interface, &naming_rules, &self.config);
         let mut orchestration = TransformCudaOrchestration::new(Box::new(device), &self.config, &naming_rules);

@@ -417,3 +417,58 @@ fn inspects_mappings_and_refinements() {
     assert!(index.contains("## Refinements"), "{index}");
     assert!(index.contains("1 refinements"), "{index}");
 }
+
+const EVALUATED: &str = r#"
+program {
+    fn probe_main() -> i32 { return (ambient(pos3).x * 3); }
+    unit probe { main probe_main; }
+    fn twice() -> i32 { return eval(probe, pos3(1, 2, 3)) @origin_scale(1, 1, 1) @position_scale(2, 2, 2); }
+    fn top_main() -> i32 {
+        vars { s: i32 }
+        s = 0;
+        repeat 4 {
+            s = (s + eval(probe, ambient(pos3)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1));
+            s = (s + twice());
+        }
+        while (s > 100) {
+            s = (s - twice());
+        }
+        return s;
+    }
+    unit top { main top_main; helpers [twice]; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+"#;
+
+/// `specs/unit-eval.md` §5.5: IR text, per-reader sites with static counts, dotted `eval` edges.
+#[test]
+fn inspects_evals() {
+    let program = program(EVALUATED);
+    let out = inspect(&program, &InspectConfig::default());
+    let file = |p: &str| &out.files[std::path::Path::new(p)];
+    let parsed: serde_json::Value = serde_json::from_str(file("inspection.json")).unwrap();
+    let unit = |d: &str| parsed["units"].as_array().unwrap().iter().find(|u| u["display"] == d).unwrap().clone();
+    let (top, probe) = (unit("top_main"), unit("probe_main"));
+    assert_eq!(probe["reachable"], true, "evaluated by a scheduled unit");
+    assert_eq!(probe["inline_verdict"]["verdict"], "unused", "an eval site is not a use");
+
+    let evals = top["evals"].as_array().unwrap();
+    assert_eq!(evals.len(), 2, "one per key: {evals:?}");
+    let by_scale = |s: f64| evals.iter().find(|e| e["position_scale"][0] == s).unwrap();
+    // Scale 1: one site under `repeat 4`.
+    assert_eq!(by_scale(1.0)["sites"], 1);
+    assert_eq!(by_scale(1.0)["evaluations"], 4);
+    assert_eq!(by_scale(1.0)["function"], "eval_probe_main_s1x1x1_1x1x1");
+    // Scale 2: one site in `twice`, called under `repeat 4` and under a `while`.
+    assert_eq!(by_scale(2.0)["sites"], 1);
+    assert_eq!(by_scale(2.0)["evaluations"], serde_json::Value::Null, "unbounded");
+
+    let ir = out.files.iter().filter(|(p, _)| p.extension().is_some_and(|e| e == "txt")).map(|(_, t)| t.as_str()).collect::<String>();
+    assert!(ir.contains("eval(probe_main, ambient(Pos3)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)"), "{ir}");
+
+    let dep = file("entries/top_main@2x1x1/dependencies.dot");
+    let edges: Vec<&str> = dep.lines().filter(|l| l.contains("eval ")).collect();
+    assert_eq!(edges.len(), 2, "{dep}");
+    assert!(edges.iter().all(|l| l.contains("dotted")), "{dep}");
+    assert!(edges.iter().any(|l| l.contains("eval ×4")) && edges.iter().any(|l| l.contains("eval unbounded")), "{dep}");
+}

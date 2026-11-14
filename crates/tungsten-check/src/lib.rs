@@ -36,7 +36,7 @@ pub use eval::{
     SequenceCase, SequenceResult, check_lowered, evaluate, prepare,
 };
 pub use map::{
-    AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, CoreId, IdMap, Instance, LowerMap, RecordNames,
+    AutoArgSpec, AutoConstInfo, AutoCoreId, AutoParamId, CoreId, EvalFnInfo, IdMap, Instance, LowerMap, RecordNames,
 };
 pub use tungsten_core::exec::{CaseResult, Failure};
 pub use tungsten_core::{Case, EvalError, ExternFail, Externs, StuckReason, Value};

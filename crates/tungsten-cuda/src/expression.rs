@@ -265,6 +265,23 @@ impl<'a> FunctionConverter<'a> {
                 let converted = self.convert_expression(expr);
                 coerce(converted, from.as_ref(), to)
             }
+            // A call of the key's eval function with the caller's origin and context, and the
+            // offsets the evaluated body reads (the caller has them: `input_params` is
+            // transitive through `eval`).
+            Expression::Eval { unit, position, origin_scale, position_scale } => {
+                let program = self.program;
+                let tungsten_ir::model::ComputeUnit::DensityFunction { function: main, .. } =
+                    &program.compute_units[*unit];
+                let mut args = vec![
+                    self.convert_expression(position),
+                    C::field(C::field(C::name(PARAM_CTX), "config"), "origin"),
+                    C::name(PARAM_CTX),
+                ];
+                for &d in self.naming.input_params(*main) {
+                    args.push(C::name(self.offset(d)));
+                }
+                C::call(self.naming.eval_fn(*unit, *origin_scale, *position_scale), args)
+            }
         }
     }
 

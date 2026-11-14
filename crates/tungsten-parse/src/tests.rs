@@ -2371,3 +2371,51 @@ fn refine_directive_errors() {
     );
     assert!(message(&shared).contains("used by several entries"), "{shared}");
 }
+
+/// `eval(unit, p) @origin_scale(..) @position_scale(..)` (`specs/unit-eval.md` §3.4): both
+/// attributes, in either order, binding tighter than any operator; printed back canonically.
+#[test]
+fn eval_parses_and_prints() {
+    let tf = load_ok(&with_units(
+        "fn top() -> f64 {
+             return ((eval(base, ambient(pos3)) @position_scale(2, 1, 0.5) @origin_scale(1, -3, 1) * 2.0)
+                 + eval(other, (ambient(pos3) + pos3(1, 0, 0))) @origin_scale(1, 1, 1) @position_scale(1, 1, 1));
+         }",
+    ));
+    let (_, top) = find_fn(&tf, "top");
+    let Statement::Return(Expression::BinaryOp { left, .. }) = &top.body[0] else { panic!() };
+    let Expression::BinaryOp { left, .. } = &**left else { panic!("{left:?}") };
+    let Expression::Eval { origin_scale, position_scale, .. } = &**left else { panic!("{left:?}") };
+    assert_eq!((*origin_scale, *position_scale), ((1.0, -3.0, 1.0), (2.0, 1.0, 0.5)));
+    let text = print(&tf.program);
+    assert!(text.contains("eval(base, ambient(pos3)) @origin_scale(1.0, -3.0, 1.0) @position_scale(2.0, 1.0, 0.5)"), "{text}");
+    round_trips(&tf);
+}
+
+#[test]
+fn eval_attributes_are_required_once_and_take_no_dims() {
+    let body = |e: &str| with_units(&format!("fn top() -> f64 {{ return {e}; }}"));
+    fails(&body("eval(base, ambient(pos3)) @origin_scale(1, 1, 1)"), "`eval` needs `@position_scale(…)`");
+    fails(&body("eval(base, ambient(pos3)) @position_scale(1, 1, 1)"), "`eval` needs `@origin_scale(…)`");
+    fails(
+        &body("eval(base, ambient(pos3)) @origin_scale(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)"),
+        "duplicate `@origin_scale`",
+    );
+    fails(
+        &body("eval(base, ambient(pos3)) @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)"),
+        "`eval` takes no `@dims`",
+    );
+    fails(&body("eval(nope, ambient(pos3)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1)"), "nope");
+    fails(
+        &with_units("const c = eval(base, pos3(0, 0, 0)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);"),
+        "not allowed in a constant expression",
+    );
+}
+
+/// `eval` is a keyword, so a function named `eval` is printed quoted and loads back.
+#[test]
+fn eval_is_a_keyword() {
+    let tf = load_ok(&with_units("fn `eval`() -> f64 { return 1.0; } fn top() -> f64 { return `eval`(); }"));
+    round_trips(&tf);
+    assert!(print(&tf.program).contains("fn `eval`()"));
+}

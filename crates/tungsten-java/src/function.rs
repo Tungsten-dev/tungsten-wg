@@ -15,7 +15,7 @@ use super::{
 };
 use tungsten_interface::naming::NamingRules;
 use crate::pools::Pools;
-use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
+use tungsten_interface::{EvalFn, Instance, Interface, LerpHelper, RefineRun};
 use crate::model as java;
 use tungsten_ir::model::VariableType;
 use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, Program, Ref};
@@ -125,6 +125,71 @@ pub fn convert_density(
         return_type: Some(convert_type(&func.return_type)),
         name: naming.density_fn(cu, dimensions).to_string(),
         params: uniform_parameters().into_iter().chain(offset_parameters(naming, *function)).collect(),
+        body,
+    };
+    finish(conv, method)
+}
+
+/// The method of one eval key (`specs/unit-eval.md` §5.4): `static T <eval>(Pos3 pos, Vec3 origin,
+/// buffers, auto_constants, host_consts, int off_..)`. It rebuilds the uniform `config` (the key's
+/// scales as literals) and `p` (at `pos`), then runs the evaluated main's body unchanged. Helpers
+/// take both as parameters, so the ones it calls see the evaluated ambients.
+pub fn convert_eval(
+    program: &Program,
+    naming: &Interface,
+    pools: &Pools,
+    rules: &NamingRules,
+    class_name: &str,
+    eval: &EvalFn,
+) -> Converted {
+    use java::Statement as S;
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[eval.key.unit];
+    let func = &program.functions[*function];
+    let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, func).with_offsets(*function);
+    let pos = conv.fresh_name("pos");
+    let origin = conv.fresh_name("origin");
+    let class = |n: &str| java::Type::class(n);
+    let mut body = vec![
+        S::Declare {
+            t: class(CONFIG_CLASS),
+            name: PARAM_CONFIG.into(),
+            init: Some(J::New {
+                class: CONFIG_CLASS.into(),
+                args: vec![
+                    J::name(&origin),
+                    vec3_literal(eval.key.origin_scale()),
+                    vec3_literal(eval.key.position_scale()),
+                    J::IntLit(0),
+                    J::IntLit(0),
+                    J::IntLit(0),
+                ],
+                comment: None,
+            }),
+            is_final: true,
+        },
+        S::Declare {
+            t: class(POSITION_ITERATOR_CLASS),
+            name: PARAM_POS.into(),
+            init: Some(J::New { class: POSITION_ITERATOR_CLASS.into(), args: vec![J::name(PARAM_CONFIG)], comment: None }),
+            is_final: true,
+        },
+        S::Expr(J::call(
+            Some(J::name(PARAM_POS)),
+            "set",
+            vec![J::field(J::name(&pos), "x"), J::field(J::name(&pos), "y"), J::field(J::name(&pos), "z"), J::IntLit(0)],
+        )),
+    ];
+    body.extend(declare_locals(&mut conv, func));
+    body.extend(conv.convert_block(&func.body));
+    let mut params = vec![(class("Pos3"), pos), (class("Vec3"), origin)];
+    params.extend(uniform_parameters().into_iter().skip(2));
+    params.extend(offset_parameters(naming, *function));
+    let method = java::Method {
+        doc: Some(format!("eval of {}", func.canonical_name.as_deref().unwrap_or("a unit"))),
+        modifiers: "static".into(),
+        return_type: Some(convert_type(&func.return_type)),
+        name: eval.name.clone(),
+        params,
         body,
     };
     finish(conv, method)

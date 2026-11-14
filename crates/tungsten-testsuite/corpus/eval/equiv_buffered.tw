@@ -1,0 +1,29 @@
+// The main property (`specs/unit-eval.md` §7): on a grid, `eval(u, pos3)` with the grid's scales
+// gives the same bits as reading `u` buffered on that grid.
+program {
+    fn u_main() -> f64 {
+        let w: vec3 = ((vec3((ambient(pos3).x as f64), (ambient(pos3).y as f64), (ambient(pos3).z as f64)) * ambient(position_scale)) + (ambient(origin) * ambient(origin_scale)));
+        return ((w.x * 0.3) + ((w.y * 1.7) - (w.z / 3.0)));
+    }
+    unit u { main u_main; }
+    input b = u @dims(3, 2, 2) @origin_scale(0.25, 1, 2) @position_scale(0.5, 3, 1);
+
+    fn buffered_main() -> f64 { return density(b); }
+    unit buffered { main buffered_main; inputs [b]; }
+    fn evaluated_main() -> f64 {
+        return eval(u, ambient(pos3)) @origin_scale(0.25, 1, 2) @position_scale(0.5, 3, 1);
+    }
+    unit evaluated { main evaluated_main; }
+    fn diff_main() -> bool {
+        return (density(b) == eval(u, ambient(pos3)) @position_scale(0.5, 3, 1) @origin_scale(0.25, 1, 2));
+    }
+    unit diff { main diff_main; inputs [b]; }
+
+    entry buffered @dims(3, 2, 2) @origin_scale(0.25, 1, 2) @position_scale(0.5, 3, 1);
+    entry evaluated @dims(3, 2, 2) @origin_scale(0.25, 1, 2) @position_scale(0.5, 3, 1);
+    entry diff @dims(3, 2, 2) @origin_scale(0.25, 1, 2) @position_scale(0.5, 3, 1);
+}
+@case "zero" origin(0, 0, 0)
+@case "moved" origin(-7.5, 100.25, 3)
+@expect "zero" diff = [true, true, true, true, true, true, true, true, true, true, true, true]
+@expect "moved" diff = [true, true, true, true, true, true, true, true, true, true, true, true]

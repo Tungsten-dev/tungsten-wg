@@ -1,7 +1,7 @@
 # Unit evaluation: `eval(unit, p)`
 
-Status: proposed. Nothing implemented. Extends `specs/density-mappings.md` and `specs/refinement.md`, and changes
-neither.
+Status: implemented (milestones 1–5), with the deviations in §10. Extends `specs/density-mappings.md` and
+`specs/refinement.md`, and changes neither.
 
 ## 1. Summary
 
@@ -359,3 +359,43 @@ discovery order, once per eval key unless stated otherwise:
 | D8 | Who emits it | Each backend emits native functions per eval key. `tungsten-check` desugars to core calls for the interpreter | A shared IR→IR desugar before backends: less control over the shape of device functions, and the desugared clones would show up in every backend's output and in inspect as anonymous helpers |
 | D9 | Caching | None. Each site evaluates the body | CSE in this spec: it needs extern purity guarantees (deferred, §8) |
 | D10 | Spec location | `specs/unit-eval.md`, next to the other feature specs | Overwriting `SPEC.md`, which holds the in-progress mdBook spec |
+
+## 10. Implementation notes
+
+Where the implementation differs from the text above, or fills a gap it left:
+
+- **Builder handle.** `eval` takes the existing `Unit` handle (there is no `UnitHandle`). A non-`Pos3` position is
+  the new `BuildErrorKind::EvalPosition`. `IR`'s `EvalKey` (unit plus scale bits) is shared by `tungsten-check`,
+  `tungsten-interface` and `tungsten-inspect`.
+- **Backends don't clone helpers per key.** In Rust, Java and CUDA every helper already takes the ambients as
+  parameters (`p`/`config`, or `p`/`ctx`). Each eval function rebuilds them from its own parameters, with the
+  key's scales as literals and `idx = 0`, and runs the evaluated main's body unchanged, so the helpers it calls see
+  the evaluated ambients and stay shared with kernels. Dynamic scoping (§4.1) holds by construction, and the
+  `nested_scales_shared_helper` corpus case checks it. `Interface::eval_helper` still names a clone per key, for
+  a backend that inlines ambients; none uses it yet. Signatures: Rust and Java
+  `(pos, origin, buffers, auto_constants, host_consts, off_..)`, CUDA `(int3 pos, double3 origin, const Ctx& outer,
+  off_..)`.
+- **Inliner.** Besides `EvaluatedCaller`, a new `InlineRejection::Evaluated`: an evaluated unit is never inlined,
+  even when an input reads it exactly once, because inlining removes the unit and would leave the eval site
+  dangling.
+- **What lowering clones.** `tungsten-check` lowers every function, reachable or not, so it clones every eval key
+  found in any function (in arena order), and the §4.4 checks apply to every key it clones. `Interface` only keys
+  what scheduled and refined units reach.
+- **Error locations.** `EvalUnknownUnit` and `EvalBadScale` are reported at the first site of each key, with its
+  path. `EvalUnindexedRead` and `EvalPrevious` are reported under the evaluated unit, once per key and input.
+  `EvalCycle` is under the program and needs at least one `eval` edge in the cycle; input-only cycles stay the
+  checker's.
+- **`LowerMap`.** `eval_fns` lists each clone with its source and key. `map.functions` gives a clone its source's
+  ref and name; the position parameter has no `Ref` (`IdMap` can now hold such an id). The testsuite's lowering
+  test counts clones accordingly.
+- **Low-level path.** `Interface::check_evals` gives the `BackendError::Codegen` of §5.4; an eval cycle through an
+  input is an instance cycle there, which `Interface::build` already panics on, as before.
+- **Corpus-wide equivalence** (`tests/eval_equivalence.rs`) runs on the interpreter only. It skips files with
+  refinements (a marched `pos3` reads another cell than the buffer index) and `@tier(large)`, and cases where the
+  original fails (a buffered input fails eagerly, an evaluated one per reading cell). The backends are compared
+  with the interpreter on `corpus/eval/`.
+- **Inspect.** Per reader, `UnitInfo::evals` lists each key with its text sites and static evaluations (through
+  helper calls too). The dotted `eval` edges are drawn in each entry's `dependencies.dot`, from a node per
+  evaluated unit. An evaluated unit counts as reachable.
+- **Docs.** `book/src/builder/expressions.md` and `mappings.md` don't exist yet (the book is still a spec), so the
+  builder docs went into `crates/tungsten-builder/README.md`.

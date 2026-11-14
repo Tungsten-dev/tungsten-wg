@@ -722,5 +722,6 @@ fn to_const(
         Expression::HostInput(_) => return not(found, "a host read"),
         Expression::Ambient(_) => return not(found, "an ambient"),
         Expression::ConstructExtern { .. } => return not(found, "a record construction"),
+        Expression::Eval { .. } => return not(found, "an eval"),
     })
 }

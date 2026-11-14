@@ -3,7 +3,7 @@
 use tungsten_ir::*;
 
 use super::derive::Deriver;
-use super::float::quote_name;
+use super::float::{f64_lit, quote_name};
 use super::labels::Labels;
 use crate::stack;
 use crate::tables::{self, Num};
@@ -227,6 +227,24 @@ impl ExprPrinter<'_> {
                 out.push('(');
                 self.expr(expr, out);
                 out.push_str(&format!(" as {})", type_text(to)));
+            }
+            Eval {
+                unit,
+                position,
+                origin_scale: o,
+                position_scale: s,
+            } => {
+                out.push_str(&format!("eval({}, ", self.labels.unit(*unit)));
+                self.expr(position, out);
+                out.push_str(&format!(
+                    ") @origin_scale({}, {}, {}) @position_scale({}, {}, {})",
+                    f64_lit(o.0),
+                    f64_lit(o.1),
+                    f64_lit(o.2),
+                    f64_lit(s.0),
+                    f64_lit(s.1),
+                    f64_lit(s.2)
+                ));
             }
         }
     }

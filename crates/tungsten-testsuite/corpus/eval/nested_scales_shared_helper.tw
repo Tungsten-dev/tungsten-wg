@@ -1,0 +1,24 @@
+// Nested evals with different scales, and a helper shared by a kernel and the evaluated bodies:
+// each call must see the ambients of the body it runs in (no leak between them).
+program {
+    fn world() -> f64 {
+        let w: vec3 = ((vec3((ambient(pos3).x as f64), (ambient(pos3).y as f64), (ambient(pos3).z as f64)) * ambient(position_scale)) + (ambient(origin) * ambient(origin_scale)));
+        return ((w.x + (w.y * 10.0)) + (w.z * 100.0));
+    }
+    fn inner_main() -> f64 { return world(); }
+    unit inner { main inner_main; helpers [world]; }
+    fn outer_main() -> f64 {
+        return (world() + (1000.0 * eval(inner, (ambient(pos3) + pos3(1, 0, 0))) @origin_scale(2, 2, 2) @position_scale(0.5, 0.5, 0.5)));
+    }
+    unit outer { main outer_main; helpers [world]; }
+    fn top_main() -> f64 {
+        let a: f64 = eval(outer, pos3(ambient(pos3).y, ambient(pos3).x, 5)) @origin_scale(1, 1, 1) @position_scale(3, 3, 3);
+        let b: f64 = eval(outer, ambient(pos3)) @origin_scale(0, 0, 0) @position_scale(1, 1, 1);
+        let c: f64 = eval(inner, ambient(pos3)) @origin_scale(2, 2, 2) @position_scale(0.5, 0.5, 0.5);
+        return (((world() + a) + (b * 0.001)) + (c * 7.0));
+    }
+    unit top { main top_main; helpers [world]; }
+    entry top @dims(2, 2, 1) @origin_scale(0.125, 4, 1) @position_scale(1, 2, 1);
+}
+@case "zero" origin(0, 0, 0)
+@case "moved" origin(10, -3.5, 0.25)

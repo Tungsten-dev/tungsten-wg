@@ -35,6 +35,8 @@ pub enum ExprStep {
     Inner,
     DensityIndex,
     FieldInit(usize),
+    /// The position of an `eval`.
+    EvalPosition,
 }
 
 /// The root (empty path) is the statement's single expression.

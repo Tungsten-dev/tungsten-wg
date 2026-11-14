@@ -706,6 +706,45 @@ pub enum Expression {
         to: VariableType,
         expr: Box<Expression>,
     },
+    /// Evaluate `unit`'s main function at `position` (a `Pos3`), with these scales and the run's
+    /// origin. The type is the unit's main return type. Sites are found by walking bodies and
+    /// deduped by [`EvalKey`].
+    Eval {
+        unit: Ref<ComputeUnit>,
+        position: Box<Expression>,
+        origin_scale: (f64, f64, f64),
+        position_scale: (f64, f64, f64),
+    },
+}
+
+/// What identifies an evaluated function: the unit and the bits of both scales. Two `eval` sites
+/// with the same key share one generated function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EvalKey {
+    pub unit: Ref<ComputeUnit>,
+    pub origin_scale: [u64; 3],
+    pub position_scale: [u64; 3],
+}
+
+impl EvalKey {
+    pub fn new(unit: Ref<ComputeUnit>, origin_scale: (f64, f64, f64), position_scale: (f64, f64, f64)) -> Self {
+        let bits = |(x, y, z): (f64, f64, f64)| [x.to_bits(), y.to_bits(), z.to_bits()];
+        Self {
+            unit,
+            origin_scale: bits(origin_scale),
+            position_scale: bits(position_scale),
+        }
+    }
+
+    pub fn origin_scale(&self) -> (f64, f64, f64) {
+        let [x, y, z] = self.origin_scale.map(f64::from_bits);
+        (x, y, z)
+    }
+
+    pub fn position_scale(&self) -> (f64, f64, f64) {
+        let [x, y, z] = self.position_scale.map(f64::from_bits);
+        (x, y, z)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

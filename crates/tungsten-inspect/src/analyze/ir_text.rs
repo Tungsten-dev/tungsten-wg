@@ -194,6 +194,13 @@ impl Printer<'_, '_> {
             ),
             Expression::ArrayLiteral(items) => format!("[{}]", self.exprs(items)),
             Expression::ExplicitCast { to, expr } => format!("({} as {to:?})", self.expr(expr)),
+            Expression::Eval { unit, position, origin_scale, position_scale } => format!(
+                "eval({}, {}) @origin_scale{} @position_scale{}",
+                ctx.units[unit].display,
+                self.expr(position),
+                super::fmt_triple(*origin_scale),
+                super::fmt_triple(*position_scale)
+            ),
         }
     }
 }

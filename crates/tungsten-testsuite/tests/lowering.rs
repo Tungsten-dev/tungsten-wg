@@ -31,7 +31,9 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
         if a == b { Ok(()) } else { Err(format!("{what}: {a} in the IR, {b} after lowering").into()) }
     };
     n("units", ir.compute_units.iter().count(), p.units.len())?;
-    n("functions", ir.functions.iter().count(), p.functions.len())?;
+    // Eval clones (`specs/unit-eval.md` §5.1) follow the program's own functions.
+    let clones = lowered.map.eval_fns.len();
+    n("functions", ir.functions.iter().count() + clones, p.functions.len())?;
     n("consts", ir.constants.iter().count(), p.consts.len())?;
     // A value autoconst is a core host, a handle autoconst a core table.
     let is_handle = |a: &tungsten_ir::AutoConst| matches!(a.t, tungsten_ir::VariableType::Handle(_));
@@ -50,8 +52,10 @@ fn check(file: CorpusFile) -> Result<(), Failed> {
             .functions
             .get(id)
             .ok_or_else(|| Failed::from(format!("fn {i} has no ref")))?;
-        n(&format!("fn {i} parameters"), ir.functions[r].parameters.len(), f.params)?;
-        let vars = ir.functions[r].variables.values().count();
+        // A clone takes the position as an extra first parameter.
+        let extra = usize::from(lowered.map.eval_fns.iter().any(|e| e.id == id));
+        n(&format!("fn {i} parameters"), ir.functions[r].parameters.len() + extra, f.params)?;
+        let vars = ir.functions[r].variables.values().count() + extra;
         n(&format!("fn {i} locals"), vars, f.locals.len())?;
         // The value autoconsts the body reads come after its listed hosts.
         let listed = ir.functions[r].host_inputs.len();

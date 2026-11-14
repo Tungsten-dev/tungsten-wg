@@ -171,7 +171,7 @@ impl<'a> CudaCodegen<'a> {
     /// asked.
     pub fn new(source: &'a Program, naming: &'a Interface, rules: &'a NamingRules, config: &'a CudaConfig) -> Self {
         let namespace_names = namespace_names(source, naming, rules, config);
-        Self {
+        let mut codegen = Self {
             source,
             naming,
             rules,
@@ -188,6 +188,24 @@ impl<'a> CudaCodegen<'a> {
             done_kernels: HashSet::new(),
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
+        };
+        codegen.generate_eval_fns();
+        codegen
+    }
+
+    /// One `__device__` function per eval key, with what they call (`specs/unit-eval.md` §5.4).
+    fn generate_eval_fns(&mut self) {
+        for e in self.naming.eval_fns() {
+            let converted = function::convert_eval(self.source, self.naming, self.config, &self.namespace_names, e);
+            self.functions.push(converted.function);
+            self.warnings.extend(converted.warnings);
+            self.generate_lerps(converted.lerps);
+            for h in converted.called {
+                self.generate_helper(h);
+            }
+            for c in converted.constants {
+                self.generate_constant(c);
+            }
         }
     }
 

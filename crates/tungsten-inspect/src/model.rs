@@ -146,6 +146,25 @@ pub struct UnitInfo {
     pub helpers: Vec<String>,
     pub constants: Vec<String>,
     pub inline_verdict: InlineVerdictInfo,
+    /// The units it evaluates, one per eval key, in discovery order (`specs/unit-eval.md` §5.5).
+    pub evals: Vec<EvalSiteInfo>,
+}
+
+/// The `eval` sites of one key in a reader's main function and the helpers it calls.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct EvalSiteInfo {
+    /// Id of the evaluated unit.
+    pub unit: String,
+    pub origin_scale: (f64, f64, f64),
+    pub position_scale: (f64, f64, f64),
+    /// The generated eval function, if a scheduled unit reaches the key.
+    pub function: Option<String>,
+    /// Sites in the text.
+    pub sites: usize,
+    /// Evaluations per cell, statically: a site under `repeat n` counts `n` times. `None` when a
+    /// site is under a `while` ("unbounded").
+    pub evaluations: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -460,6 +479,12 @@ pub enum NodeKind {
     Call {
         function: String,
     },
+    /// `eval(unit, pos)` with these scales; `pos` is its input edge.
+    Eval {
+        unit: String,
+        origin_scale: (f64, f64, f64),
+        position_scale: (f64, f64, f64),
+    },
     /// A density read with an `idx` input edge.
     IndexedDensityRead(DensityReadInfo),
 
@@ -646,4 +671,6 @@ pub enum Verdict {
     Refinement,
     ReadInSeveralFunctions,
     NotRead,
+    EvaluatedCaller,
+    Evaluated,
 }

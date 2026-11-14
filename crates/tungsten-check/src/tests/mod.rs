@@ -17,6 +17,7 @@ mod normalization;
 mod refine;
 mod registry;
 mod stuck_mutation;
+mod unit_eval;
 mod wf_mirror;
 
 use tungsten_core::{Expr, FnId, Stmt};

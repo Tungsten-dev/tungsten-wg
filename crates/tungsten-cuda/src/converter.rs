@@ -170,6 +170,7 @@ impl<'a> FunctionConverter<'a> {
                 VariableType::Array(Box::new(self.derive_type(items.first()?)?), items.len())
             }
             E::ExplicitCast { to, .. } => to.clone(),
+            E::Eval { unit, .. } => unit_return_type(self.program, *unit).clone(),
         })
     }
 

@@ -1,0 +1,23 @@
+// Off-grid and negative positions: `probe` is never a kernel and is evaluated far outside any
+// buffer, including below zero.
+program {
+    host k: i32;
+    fn probe_main() -> f64 @hosts(k) {
+        return ((((ambient(pos3).x * 1000) + (ambient(pos3).y * host(k))) - ambient(pos3).z) as f64);
+    }
+    unit probe { main probe_main; hosts [k]; }
+    fn top_main() -> f64 {
+        let s: f64 = 0.0;
+        let i: i32 = 0;
+        repeat 5 {
+            s = (s + eval(probe, pos3((ambient(pos3).x - (i * 7)), -1000000, (i - 2))) @origin_scale(1, 1, 1) @position_scale(1, 1, 1));
+            i = (i + 1);
+        }
+        return s;
+    }
+    unit top { main top_main; }
+    entry top @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "a" origin(0, 0, 0) host(k = 3)
+@case "b" origin(1.5, -2, 4) host(k = -1)
+@expect "a" top = [-15070000.0, -15065000.0, -15060000.0]

@@ -166,6 +166,16 @@ pub enum LowerErrorKind {
     PreviousMapped,
     #[error("`{unit}` reads this `@previous` input with an explicit index")]
     PreviousIndexed { unit: String },
+    #[error("`eval` names a unit that isn't in the program")]
+    EvalUnknownUnit,
+    #[error("`eval` forms a cycle: {cycle}")]
+    EvalCycle { cycle: String },
+    #[error("`{unit}` is evaluated, but `{function}` reads input `{input}` without an index")]
+    EvalUnindexedRead { unit: String, function: String, input: String },
+    #[error("`{unit}` is evaluated, but it reads `@previous` input `{input}`")]
+    EvalPrevious { unit: String, input: String },
+    #[error("`eval` {scale} scale component {axis} is {value}, which isn't finite")]
+    EvalBadScale { scale: &'static str, axis: char, value: String },
 }
 
 /// Where an error is: an item and a path inside it.

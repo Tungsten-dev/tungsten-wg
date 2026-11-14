@@ -83,6 +83,10 @@ impl<'a> Deriver<'a> {
                 T::Array(Box::new(self.expr(f, items.first()?)?), items.len())
             }
             Expression::ExplicitCast { to, .. } => to.clone(),
+            Expression::Eval { unit, .. } => {
+                let ComputeUnit::DensityFunction { function, .. } = self.p.compute_units.try_get(*unit)?;
+                self.p.functions.try_get(*function)?.return_type.clone()
+            }
         })
     }
 }

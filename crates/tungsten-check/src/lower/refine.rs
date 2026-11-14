@@ -7,6 +7,7 @@ use tungsten_core::InputId;
 use tungsten_ir::{ComputeUnit, DensityInput, DensityMapping, Program as IrProgram, Ref, Refinement, Rerun};
 
 use super::Ctx;
+use super::unit_eval::reached_inputs;
 use super::mapping::{AXES, arr, listed_inputs, unit_reads, unit_return_type};
 use crate::error::{Item, LowerErrorKind};
 
@@ -98,7 +99,7 @@ fn walk(p: &IrProgram, index: usize, r: &Refinement) -> Option<Walk> {
     while i < running.len() {
         let run = running[i];
         i += 1;
-        for (_, d) in listed_inputs(p, run.unit) {
+        for (_, d) in reached_inputs(p, run.unit) {
             if d.previous {
                 continue;
             }
@@ -227,7 +228,7 @@ impl<'p, 'r> Ctx<'p, 'r> {
             .running
             .iter()
             .map(|run| {
-                listed_inputs(p, run.unit)
+                reached_inputs(p, run.unit)
                     .into_iter()
                     .filter(|(_, d)| !d.previous)
                     .filter_map(|(_, d)| index(&Inst::of_input(d)))

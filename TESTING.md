@@ -313,6 +313,8 @@ The full format (grammar, elaboration, printer, envelope) is specified in
 - Floats: shortest round-trip decimal with a mandatory `.` (`1.5f`, `-0.0`, `2.0`), `inf`,
   `-inf`, `inf_f32`, and NaNs with their full bits: `nan_f32(0x7fc00000)` /
   `nan(0x7ff8000000000000)`. Integers: `1b`, `1`, `1L`.
+- `eval(u, p)` prints both scale attributes, origin first (`specs/unit-eval.md` §3.4); the
+  parser takes them in either order.
 - Required only within the nesting limit (256 levels of expressions, blocks, types and values;
   SPEC §6.2). Deeper programs print, but the text doesn't load.
 

@@ -18,6 +18,7 @@ use crate::model::*;
 mod buffers;
 mod calls;
 mod dataflow;
+mod evals;
 mod graph;
 mod inline;
 pub(crate) mod ir_text;
@@ -413,8 +414,10 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// Scheduled, or evaluated by a scheduled unit.
     pub fn unit_reachable(&self, cu: Ref<ComputeUnit>) -> bool {
         !self.interface.dimensions_of(cu).is_empty()
+            || self.interface.eval_fns().iter().any(|e| e.key.unit == cu)
     }
 
     /// The units a function belongs to: its own unit, or every unit listing it as a helper.
@@ -612,6 +615,7 @@ pub(crate) fn expr_children(e: &Expression) -> Vec<&Expression> {
         Expression::ConstructExtern { args, .. } => args.iter().map(|(_, a)| a).collect(),
         Expression::ArrayLiteral(items) => items.iter().collect(),
         Expression::ExplicitCast { expr, .. } => vec![expr],
+        Expression::Eval { position, .. } => vec![position],
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)

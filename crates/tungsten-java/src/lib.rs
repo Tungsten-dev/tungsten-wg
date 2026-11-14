@@ -138,7 +138,7 @@ impl<'a> JavaCodegen<'a> {
         rules: &'a NamingRules,
         class_name: &str,
     ) -> Self {
-        Self {
+        let mut codegen = Self {
             source,
             naming,
             pools,
@@ -153,6 +153,24 @@ impl<'a> JavaCodegen<'a> {
             done_kernels: HashSet::new(),
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
+        };
+        codegen.generate_eval_fns();
+        codegen
+    }
+
+    /// One method per eval key, with what they call (`specs/unit-eval.md` §5.4).
+    fn generate_eval_fns(&mut self) {
+        for e in self.naming.eval_fns() {
+            let converted =
+                function::convert_eval(self.source, self.naming, self.pools, self.rules, &self.class_name, e);
+            self.functions.push(converted.method);
+            for h in converted.called {
+                self.generate_helper(h);
+            }
+            self.generate_lerps(converted.lerps);
+            for c in converted.constants {
+                self.generate_constant(c);
+            }
         }
     }
 

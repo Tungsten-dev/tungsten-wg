@@ -1285,6 +1285,20 @@ impl Parser {
                 self.expect(Tok::RParen)?;
                 ExprKind::Density { input, index }
             }
+            Tok::Kw(Kw::Eval) => {
+                self.bump();
+                self.expect(Tok::LParen)?;
+                let unit = self.label()?;
+                self.expect(Tok::Comma)?;
+                let position = Box::new(self.expr()?);
+                self.expect(Tok::RParen)?;
+                // The attributes bind to the call, tighter than any operator.
+                let scales = self.grid_attrs()?;
+                if let Some((_, span)) = scales.dims {
+                    return self.fail(span, "`eval` takes no `@dims`");
+                }
+                ExprKind::Eval { unit, position, scales }
+            }
             Tok::Kw(Kw::Ambient) => {
                 self.bump();
                 self.expect(Tok::LParen)?;

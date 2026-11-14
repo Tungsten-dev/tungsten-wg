@@ -66,6 +66,11 @@ pub enum InlineRejection {
     ReadInSeveralFunctions,
     /// The caller declares the input but never reads it.
     NotRead,
+    /// The caller is evaluated somewhere (`specs/unit-eval.md` §4.6), and inlining would add an
+    /// un-indexed read to its body, which an evaluated body can't have.
+    EvaluatedCaller,
+    /// An `eval` site names it. Inlining removes the unit, so the site would dangle.
+    Evaluated,
 }
 
 /// One merge done by the inliner. Refs are in the tags of the program that was mutated.
@@ -272,6 +277,41 @@ impl<'m> Planner<'m> {
         })
     }
 
+    /// Every unit an `eval` site in any function names. An eval site is not a use (it doesn't
+    /// count in `sole_user`), but it does pin the unit.
+    fn evaluated_units(&self) -> Vec<Ref<ComputeUnit>> {
+        let mut out = Vec::new();
+        for f in self.program.functions.values() {
+            visit_stmts(&f.body, &mut |e| {
+                if let Expression::Eval { unit, .. } = e
+                    && !out.contains(unit)
+                {
+                    out.push(*unit);
+                }
+            });
+        }
+        out
+    }
+
+    /// Whether `unit`'s main or one of its helpers reads a density input un-indexed.
+    fn has_unindexed_read(&self, unit: Ref<ComputeUnit>) -> bool {
+        let ComputeUnit::DensityFunction {
+            function,
+            helper_functions,
+            ..
+        } = &self.program.compute_units[unit];
+        std::iter::once(*function)
+            .chain(helper_functions.iter().copied())
+            .filter_map(|f| self.program.functions.try_get(f))
+            .any(|f| {
+                let mut found = false;
+                visit_stmts(&f.body, &mut |e| {
+                    found |= matches!(e, Expression::DensityVariable(_, None));
+                });
+                found
+            })
+    }
+
     /// Placeholder for criterion 1 of `plan` ("caller must not already be too complex").
     /// Skipped for now.
     fn caller_too_complex(&self, _caller: &ComputeUnit) -> bool {
@@ -296,6 +336,13 @@ impl<'m> Planner<'m> {
             return Err(InlineRejection::Refinement);
         }
         let caller = self.sole_user(callee)?;
+        let evaluated = self.evaluated_units();
+        if evaluated.contains(&callee) {
+            return Err(InlineRejection::Evaluated);
+        }
+        if evaluated.contains(&caller) && self.has_unindexed_read(callee) {
+            return Err(InlineRejection::EvaluatedCaller);
+        }
         let caller_unit = &self.program.compute_units[caller];
         let ComputeUnit::DensityFunction {
             function: caller_fn,
@@ -618,6 +665,7 @@ fn visit_expr(e: &Expression, f: &mut dyn FnMut(&Expression)) {
             }
         }
         Expression::ExplicitCast { expr, .. } => visit_expr(expr, f),
+        Expression::Eval { position, .. } => visit_expr(position, f),
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)
@@ -695,6 +743,7 @@ fn visit_expr_mut(e: &mut Expression, f: &mut dyn FnMut(&mut Expression)) {
             }
         }
         Expression::ExplicitCast { expr, .. } => visit_expr_mut(expr, f),
+        Expression::Eval { position, .. } => visit_expr_mut(position, f),
         Expression::Constant(_)
         | Expression::Variable(_)
         | Expression::Float(_)

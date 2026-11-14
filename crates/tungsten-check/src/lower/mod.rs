@@ -8,6 +8,7 @@ mod refine;
 mod step;
 mod stmt;
 pub(crate) mod types;
+mod unit_eval;
 
 use std::collections::HashMap;
 
@@ -45,6 +46,12 @@ pub(crate) struct Ctx<'p, 'r> {
     pub auto_reads: Vec<tungsten_core::HostId>,
     /// Set while lowering one refine call (`specs/refinement.md` §7.2).
     step: Option<step::StepCfg>,
+    /// The eval keys and their clones (`specs/unit-eval.md` §5.1).
+    eval: unit_eval::EvalPlan,
+    /// The key whose clone is being lowered.
+    eval_clone: Option<usize>,
+    /// Keys whose site errors were reported, so each is reported once.
+    eval_reported: std::collections::HashSet<tungsten_ir::EvalKey>,
 }
 
 struct CtxNames<'a> {

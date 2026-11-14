@@ -64,6 +64,32 @@ pub(crate) fn dependencies(ctx: &Ctx, entry: &EntryInfo, path: &str) -> String {
             g.edge(&e.producer, id, attrs);
         }
     }
+    // Evaluated units have no instance: one node per unit, and a dotted `eval` edge to each reader
+    // per eval key (`specs/unit-eval.md` §5.5).
+    let mut evaluated: Vec<&str> = vec![];
+    for id in &entry.instances {
+        let inst = ctx.instances[id.as_str()];
+        for e in &ctx.units[inst.unit.as_str()].evals {
+            let node = format!("eval_{}", e.unit);
+            if !evaluated.contains(&e.unit.as_str()) {
+                evaluated.push(&e.unit);
+                let mut attrs: Attrs =
+                    vec![("label", ctx.display(&e.unit).to_string()), ("shape", "ellipse".into()), ("style", "dotted".into())];
+                href(&mut attrs, ctx.unit_href(path, &e.unit));
+                g.node(&node, attrs);
+            }
+            let count = match e.evaluations {
+                Some(n) => format!("×{n}"),
+                None => "unbounded".to_string(),
+            };
+            let label = format!(
+                "eval {count}\n@origin_scale{} @position_scale{}",
+                crate::analyze::fmt_triple(e.origin_scale),
+                crate::analyze::fmt_triple(e.position_scale)
+            );
+            g.edge(&node, id, vec![("label", label), ("style", "dotted".into()), ("color", "purple".into())]);
+        }
+    }
     g.finish()
 }
 
@@ -575,6 +601,10 @@ impl DagRenderer<'_, '_> {
             NodeKind::Call { function } => {
                 href(&mut attrs, ctx.function_href(self.path, function));
                 (ctx.display(function).to_string(), "component")
+            }
+            NodeKind::Eval { unit, .. } => {
+                href(&mut attrs, ctx.unit_href(self.path, unit));
+                (format!("eval {}", ctx.display(unit)), "component")
             }
             NodeKind::Def { var, version } => (format!("{var}#{version}"), "note"),
             NodeKind::Return => ("return".into(), "doubleoctagon"),

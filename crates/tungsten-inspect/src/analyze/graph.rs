@@ -300,6 +300,7 @@ pub(crate) fn units(ctx: &Ctx, instances: &[InstanceInfo]) -> Vec<UnitInfo> {
                 helpers,
                 constants: consts,
                 inline_verdict: verdicts[&r].clone(),
+                evals: super::evals::unit_evals(ctx, r),
                 id,
             }
         })

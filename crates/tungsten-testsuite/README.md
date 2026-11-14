@@ -155,6 +155,11 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   only that entry's hosts (`specs/workers.md`). `tests/rust_workers.rs`, `tests/java_workers.rs` and `tests/cuda_workers.rs` cover what the
   corpus can't: threads (`std::thread` and an `ExecutorService`), the bounds modes, marched slices and worker
   isolation, and on Rust the `Send + Sync` assertion and records without `Default`.
+- **`eval`** (`specs/unit-eval.md` §7). `corpus/eval/` runs evaluated units on every backend (off-grid and
+  negative positions, nested scales with a shared helper, indexed reads, hosts, records, refine steps), and
+  `corpus/reject/eval_*` the rejections. `tests/eval_equivalence.rs` rewrites every eligible un-indexed Identity
+  read of the corpus into `eval(source, pos3)` with the input's scales and checks the interpreter gives the same
+  cells. `tests/eval_interface.rs` covers names, scheduling, the inliner and the Java size estimate.
 - **What is not covered yet.** The random program generator and decision traces (see below).
 
 ## Rules and contracts

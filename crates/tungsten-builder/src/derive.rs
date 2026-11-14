@@ -173,6 +173,14 @@ impl Walk<'_> {
                 }
             }
             Expression::ExplicitCast { expr, .. } => self.expr(expr),
+            // The evaluated unit's lists stay its own (unit-eval spec §3.2); only the position
+            // belongs to the reader.
+            Expression::Eval { unit, position, .. } => {
+                self.expr(position);
+                if !self.pb.program.compute_units.contains(*unit) {
+                    self.foreign("a unit");
+                }
+            }
         }
     }
 }
@@ -266,6 +274,7 @@ pub(crate) fn each_child(e: &Expression, f: &mut dyn FnMut(&Expression)) {
             }
         }
         Expression::ExplicitCast { expr, .. } => each_child(expr, f),
+        Expression::Eval { position, .. } => each_child(position, f),
         _ => {}
     }
 }

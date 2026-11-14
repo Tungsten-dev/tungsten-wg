@@ -96,6 +96,14 @@ fn translate(ctx: &Ctx, v: InlineVerdict) -> InlineVerdictInfo {
                 Verdict::NotRead,
                 "blocked: the caller declares the input but never reads it".to_string(),
             ),
+            InlineRejection::EvaluatedCaller => (
+                Verdict::EvaluatedCaller,
+                "blocked: the caller is evaluated, and inlining would add an un-indexed read".to_string(),
+            ),
+            InlineRejection::Evaluated => (
+                Verdict::Evaluated,
+                "blocked: an `eval` names it".to_string(),
+            ),
         },
     };
     InlineVerdictInfo {

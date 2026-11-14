@@ -232,10 +232,10 @@ fn walk_expr<'a>(e: &'a Expr, refs: &mut Refs<'a>) -> R<()> {
             ExprKind::Call { callee, .. } => refs.calls.push(callee),
             ExprKind::Const(l) => refs.consts.push(l),
             ExprKind::Name(l) if !refs.vars.contains(&l.key()) => refs.consts.push(l),
-            ExprKind::Host(_) | ExprKind::Auto(_) | ExprKind::Density { .. } => {
+            ExprKind::Host(_) | ExprKind::Auto(_) | ExprKind::Density { .. } | ExprKind::Eval { .. } => {
                 return Err(Diagnostic::elab(
                     e.span,
-                    "library code can't use host inputs, autoconsts or density inputs",
+                    "library code can't use host inputs, autoconsts, density inputs or `eval`",
                 ));
             }
             _ => {}

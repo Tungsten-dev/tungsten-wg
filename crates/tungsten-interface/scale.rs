@@ -111,13 +111,6 @@ impl Mul for Scale {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        Self {
-            x: self.x * rhs.x,
-            y: self.y * rhs.y,
-            z: self.z * rhs.z,
-            rx: self.rx * rhs.rx,
-            ry: self.ry * rhs.ry,
-            rz: self.rz * rhs.rz,
-        }
+        Scale::new(self.rx * rhs.rx, self.ry * rhs.ry, self.rz * rhs.rz)
     }
 }

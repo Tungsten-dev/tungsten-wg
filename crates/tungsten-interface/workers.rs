@@ -153,7 +153,7 @@ struct Uses {
 /// callees, which only the checker rejects.
 fn transitive_uses(program: &Program) -> HashMap<Ref<Function>, Uses> {
     let direct: HashMap<Ref<Function>, (Uses, HashSet<Ref<Function>>)> =
-        program.functions.iter().map(|(r, f)| (r, direct_uses(f))).collect();
+        program.functions.iter().map(|(r, f)| (r, direct_uses(program, f))).collect();
     direct
         .keys()
         .map(|&start| {
@@ -172,8 +172,10 @@ fn transitive_uses(program: &Program) -> HashMap<Ref<Function>, Uses> {
         .collect()
 }
 
-/// Uses an explicit stack: expressions can nest deeper than the thread's stack allows.
-fn direct_uses(f: &Function) -> (Uses, HashSet<Ref<Function>>) {
+/// Uses an explicit stack: expressions can nest deeper than the thread's stack allows. An `eval`
+/// counts as a call of the evaluated unit's main: its generated function takes what that body
+/// reads (`specs/unit-eval.md` §5.3).
+fn direct_uses(program: &Program, f: &Function) -> (Uses, HashSet<Ref<Function>>) {
     let mut uses = Uses::default();
     let mut calls = HashSet::new();
     let mut stmts: Vec<&Statement> = f.body.iter().collect();
@@ -218,6 +220,12 @@ fn direct_uses(f: &Function) -> (Uses, HashSet<Ref<Function>>) {
             Expression::UnaryOp { operand: x, .. }
             | Expression::Field { base: x, .. }
             | Expression::ExplicitCast { expr: x, .. } => exprs.push(x),
+            Expression::Eval { unit, position, .. } => {
+                if let Some(main) = crate::eval::unit_main(program, *unit) {
+                    calls.insert(main);
+                }
+                exprs.push(position);
+            }
             Expression::Constant(_)
             | Expression::Variable(_)
             | Expression::Float(_)

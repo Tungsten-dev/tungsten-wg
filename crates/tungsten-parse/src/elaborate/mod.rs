@@ -24,6 +24,9 @@ use types::var_type;
 
 pub(crate) type R<T> = Result<T, Diagnostic>;
 
+/// A scale, as the IR holds it.
+type Triple = (f64, f64, f64);
+
 /// Dims, scaled origin and scaled position, as `EntryPoint` and `DensityInput` hold them.
 pub(crate) type Grid = ((i32, i32, i32), (f64, f64, f64), (f64, f64, f64));
 
@@ -618,6 +621,18 @@ impl<'a> Ctx<'a> {
         ))
     }
 
+    /// The two scales of an `eval`, both required.
+    pub(crate) fn eval_scales(&self, g: &ast::GridAttrs) -> R<(Triple, Triple)> {
+        let triple_f = |a: &Option<([ast::Lit; 3], Span)>, name: &str| -> R<(f64, f64, f64)> {
+            let Some((lits, _)) = a else {
+                return err(g.span, format!("`eval` needs `@{name}(…)`"));
+            };
+            let [x, y, z] = lits.each_ref().map(envelope::attr_f64);
+            Ok((x?, y?, z?))
+        };
+        Ok((triple_f(&g.origin_scale, "origin_scale")?, triple_f(&g.position_scale, "position_scale")?))
+    }
+
     fn declare_input(&mut self, input: &ast::InputItem) -> R<()> {
         let target = self.lookup_unit(&input.target)?;
         let (dimensions, scaled_origin, scaled_position) = self.grid(&input.grid)?;
@@ -741,6 +756,7 @@ impl<'a> Ctx<'a> {
             Host(_)
             | Auto(_)
             | Density { .. }
+            | Eval { .. }
             | Ambient(_)
             | Call { .. }
             | ExtCall { .. }

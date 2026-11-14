@@ -1,0 +1,13 @@
+// The same, through a helper of the evaluated unit.
+program {
+    fn base_main() -> f64 { return 1.0; }
+    unit base { main base_main; }
+    input b = base @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    fn read() -> f64 { return density(b); }
+    fn probe_main() -> f64 { return (read() * 2.0); }
+    unit probe { main probe_main; helpers [read]; inputs [b]; }
+    fn top_main() -> f64 { return eval(probe, ambient(pos3)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1); }
+    unit top { main top_main; }
+    entry top @dims(1, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@expect reject(EvalUnindexedRead)

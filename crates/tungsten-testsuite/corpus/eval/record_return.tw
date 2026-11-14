@@ -1,0 +1,15 @@
+// An evaluated unit that returns a record.
+program {
+    fn pair_main() -> extern Pair {
+        return new Pair { a: ((ambient(pos3).x as f64) * 0.5), b: (ambient(pos3).y - 3) };
+    }
+    unit pair { main pair_main; }
+    fn top_main() -> extern Pair {
+        let p: extern Pair = eval(pair, pos3((ambient(pos3).x + 1), -2, 0)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+        return new Pair { a: (p.a + 1.0), b: (p.b * 2) };
+    }
+    unit top { main top_main; }
+    entry top @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0)
+@expect "c" top = [new Pair { a: 1.5, b: -10 }, new Pair { a: 2.0, b: -10 }]

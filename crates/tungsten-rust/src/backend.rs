@@ -85,6 +85,7 @@ impl Backend for RustBackend {
         interface: &Interface,
     ) -> Result<RustOutput, BackendError> {
         crate::mapping::check_emittable(program, interface)?;
+        interface.check_evals(program)?;
         check_slots(program, interface)?;
         let pools = Pools::new(program, interface, self.config.buffer_bounds);
         // The arena only lives for this call; the output is stored as finished strings.

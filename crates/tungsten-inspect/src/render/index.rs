@@ -262,5 +262,7 @@ fn verdict_kind(v: &Verdict) -> &'static str {
         Verdict::Refinement => "refinement",
         Verdict::ReadInSeveralFunctions => "read in several functions",
         Verdict::NotRead => "not read",
+        Verdict::EvaluatedCaller => "evaluated caller",
+        Verdict::Evaluated => "evaluated",
     }
 }

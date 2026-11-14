@@ -1,0 +1,16 @@
+// A host read only inside an evaluated body still reaches the entry's `HostConsts`.
+program {
+    host scale: f64;
+    host shift: i32;
+    fn probe_main() -> f64 @hosts(scale, shift) {
+        return ((((ambient(pos3).x + host(shift)) as f64)) * host(scale));
+    }
+    unit probe { main probe_main; hosts [scale, shift]; }
+    fn top_main() -> f64 {
+        return eval(probe, ambient(pos3)) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+    }
+    unit top { main top_main; }
+    entry top @dims(3, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(0, 0, 0) host(scale = 0.5, shift = 4)
+@expect "c" top = [2.0, 2.5, 3.0]

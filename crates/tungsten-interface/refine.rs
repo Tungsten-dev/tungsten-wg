@@ -27,11 +27,14 @@ pub(crate) struct Walk {
     pub with_targets: Vec<Instance>,
 }
 
-/// The listed inputs of `cu` as instances, `@previous` ones left out: they add no dependency.
+/// The inputs `cu` reaches as instances: the ones it lists, then the ones read inside the bodies
+/// it evaluates (`specs/unit-eval.md` §5.3). `@previous` ones are left out: they add no
+/// dependency.
 pub(crate) fn normal_inputs(program: &Program, cu: Ref<ComputeUnit>) -> Vec<Instance> {
     let ComputeUnit::DensityFunction { density_inputs, .. } = &program.compute_units[cu];
     let mut out: Vec<Instance> = vec![];
-    for &r in density_inputs {
+    let evaluated = crate::eval::eval_inputs(program, cu);
+    for &r in density_inputs.iter().chain(&evaluated) {
         let d = &program.density_inputs[r];
         if d.previous {
             continue;

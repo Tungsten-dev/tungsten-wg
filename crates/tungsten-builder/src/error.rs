@@ -122,6 +122,8 @@ pub enum BuildErrorKind {
     },
     #[error("a unit's main can't have parameters (it has {params})")]
     UnitHasParams { params: usize },
+    #[error("eval position: expected `pos3`, found `{found}`")]
+    EvalPosition { found: String },
 }
 
 fn field_message(field: &str, base: &str, problem: &FieldProblem) -> String {

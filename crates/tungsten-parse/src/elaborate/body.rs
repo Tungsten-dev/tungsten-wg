@@ -223,6 +223,17 @@ impl<'a> Ctx<'a> {
                 let ret = self.density_return_type(d);
                 (Expression::DensityVariable(d, index), Some(ret))
             }
+            ExprKind::Eval { unit, position, scales } => {
+                if sc.f.is_none() {
+                    return err(e.span, "not allowed in a constant expression");
+                }
+                let u = self.lookup_unit(unit)?;
+                let (origin_scale, position_scale) = self.eval_scales(scales)?;
+                let position = Box::new(self.child(sc, position, path, ExprStep::EvalPosition)?.0);
+                let ComputeUnit::DensityFunction { function, .. } = &self.prog.compute_units[u];
+                let ret = self.prog.functions[*function].return_type.clone();
+                (Expression::Eval { unit: u, position, origin_scale, position_scale }, Some(ret))
+            }
             ExprKind::Call { callee, args } => {
                 let function = self.lookup_fn(callee)?;
                 let (parameters, _) = self.children(sc, args, path, ExprStep::Arg)?;

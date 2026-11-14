@@ -250,6 +250,10 @@ fn walk_expr(e: &mut Expression, v: &mut impl RefVisitor) {
         }
         Expression::ArrayLiteral(items) => items.iter_mut().for_each(|i| walk_expr(i, v)),
         Expression::ExplicitCast { expr, .. } => walk_expr(expr, v),
+        Expression::Eval { unit, position, .. } => {
+            v.compute_unit(unit);
+            walk_expr(position, v);
+        }
         Expression::Float(_)
         | Expression::Double(_)
         | Expression::Byte(_)

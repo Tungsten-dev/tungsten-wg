@@ -402,6 +402,12 @@ pub enum ExprKind {
         index: Option<Box<Expr>>,
     },
     Ambient(AmbientKind),
+    /// `eval(unit, p) @origin_scale(..) @position_scale(..)`. `scales` has no `@dims`.
+    Eval {
+        unit: Label,
+        position: Box<Expr>,
+        scales: GridAttrs,
+    },
     Call {
         callee: Label,
         args: Vec<Expr>,
@@ -448,6 +454,7 @@ impl ExprKind {
             | ExprKind::Auto(_)
             | ExprKind::Ambient(_) => {}
             ExprKind::Density { index, .. } => index.iter().for_each(|e| f(e)),
+            ExprKind::Eval { position, .. } => f(position),
             ExprKind::Call { args, .. }
             | ExprKind::ExtCall { args, .. }
             | ExprKind::Construct { args, .. }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tungsten_core::{ConstId, ExternId, FnId, HostId, InputId, LocalId, RecordId, TableId, UnitId};
 use tungsten_ir::{
-    AutoConst, AutoParam, ComputeUnit, Constant, DensityInput, Function, HostInput, Ref, Var, VariableType,
+    AutoConst, AutoParam, ComputeUnit, Constant, DensityInput, EvalKey, Function, HostInput, Ref, Var, VariableType,
 };
 
 /// A core id: a dense index.
@@ -29,7 +29,8 @@ core_ids!(UnitId, FnId, ConstId, HostId, TableId, InputId, ExternId, RecordId, L
 
 /// Core id → (`Ref`, display name), and `Ref` → core id.
 pub struct IdMap<T, I> {
-    forward: Vec<(Ref<T>, String)>,
+    /// `None` for an id with no `Ref` behind it (the position parameter of an eval clone).
+    forward: Vec<(Option<Ref<T>>, String)>,
     reverse: HashMap<Ref<T>, I>,
 }
 
@@ -69,13 +70,20 @@ impl<T, I: CoreId> IdMap<T, I> {
     /// Appends `r` with the next id. Refs are unique per map, so a repeat keeps its first id.
     pub(crate) fn push(&mut self, r: Ref<T>, name: String) -> I {
         let id = I::from_index(self.forward.len());
-        self.forward.push((r, name));
+        self.forward.push((Some(r), name));
         self.reverse.entry(r).or_insert(id);
         id
     }
 
+    /// Appends an id that has a name but no `Ref`.
+    pub(crate) fn push_hole(&mut self, name: String) -> I {
+        let id = I::from_index(self.forward.len());
+        self.forward.push((None, name));
+        id
+    }
+
     pub fn get(&self, id: I) -> Option<Ref<T>> {
-        self.forward.get(id.index()).map(|(r, _)| *r)
+        self.forward.get(id.index()).and_then(|(r, _)| *r)
     }
 
     pub fn name(&self, id: I) -> Option<&str> {
@@ -94,12 +102,12 @@ impl<T, I: CoreId> IdMap<T, I> {
         self.forward.is_empty()
     }
 
-    /// `(id, ref, name)` in id order.
+    /// `(id, ref, name)` in id order, skipping ids without a `Ref`.
     pub fn iter(&self) -> impl Iterator<Item = (I, Ref<T>, &str)> {
         self.forward
             .iter()
             .enumerate()
-            .map(|(i, (r, n))| (I::from_index(i), *r, n.as_str()))
+            .filter_map(|(i, (r, n))| Some((I::from_index(i), (*r)?, n.as_str())))
     }
 }
 
@@ -200,6 +208,20 @@ pub struct LowerMap {
     pub externs: Vec<String>,
     /// By `RecordId`.
     pub records: Vec<RecordNames>,
+    /// The functions `eval` desugared into (`specs/unit-eval.md` §5.1), in `FnId` order. They
+    /// follow the program's own functions, and `functions` maps each back to its source.
+    pub eval_fns: Vec<EvalFnInfo>,
+}
+
+/// One function cloned for an eval key. Its first parameter is the position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalFnInfo {
+    pub id: FnId,
+    /// The function it was cloned from.
+    pub source: Ref<Function>,
+    pub key: EvalKey,
+    /// Whether it is the clone of the evaluated unit's main function.
+    pub main: bool,
 }
 
 /// A buffer: a unit at dims and scales, with the scales as bits. Refine steps keep one store

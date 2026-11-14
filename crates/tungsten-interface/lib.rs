@@ -13,12 +13,15 @@ use tungsten_ir::model::{
 };
 
 pub mod compiler;
+mod eval;
 pub mod naming;
 mod refine;
 pub mod scale;
 mod workers;
 
 pub use compiler::{CompileError, Compiler, Inline, Passes};
+pub use eval::EvalFn;
+pub use tungsten_ir::model::EvalKey;
 pub use refine::RefineRun;
 pub use scale::Scale;
 pub use workers::{Pool, Slot, WorkerLayout};
@@ -216,6 +219,9 @@ pub struct Interface {
     with_dims: Vec<(Ref<ComputeUnit>, (i32, i32, i32))>,
     walks: Vec<refine::Walk>,
     workers: workers::Workers,
+    /// In discovery order (`specs/unit-eval.md` §5.2).
+    eval_fns: Vec<EvalFn>,
+    eval_index: HashMap<EvalKey, usize>,
 }
 
 impl Interface {
@@ -316,6 +322,28 @@ impl Interface {
             helpers.insert(r, unique(&mut used, base));
         }
 
+        // Eval functions: one per key the scheduled and refined units reach, in discovery order.
+        let reached = instances.iter().map(|i| i.cu).chain(with_dims.iter().map(|(cu, _)| *cu));
+        let mut eval_fns: Vec<EvalFn> = vec![];
+        for (k, key) in eval::reached_keys(program, reached).into_iter().enumerate() {
+            let unit = unit_base_name(rules, program, key.unit);
+            let base = (rules.sanitize)(&format!("eval_{unit}_{}", eval::scale_suffix(&key)));
+            let base = if used.contains(&base) { (rules.sanitize)(&format!("eval_{unit}_{k}")) } else { base };
+            let name = unique(&mut used, base);
+            let main = eval::unit_main(program, key.unit).expect("reached keys resolve");
+            let helpers = eval::call_reach(program, main)
+                .into_iter()
+                .skip(1)
+                .map(|f| {
+                    let h = program.functions[f].canonical_name.as_deref().map(rules.sanitize);
+                    let h = h.unwrap_or_else(|| "function".into());
+                    (f, unique(&mut used, format!("{name}_{h}")))
+                })
+                .collect();
+            eval_fns.push(EvalFn { key, name, helpers });
+        }
+        let eval_index = eval_fns.iter().enumerate().map(|(i, e)| (e.key, i)).collect();
+
         let mut constants = HashMap::new();
         for (r, c) in program.constants.iter() {
             constants.insert(r, unique(&mut used, (rules.sanitize)(&c.name)));
@@ -391,6 +419,8 @@ impl Interface {
             with_dims,
             walks,
             workers: workers::Workers::default(),
+            eval_fns,
+            eval_index,
         };
         interface.workers = workers::Workers::build(program, &interface);
         interface.lerp_helpers = collect_lerp_helpers(program, &interface, rules, &mut used);
@@ -563,6 +593,40 @@ impl Interface {
     /// Parameter name of an auto param in the creation functions.
     pub fn auto_param(&self, p: Ref<AutoParam>) -> &str {
         &self.auto_params[&p]
+    }
+
+    /// The generated function of `eval(unit, ·)` with these scales. Panics for a key no scheduled
+    /// unit reaches.
+    pub fn eval_fn(
+        &self,
+        unit: Ref<ComputeUnit>,
+        origin_scale: (f64, f64, f64),
+        position_scale: (f64, f64, f64),
+    ) -> &str {
+        let key = EvalKey::new(unit, origin_scale, position_scale);
+        &self.eval_fns[self.eval_index[&key]].name
+    }
+
+    /// Every eval function, in discovery order: the scheduled units in `instances` order, then the
+    /// refined units, each walked from its main, then nested evals.
+    pub fn eval_fns(&self) -> &[EvalFn] {
+        &self.eval_fns
+    }
+
+    /// `BackendError::Codegen` for an eval function no backend can emit: an eval cycle, or an
+    /// un-indexed read in an evaluated body. For the unchecked path; validation rejects both.
+    pub fn check_evals(&self, program: &Program) -> Result<(), BackendError> {
+        eval::check_emittable(program, &self.eval_fns).map_err(BackendError::Codegen)
+    }
+
+    /// The clone of helper `f` for `key`: helpers read ambients, so each key has its own.
+    pub fn eval_helper(&self, key: &EvalKey, f: Ref<Function>) -> &str {
+        let e = &self.eval_fns[self.eval_index[key]];
+        e.helpers
+            .iter()
+            .find(|(h, _)| *h == f)
+            .map(|(_, n)| n.as_str())
+            .unwrap_or_else(|| panic!("{f:?} isn't reached from the evaluated body"))
     }
 
     /// Field of `HostConsts` for a static host input.

@@ -74,8 +74,11 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 function,
                 parameters,
             } => {
-                let func = self.fn_ref(*function);
-                let args = self.list(parameters, Step::Arg);
+                let (func, mut args) = match self.eval_call(*function) {
+                    Some(clone) => (clone, self.eval_position().into_iter().collect()),
+                    None => (self.fn_ref(*function), vec![]),
+                };
+                args.extend(self.list(parameters, Step::Arg));
                 Expr::Call { func, args }
             }
             Expression::ExternCall {
@@ -127,7 +130,16 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 None => Expr::Table(self.table_ref(*r)),
             },
             Expression::HostInput(r) => Expr::Host(self.host_ref(*r)),
-            Expression::Ambient(AmbientKind::Pos3) => self.marched_pos3(),
+            Expression::Ambient(AmbientKind::Pos3) => {
+                self.eval_position().unwrap_or_else(|| self.marched_pos3())
+            }
+            Expression::Ambient(k @ (AmbientKind::OriginScale | AmbientKind::PositionScale))
+                if let Some((o, s)) = self.eval_scales() =>
+            {
+                let (x, y, z) = if *k == AmbientKind::OriginScale { o } else { s };
+                let lit = |v: f64| Box::new(Expr::Lit(Lit::F64(v.to_bits())));
+                Expr::MakeVec3 { x: lit(x), y: lit(y), z: lit(z) }
+            }
             Expression::Ambient(k) => Expr::Ambient(match k {
                 AmbientKind::Origin => Ambient::Origin,
                 AmbientKind::Pos3 => Ambient::Pos3,
@@ -174,6 +186,12 @@ impl<'p, 'r> Ctx<'p, 'r> {
                 let operand = self.boxed(Step::Operand, expr);
                 Expr::Cast { to, operand }
             }
+            Expression::Eval {
+                unit,
+                position,
+                origin_scale,
+                position_scale,
+            } => self.eval_expr(*unit, position, *origin_scale, *position_scale),
         }
     }
 

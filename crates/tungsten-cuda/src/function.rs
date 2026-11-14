@@ -7,7 +7,7 @@ wrapper, so a future fused kernel can call several bodies unchanged.
 
 use std::collections::{HashMap, HashSet};
 
-use tungsten_interface::{Instance, Interface, LerpHelper, RefineRun};
+use tungsten_interface::{EvalFn, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{Arena, ComputeUnit, Constant, Function, Program, Ref, VariableType};
 use tungsten_rust::expression::const_refs;
 use tungsten_rust::types::derive_const_type;
@@ -96,6 +96,75 @@ pub fn convert_helper<'a>(
     body.extend(conv.convert_block(&func.body));
     let function = cuda::Function {
         doc: func.canonical_name.clone(),
+        qualifiers: function_qualifiers(config),
+        return_type: device_type(&func.return_type),
+        attributes: String::new(),
+        name,
+        params,
+        body: Some(body),
+    };
+    finish(conv, function)
+}
+
+/// The `__device__` function of one eval key (`specs/unit-eval.md` §5.4):
+/// `T <eval>(int3 pos, double3 origin, const Ctx& outer, off_..)`. It rebuilds the uniform `ctx`
+/// (the key's scales as literals, the outer buffers and constants) and `p` (at `pos`), then runs
+/// the evaluated main's body unchanged. Helpers take both as parameters, so the ones it calls see
+/// the evaluated ambients. Not recursive: validation rejects eval cycles.
+pub fn convert_eval<'a>(
+    program: &'a Program,
+    naming: &'a Interface,
+    config: &'a CudaConfig,
+    used_names: &HashSet<String>,
+    eval: &EvalFn,
+) -> Converted {
+    let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[eval.key.unit];
+    let func = &program.functions[*function];
+    let name = eval.name.clone();
+    let mut conv = FunctionConverter::new(program, naming, config, func, &name, used_names.clone()).with_offsets(*function);
+    let pos = conv.fresh_name("pos");
+    let origin = conv.fresh_name("origin");
+    let outer = conv.fresh_name("outer");
+    let outer_field = |f: &str| C::field(C::name(&outer), f);
+    let ctx = C::BraceInit {
+        t: cuda::Type::named(CTX_STRUCT),
+        items: vec![
+            C::BraceInit {
+                t: cuda::Type::named(CONFIG_TYPE),
+                items: vec![
+                    C::name(&origin),
+                    double3_literal(eval.key.origin_scale()),
+                    double3_literal(eval.key.position_scale()),
+                    int3(C::IntLit(0), C::IntLit(0), C::IntLit(0)),
+                ],
+            },
+            outer_field("buffers"),
+            outer_field("auto_constants"),
+            outer_field("host_consts"),
+        ],
+    };
+    let mut body = vec![
+        S::Declare { t: cuda::Type::named(CTX_STRUCT), name: PARAM_CTX.into(), init: Some(ctx), is_const: true },
+        S::Declare {
+            t: cuda::Type::named(POSITION_ITERATOR_TYPE),
+            name: PARAM_POS.into(),
+            init: Some(C::BraceInit {
+                t: cuda::Type::named(POSITION_ITERATOR_TYPE),
+                items: vec![C::name(&pos), C::IntLit(0)],
+            }),
+            is_const: true,
+        },
+    ];
+    body.extend(declare_locals(&mut conv, func));
+    body.extend(conv.convert_block(&func.body));
+    let mut params = vec![
+        (cuda::Type::named("int3"), pos),
+        (cuda::Type::named("double3"), origin),
+        (cuda::Type::ConstRef(Box::new(cuda::Type::named(CTX_STRUCT))), outer),
+    ];
+    params.extend(offset_parameters(naming, *function));
+    let function = cuda::Function {
+        doc: Some(format!("eval of {}", func.canonical_name.as_deref().unwrap_or("a unit"))),
         qualifiers: function_qualifiers(config),
         return_type: device_type(&func.return_type),
         attributes: String::new(),

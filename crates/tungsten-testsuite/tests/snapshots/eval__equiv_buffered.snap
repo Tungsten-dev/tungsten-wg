@@ -1,0 +1,740 @@
+---
+source: crates/tungsten-testsuite/tests/lowering.rs
+expression: lowered.program
+---
+Program {
+    units: [
+        Unit {
+            main: FnId(
+                0,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                1,
+            ),
+            inputs: [
+                InputId(
+                    0,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                2,
+            ),
+            inputs: [],
+            tables: [],
+            hosts: [],
+            helpers: [
+                FnId(
+                    4,
+                ),
+            ],
+            consts: [],
+        },
+        Unit {
+            main: FnId(
+                3,
+            ),
+            inputs: [
+                InputId(
+                    0,
+                ),
+            ],
+            tables: [],
+            hosts: [],
+            helpers: [
+                FnId(
+                    4,
+                ),
+            ],
+            consts: [],
+        },
+    ],
+    functions: [
+        Function {
+            params: 0,
+            locals: [
+                Vec3,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        0,
+                    ),
+                    value: Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: MakeVec3 {
+                                x: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            X,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                                y: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            Y,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                                z: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Ambient(
+                                            Pos3,
+                                        ),
+                                        sel: Pos3(
+                                            Z,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                            },
+                            right: Ambient(
+                                PositionScale,
+                            ),
+                        },
+                        right: Binary {
+                            op: Multiply,
+                            left: Ambient(
+                                Origin,
+                            ),
+                            right: Ambient(
+                                OriginScale,
+                            ),
+                        },
+                    },
+                },
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: Field {
+                                base: Local(
+                                    LocalId(
+                                        0,
+                                    ),
+                                ),
+                                sel: Vec3(
+                                    X,
+                                ),
+                                ty: F64,
+                            },
+                            right: Lit(
+                                F64(
+                                    4599075939470750515,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Subtract,
+                            left: Binary {
+                                op: Multiply,
+                                left: Field {
+                                    base: Local(
+                                        LocalId(
+                                            0,
+                                        ),
+                                    ),
+                                    sel: Vec3(
+                                        Y,
+                                    ),
+                                    ty: F64,
+                                },
+                                right: Lit(
+                                    F64(
+                                        4610334938539176755,
+                                    ),
+                                ),
+                            },
+                            right: Binary {
+                                op: Divide,
+                                left: Field {
+                                    base: Local(
+                                        LocalId(
+                                            0,
+                                        ),
+                                    ),
+                                    sel: Vec3(
+                                        Z,
+                                    ),
+                                    ty: F64,
+                                },
+                                right: Lit(
+                                    F64(
+                                        4613937818241073152,
+                                    ),
+                                ),
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: F64,
+            hosts: [],
+            body: [
+                Return(
+                    Density {
+                        input: InputId(
+                            0,
+                        ),
+                        index: None,
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: F64,
+            hosts: [],
+            body: [
+                Return(
+                    Call {
+                        func: FnId(
+                            4,
+                        ),
+                        args: [
+                            Ambient(
+                                Pos3,
+                            ),
+                        ],
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 0,
+            locals: [],
+            ret: Bool,
+            hosts: [],
+            body: [
+                Return(
+                    Binary {
+                        op: Equal,
+                        left: Density {
+                            input: InputId(
+                                0,
+                            ),
+                            index: None,
+                        },
+                        right: Call {
+                            func: FnId(
+                                4,
+                            ),
+                            args: [
+                                Ambient(
+                                    Pos3,
+                                ),
+                            ],
+                        },
+                    },
+                ),
+            ],
+        },
+        Function {
+            params: 1,
+            locals: [
+                Pos3,
+                Vec3,
+            ],
+            ret: F64,
+            hosts: [],
+            body: [
+                Assign {
+                    target: LocalId(
+                        1,
+                    ),
+                    value: Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: MakeVec3 {
+                                x: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        sel: Pos3(
+                                            X,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                                y: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        sel: Pos3(
+                                            Y,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                                z: Cast {
+                                    to: F64,
+                                    operand: Field {
+                                        base: Local(
+                                            LocalId(
+                                                0,
+                                            ),
+                                        ),
+                                        sel: Pos3(
+                                            Z,
+                                        ),
+                                        ty: I32,
+                                    },
+                                },
+                            },
+                            right: MakeVec3 {
+                                x: Lit(
+                                    F64(
+                                        4602678819172646912,
+                                    ),
+                                ),
+                                y: Lit(
+                                    F64(
+                                        4613937818241073152,
+                                    ),
+                                ),
+                                z: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                            },
+                        },
+                        right: Binary {
+                            op: Multiply,
+                            left: Ambient(
+                                Origin,
+                            ),
+                            right: MakeVec3 {
+                                x: Lit(
+                                    F64(
+                                        4598175219545276416,
+                                    ),
+                                ),
+                                y: Lit(
+                                    F64(
+                                        4607182418800017408,
+                                    ),
+                                ),
+                                z: Lit(
+                                    F64(
+                                        4611686018427387904,
+                                    ),
+                                ),
+                            },
+                        },
+                    },
+                },
+                Return(
+                    Binary {
+                        op: Add,
+                        left: Binary {
+                            op: Multiply,
+                            left: Field {
+                                base: Local(
+                                    LocalId(
+                                        1,
+                                    ),
+                                ),
+                                sel: Vec3(
+                                    X,
+                                ),
+                                ty: F64,
+                            },
+                            right: Lit(
+                                F64(
+                                    4599075939470750515,
+                                ),
+                            ),
+                        },
+                        right: Binary {
+                            op: Subtract,
+                            left: Binary {
+                                op: Multiply,
+                                left: Field {
+                                    base: Local(
+                                        LocalId(
+                                            1,
+                                        ),
+                                    ),
+                                    sel: Vec3(
+                                        Y,
+                                    ),
+                                    ty: F64,
+                                },
+                                right: Lit(
+                                    F64(
+                                        4610334938539176755,
+                                    ),
+                                ),
+                            },
+                            right: Binary {
+                                op: Divide,
+                                left: Field {
+                                    base: Local(
+                                        LocalId(
+                                            1,
+                                        ),
+                                    ),
+                                    sel: Vec3(
+                                        Z,
+                                    ),
+                                    ty: F64,
+                                },
+                                right: Lit(
+                                    F64(
+                                        4613937818241073152,
+                                    ),
+                                ),
+                            },
+                        },
+                    },
+                ),
+            ],
+        },
+    ],
+    consts: [],
+    hosts: [],
+    tables: [],
+    inputs: [
+        InputDecl {
+            source: UnitId(
+                0,
+            ),
+            dims: Dims {
+                x: 3,
+                y: 2,
+                z: 2,
+            },
+            origin_scale: F64x3 {
+                x: 4598175219545276416,
+                y: 4607182418800017408,
+                z: 4611686018427387904,
+            },
+            position_scale: F64x3 {
+                x: 4602678819172646912,
+                y: 4613937818241073152,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    entries: [
+        Entry {
+            unit: UnitId(
+                1,
+            ),
+            dims: Dims {
+                x: 3,
+                y: 2,
+                z: 2,
+            },
+            origin_scale: F64x3 {
+                x: 4598175219545276416,
+                y: 4607182418800017408,
+                z: 4611686018427387904,
+            },
+            position_scale: F64x3 {
+                x: 4602678819172646912,
+                y: 4613937818241073152,
+                z: 4607182418800017408,
+            },
+        },
+        Entry {
+            unit: UnitId(
+                2,
+            ),
+            dims: Dims {
+                x: 3,
+                y: 2,
+                z: 2,
+            },
+            origin_scale: F64x3 {
+                x: 4598175219545276416,
+                y: 4607182418800017408,
+                z: 4611686018427387904,
+            },
+            position_scale: F64x3 {
+                x: 4602678819172646912,
+                y: 4613937818241073152,
+                z: 4607182418800017408,
+            },
+        },
+        Entry {
+            unit: UnitId(
+                3,
+            ),
+            dims: Dims {
+                x: 3,
+                y: 2,
+                z: 2,
+            },
+            origin_scale: F64x3 {
+                x: 4598175219545276416,
+                y: 4607182418800017408,
+                z: 4611686018427387904,
+            },
+            position_scale: F64x3 {
+                x: 4602678819172646912,
+                y: 4613937818241073152,
+                z: 4607182418800017408,
+            },
+        },
+    ],
+    externs: [
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+                F64,
+                F64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+                F32,
+                F32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                F64,
+            ],
+            ret: I64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: F32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I64,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        0,
+                    ),
+                ),
+                I32,
+            ],
+            ret: I32,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                Handle(
+                    HandleTypeId(
+                        1,
+                    ),
+                ),
+                Vec3,
+            ],
+            ret: F64,
+            domain_error: false,
+        },
+        ExternDecl {
+            params: [
+                I32,
+            ],
+            ret: I32,
+            domain_error: true,
+        },
+    ],
+    records: [
+        RecordDecl {
+            fields: [
+                F64,
+                I32,
+            ],
+        },
+        RecordDecl {
+            fields: [
+                Record(
+                    RecordId(
+                        0,
+                    ),
+                ),
+                Vec3,
+            ],
+        },
+    ],
+}
