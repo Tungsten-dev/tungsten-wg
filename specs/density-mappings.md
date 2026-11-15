@@ -430,8 +430,7 @@ to decide.
 - **Rust helper.** `#[inline(always)] fn <name>(pool: &[T], off: usize, p: Pos3) -> T`. The caller passes
   `&buffers.<pool>`, its `off_<input>` and `p.pos`. Fractions use `T(p & (n-1)) / T(n)` for a power of two and
   `T(p % n) / T(n)` otherwise, and the low coordinate is a shift or a division. The loads use the same `read_pool` as
-  every other read, so `PerBuffer` is `rd(&*pool, off, LEN, i)`, `Slab` indexes the slice, and `Unchecked` uses
-  `get_unchecked`. Each interpolation is `a + t * (b - a)` with no fused multiply-add and no case for `t == 0`.
+  every other read, so each load is `rd(&*pool, off, LEN, i)`, and `rd`'s body follows the bounds mode. Each interpolation is `a + t * (b - a)` with no fused multiply-add and no case for `t == 0`.
 - **Expand** is an inline `usize` index: `Repeat` has no term, `Factor(1)` reads `p.pos.<axis>`, and `Factor(n)` shifts
   (power of two) or divides. All `Repeat` reads cell 0, as before.
 - **Refusals** (`BackendError::Codegen`, checked before anything is generated, for every input of the program): a factor

@@ -218,7 +218,9 @@ fn orchestration_and_workers() {
     ]);
     assert!(!output.orchestration_module.contains("orchestrate_"), "{}", output.orchestration_module);
     assert!(!output.orchestration_module.contains("pub struct HostConsts"));
-    assert!(!output.full_source.contains("unsafe"));
+    // `PerBuffer`'s only `unsafe` is the pool access inside `rd`, after its own length check.
+    assert_eq!(output.full_source.matches("unsafe").count(), 1, "{}", output.full_source);
+    assert!(output.full_source.contains("unsafe { *pool.get_unchecked(offset + i) }"));
 }
 
 /// Helpers take the offsets of what they read, and callers pass their own through.
@@ -238,19 +240,25 @@ fn offsets_pass_through_helpers() {
     ]);
 }
 
+/// Reads are `rd(..)` in every mode; the mode only changes `rd`'s body.
 #[test]
 fn bounds_modes() {
+    let read = "rd((&buffers.i32s), off_leaf_in, 4_usize, index(p))";
     let slab = generate_with(SHARED, BufferBounds::Slab).density_module;
-    assert_contains(&slab, &["buffers.i32s[(off_leaf_in + index(p)) as usize]"]);
-    assert!(!slab.contains("rd((&"), "{slab}");
+    assert_contains(&slab, &[read, "pool[offset + i]"]);
     assert!(!slab.contains("unsafe"), "{slab}");
+    assert!(!slab.contains("i >= len"), "{slab}");
 
     let unchecked = generate_with(SHARED, BufferBounds::Unchecked).density_module;
     assert_contains(&unchecked, &[
-        "unsafe { (*buffers.i32s.get_unchecked((off_leaf_in + index(p)))) }",
+        read,
+        "unsafe { *pool.get_unchecked(offset + i) }",
         "(*unsafe { buffers.i32s.get_unchecked_mut((out_off + index(p))) }) = r;",
     ]);
-    assert!(!unchecked.contains("rd((&"), "{unchecked}");
+    assert!(!unchecked.contains("i >= len"), "{unchecked}");
+
+    let per_buffer = generate_with(SHARED, BufferBounds::PerBuffer).density_module;
+    assert_contains(&per_buffer, &[read, "if i >= len {", "unsafe { *pool.get_unchecked(offset + i) }"]);
 }
 
 /// An explicit index is cast, so a negative one wraps and fails the `PerBuffer` length check.
@@ -388,21 +396,15 @@ program {
     ]);
 }
 
-/// Helper loads follow the compile's `BufferBounds`, like every other read.
+/// Helper loads go through `rd` like every other read, so they follow the compile's `BufferBounds`.
 #[test]
-fn lerp_helper_follows_bounds_modes() {
-    let slab = generate_with(MAPPED, BufferBounds::Slab).density_module;
-    assert_contains(&slab, &[
-        "let v000: f64 = (*pool)[(off + ((x0 + (y0 * 5_usize)) + (z0 * 245_usize))) as usize];",
-        "buffers.f64s[(off_e + (((p.pos.x >> 2_i32) as usize) + (((p.pos.z >> 2_i32) as usize) * 4_usize))) as usize]",
-    ]);
-    assert!(!slab.contains("rd((&"), "{slab}");
-
-    let unchecked = generate_with(MAPPED, BufferBounds::Unchecked).density_module;
-    assert_contains(&unchecked, &[
-        "let v000: f64 = unsafe { (*(*pool).get_unchecked((off + ((x0 + (y0 * 5_usize)) + (z0 * 245_usize))))) };",
-    ]);
-    assert!(!unchecked.contains("rd((&"), "{unchecked}");
+fn lerp_helper_reads_through_rd() {
+    for bounds in [BufferBounds::PerBuffer, BufferBounds::Slab, BufferBounds::Unchecked] {
+        let density = generate_with(MAPPED, bounds).density_module;
+        assert_contains(&density, &[
+            "let v000: f64 = rd((&(*pool)), off, 1225_usize, ((x0 + (y0 * 5_usize)) + (z0 * 245_usize)));",
+        ]);
+    }
 }
 
 fn generate_err(src: &str) -> String {

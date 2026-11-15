@@ -10,41 +10,28 @@ use super::converter::FunctionConverter;
 use super::types::{convert_binary_op, convert_type, convert_unary_op, derive_const_type};
 use crate::model as rcl;
 use tungsten_interface::naming::sanitize_name;
-use tungsten_interface::{BufferBounds, Interface};
+use tungsten_interface::Interface;
 use tungsten_ir::model::{
     AmbientKind, AxisFactor, BinaryOperator, ComputeUnit, ConstExpr, Constant, DensityMapping,
     Expression, Program, Ref, VariableType,
 };
 
 /// A read of element `index` of the input at `offset` in `pool`, whose length is `len`
-/// (`specs/workers.md` §5.1). `index` is a `usize`; a negative IR index has wrapped to a huge one.
+/// (`specs/workers.md` §5.1): always `rd(&pool, offset, len, index)`. How `rd` checks the read is
+/// the compile's `BufferBounds` (`read_helper_source`). `index` is a `usize`; a negative IR index
+/// has wrapped to a huge one.
 pub fn read_pool<'m>(
-    bounds: BufferBounds,
     pool: rcl::Expression<'m>,
     offset: rcl::Expression<'m>,
     len: usize,
     index: rcl::Expression<'m>,
 ) -> rcl::Expression<'m> {
     use rcl::Expression as R;
-    let at = || R::BinaryOp {
-        op: rcl::BinaryOperator::Add,
-        left: Box::new(offset.clone()),
-        right: Box::new(index.clone()),
-    };
-    match bounds {
-        BufferBounds::Slab => R::Index { base: Box::new(pool), index: Box::new(at()) },
-        BufferBounds::Unchecked => R::Unsafe(Box::new(R::Deref(Box::new(R::MethodCall {
-            receiver: Box::new(pool),
-            method: "get_unchecked".into(),
-            arguments: vec![at()],
-        })))),
-        // `PerBuffer`, and any mode added later: the safest.
-        _ => R::LateBoundCall {
-            function_name: super::READ_HELPER.into(),
-            argument_types: vec![],
-            return_type: rcl::Type::Void,
-            arguments: vec![R::Ref(Box::new(pool)), offset, R::UsizeLiteral(len), index],
-        },
+    R::LateBoundCall {
+        function_name: super::READ_HELPER.into(),
+        argument_types: vec![],
+        return_type: rcl::Type::Void,
+        arguments: vec![R::Ref(Box::new(pool)), offset, R::UsizeLiteral(len), index],
     }
 }
 
@@ -278,7 +265,7 @@ impl<'a> FunctionConverter<'a> {
                         arguments: vec![R::Variable(self.uniform.it.clone())],
                     },
                 };
-                read_pool(self.pools.bounds, pool, offset, crate::pools::cells(di.dimensions), index)
+                read_pool(pool, offset, crate::pools::cells(di.dimensions), index)
             }
             Expression::AutoConst(r) => {
                 let name = self.naming.auto_const_field(*r);

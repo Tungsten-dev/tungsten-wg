@@ -36,7 +36,7 @@
 
 use std::collections::HashSet;
 
-use tungsten_interface::{DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
+use tungsten_interface::{BufferBounds, DeviceCodegen, Instance, Interface, LerpHelper, RefineRun};
 use tungsten_ir::model::{ComputeUnit, Constant, Function, Program, Ref};
 
 use crate::interned::Interned;
@@ -75,19 +75,40 @@ pub const CONFIG_STRUCT_NAME: &str = "Config";
 pub const INTERNAL_BUFFERS_STRUCT_NAME: &str = "InternalBuffers";
 pub const ORCHESTRATION_STRUCT_NAME: &str = "Orchestration";
 
-/// The checked read of `BufferBounds::PerBuffer`, generated into the density module. Reserved by
-/// the Rust naming rules.
+/// The read of a density input, generated into the density module: every read of a pool is
+/// `rd(&pool, off_d, LEN, i)`. Reserved by the Rust naming rules.
 pub const READ_HELPER: &str = tungsten_interface::naming::RUST_READ_HELPER;
 
-/// Checks the index against the input's own length, so a bad index panics with the message of an
-/// out-of-bounds index into a separate array, which the test driver maps to `OutOfBounds`.
-const READ_HELPER_SOURCE: &str = "#[inline(always)]
-fn rd<T: Copy>(pool: &[T], offset: usize, len: usize, i: usize) -> T {
-    if i >= len {
+/// `rd`'s source for `bounds`; the call sites are the same in every mode.
+///
+/// - `PerBuffer` checks the index against the input's own length, so a bad index panics with the
+///   message of an out-of-bounds index into a separate array, which the test driver maps to
+///   `OutOfBounds`. The pool access itself is then unchecked.
+/// - `Slab` indexes the pool, so only its end is checked.
+/// - `Unchecked` doesn't check at all.
+///
+/// The unchecked pool access is sound because this compiler only ever passes an `(offset, len)` of
+/// an input in the calling worker's layout, and the orchestration sizes each pool to cover its
+/// inputs, so `offset + len <= pool.len()`. `InternalBuffers` is private to the generated module,
+/// so no caller outside it can pass another pool. Debug builds assert it.
+fn read_helper_source(bounds: BufferBounds) -> String {
+    let body = match bounds {
+        BufferBounds::Slab => "pool[offset + i]",
+        BufferBounds::Unchecked => {
+            "debug_assert!(offset + len <= pool.len());
+    unsafe { *pool.get_unchecked(offset + i) }"
+        }
+        // `PerBuffer`, and any mode added later: the safest.
+        _ => {
+            "if i >= len {
         panic!(\"index out of bounds: the len is {} but the index is {}\", len, i);
     }
-    pool[offset + i]
-}";
+    debug_assert!(offset + len <= pool.len());
+    unsafe { *pool.get_unchecked(offset + i) }"
+        }
+    };
+    format!("#[inline(always)]\nfn rd<T: Copy>(pool: &[T], offset: usize, len: usize, i: usize) -> T {{\n    {body}\n}}")
+}
 
 /// Uniform parameter names shared by every generated density and helper function, in order.
 pub const PARAM_POS: &str = "p";
@@ -181,7 +202,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
         pools: &'a Pools,
     ) -> Self {
         let mut model = rcl::RCL::new();
-        model.raw_items.push(READ_HELPER_SOURCE.to_string());
+        model.raw_items.push(read_helper_source(pools.bounds));
         let mut codegen = Self {
             source,
             naming: interface,
@@ -255,7 +276,7 @@ impl<'a, 'm> RCLCodegen<'a, 'm> {
     fn generate_lerps(&mut self, lerps: Vec<LerpHelper>) {
         for h in lerps {
             if self.done_lerps.insert(h.name.clone()) {
-                let f = self.intern(mapping::lerp_helper(&h, self.pools.bounds));
+                let f = self.intern(mapping::lerp_helper(&h));
                 self.model.functions.push(f);
             }
         }

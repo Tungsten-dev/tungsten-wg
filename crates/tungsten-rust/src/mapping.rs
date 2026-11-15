@@ -10,7 +10,7 @@ use crate::expression::read_pool;
 use crate::model as rcl;
 use crate::pools::cells;
 use crate::types::convert_type;
-use tungsten_interface::{BackendError, BufferBounds, Interface, LerpHelper};
+use tungsten_interface::{BackendError, Interface, LerpHelper};
 use tungsten_ir::model::{AxisFactor, DensityInput, DensityMapping, Program, VariableType};
 
 /// Parameter names of a lerp helper.
@@ -128,8 +128,8 @@ fn lerp<'m>(a: &Rc<rcl::Variable>, b: &Rc<rcl::Variable>, t: &Rc<rcl::Variable>)
 }
 
 /// `fn <name>(pool: &[T], off: usize, p: Pos3) -> T`: the loads and lerps of §3.3, in order. The
-/// caller passes its `off_<input>`. Loads follow `bounds` like every read of a pool.
-pub fn lerp_helper<'m>(h: &LerpHelper, bounds: BufferBounds) -> rcl::Function<'m> {
+/// caller passes its `off_<input>`. Loads go through `rd` like every read of a pool.
+pub fn lerp_helper<'m>(h: &LerpHelper) -> rcl::Function<'m> {
     use rcl::{BinaryOperator as Op, Expression as E, Statement as S};
     let element = convert_type(&h.element);
     let mut f = rcl::Function::new(Some(h.name.clone()), Some(element.clone()));
@@ -187,7 +187,7 @@ pub fn lerp_helper<'m>(h: &LerpHelper, bounds: BufferBounds) -> rcl::Function<'m
                 let pool = E::Deref(Box::new(E::Variable(var(POOL, rcl::Type::Void))));
                 let offset = E::Variable(var(OFFSET, rcl::Type::Usize));
                 let v = var(&format!("v{cx}{cy}{cz}"), element.clone());
-                declare(&mut f, &v, read_pool(bounds, pool, offset, len, index));
+                declare(&mut f, &v, read_pool(pool, offset, len, index));
                 table.push(((cx, cy, cz), v));
             }
         }

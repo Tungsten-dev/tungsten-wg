@@ -271,11 +271,11 @@ A read of input `di` with index `i` (explicit, `0` for single, or `index(p)`):
 
 | Mode | Rust | Java | CUDA |
 |---|---|---|---|
-| `PerBuffer` | `rd(&buffers.<pool>, off_d, LEN, i)`: checks `i < LEN` as `usize` (negatives fail), then indexes `off_d + i` | `Rt.idx(i, LEN)` (`Objects.checkIndex`), then `<pool>[off_d + i]` | `TW_CHECK_INDEX(i, LEN, loc)`, then `tw::buffer<T>(ctx.buffers, off_d)[i]` |
-| `Slab` | `buffers.<pool>[off_d + i as usize]` | `<pool>[off_d + i]` | Checks against the slab length |
-| `Unchecked` | `unsafe { *buffers.<pool>.get_unchecked(off_d + i as usize) }` | Same as `Slab` | No check |
+| `PerBuffer` | `rd(&buffers.<pool>, off_d, LEN, i)` with `rd` checking `i < LEN` as `usize` (negatives fail), then reading `off_d + i` with `get_unchecked` | `Rt.idx(i, LEN)` (`Objects.checkIndex`), then `<pool>[off_d + i]` | `TW_CHECK_INDEX(i, LEN, loc)`, then `tw::buffer<T>(ctx.buffers, off_d)[i]` |
+| `Slab` | `rd(..)` with `rd` indexing `pool[offset + i]` | `<pool>[off_d + i]` | Checks against the slab length |
+| `Unchecked` | `rd(..)` with `rd` reading `get_unchecked(offset + i)` | Same as `Slab` | No check |
 
-`LEN` is a literal from `di.dimensions`. Kernel writes go to `out_off + index(p)`, which is in range by construction.
+`LEN` is a literal from `di.dimensions`. In Rust every read is the same `rd` call, and the mode only picks `rd`'s body. Its `get_unchecked` is sound because the compiler only passes an input of the calling worker's layout, which the orchestration sizes the pool to cover. Kernel writes go to `out_off + index(p)`, which is in range by construction.
 They use the `Slab` form, or `Unchecked` under `Unchecked`.
 
 `PerBuffer` must fail exactly where today's per-buffer array fails. On the interpreter that's an index error, so the
@@ -294,7 +294,7 @@ differential suite runs `PerBuffer` (§8).
 - Kernels: `fn <kernel>(origin, buffers: &mut InternalBuffers, out_off, off_.., auto_constants, host_consts)`. Per cell:
   `let r = density(.., &*buffers, off_..); buffers.<pool>[out_off + idx] = r;`. These are sequential borrows, as today.
 - Density functions take `buffers: &InternalBuffers`.
-- Generated code keeps `#[allow(warnings)]`. Under `Unchecked` it contains `unsafe` blocks, and nothing else is unsafe.
+- Generated code keeps `#[allow(warnings)]`. Its `unsafe` is `rd`'s pool access (under `PerBuffer` and `Unchecked`) and, under `Unchecked`, the kernel writes. Nothing else is unsafe.
 
 ### 5.3 Java
 
