@@ -10,9 +10,10 @@ use super::expression::const_to_expression;
 use super::types::convert_type;
 use super::{
     AUTO_CONSTS_CLASS, CONFIG_CLASS, HOST_CONSTS_CLASS, INTERNAL_BUFFERS_CLASS, PARAM_AUTO_CONSTS,
-    PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_POS, POSITION_ITERATOR_CLASS, uniform_arguments,
-    uniform_parameters,
+    PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_INDEX, POSITION_PARAMS, uniform_parameters,
+    uniform_tail_arguments,
 };
+use crate::vector::{VectorGroup, component_type, is_vector_type};
 use tungsten_interface::naming::NamingRules;
 use crate::pools::Pools;
 use tungsten_interface::{EvalFn, Instance, Interface, LerpHelper, RefineRun};
@@ -35,6 +36,10 @@ pub struct Converted {
     pub lerps: Vec<LerpHelper>,
     /// Operand types of the `tw$select` overloads the body calls.
     pub selects: Vec<VariableType>,
+    /// Flattened methods the body calls through their boxed adapter.
+    pub boxed: Vec<String>,
+    /// The method's split `Vec3`/`Pos3` parameters, for its boxed adapter.
+    pub groups: Vec<VectorGroup>,
 }
 
 /// Name of a kernel's own slot offset.
@@ -45,12 +50,19 @@ fn offset_parameters(naming: &Interface, f: Ref<Function>) -> Vec<(java::Type, S
     naming.input_params(f).iter().map(|&d| (java::Type::Int, naming.offset_param(d).to_string())).collect()
 }
 
-/// Declares every local bare at the top of the function. Initializing them is the frontend's job
-/// (javac reports violations).
+/// Declares every local bare at the top of the function, a vector one as its three components.
+/// Initializing them is the frontend's job (javac reports violations). Dead locals are left out.
 fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java::Statement> {
     let mut out = Vec::new();
     for (r, var) in func.variables.iter() {
-        if func.parameters.contains(&r) {
+        if func.parameters.contains(&r) || conv.dead.contains(&r) {
+            continue;
+        }
+        if is_vector_type(&var.t) {
+            let t = convert_type(&component_type(&var.t));
+            for name in conv.declare_vector_var(r) {
+                out.push(java::Statement::Declare { t: t.clone(), name, init: None, is_final: false });
+            }
             continue;
         }
         let name = conv.declare_var(r);
@@ -64,13 +76,15 @@ fn declare_locals(conv: &mut FunctionConverter<'_>, func: &Function) -> Vec<java
     out
 }
 
-fn finish(conv: FunctionConverter<'_>, method: java::Method) -> Converted {
+fn finish(conv: FunctionConverter<'_>, method: java::Method, groups: Vec<VectorGroup>) -> Converted {
     Converted {
         method,
         called: conv.called,
         constants: conv.used_constants,
         lerps: conv.used_lerps,
         selects: conv.used_selects,
+        boxed: conv.used_boxed,
+        groups,
     }
 }
 
@@ -106,10 +120,20 @@ pub fn convert_helper(
     let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, func).with_offsets(f);
     let mut params = uniform_parameters();
     params.extend(offset_parameters(naming, f));
-    // Helper-specific parameters follow the uniform ones.
+    // Helper-specific parameters follow the uniform ones; a vector one is its three components.
+    let mut groups = vec![];
     for p in &func.parameters {
-        let name = conv.declare_var(*p);
-        params.push((conv.java_var_type(*p), name));
+        let t = conv.var_type(*p);
+        if is_vector_type(t) {
+            groups.push(VectorGroup { start: params.len(), t: t.clone() });
+            let ct = convert_type(&component_type(t));
+            for name in conv.declare_vector_var(*p) {
+                params.push((ct.clone(), name));
+            }
+        } else {
+            let name = conv.declare_var(*p);
+            params.push((conv.java_var_type(*p), name));
+        }
     }
     let mut body = declare_locals(&mut conv, func);
     body.extend(conv.convert_block(&func.body));
@@ -121,7 +145,7 @@ pub fn convert_helper(
         params,
         body,
     };
-    finish(conv, method)
+    finish(conv, method, groups)
 }
 
 /// Converts a unit's density function for one set of dimensions (named `<name>_d{X}x{Y}x{Z}`).
@@ -154,13 +178,15 @@ pub fn convert_density(
         params: uniform_parameters().into_iter().chain(offset_parameters(naming, *function)).collect(),
         body,
     };
-    finish(conv, method)
+    finish(conv, method, vec![])
 }
 
-/// The method of one eval key (`specs/unit-eval.md` §5.4): `static T <eval>(Pos3 pos, Vec3 origin,
-/// buffers, auto_constants, host_consts, int off_..)`. It rebuilds the uniform `config` (the key's
-/// scales as literals) and `p` (at `pos`), then runs the evaluated main's body unchanged. Helpers
-/// take both as parameters, so the ones it calls see the evaluated ambients.
+/// The method of one eval key (`specs/unit-eval.md` §5.4): `static T <eval>(int px, int py, int pz,
+/// Vec3 origin, buffers, auto_constants, host_consts, int off_..)`. It declares the uniform `idx`
+/// (0) and `config` (the caller's origin, the key's scales as literals), then runs the evaluated
+/// main's body unchanged. Helpers take both as parameters, so the ones it calls see the evaluated
+/// ambients. A call whose position can't be split goes through the `$boxed` adapter, which takes a
+/// `Pos3`.
 pub fn convert_eval(
     program: &Program,
     naming: &Interface,
@@ -173,10 +199,10 @@ pub fn convert_eval(
     let ComputeUnit::DensityFunction { function, .. } = &program.compute_units[eval.key.unit];
     let func = &program.functions[*function];
     let mut conv = FunctionConverter::new(program, naming, pools, rules, class_name, func).with_offsets(*function);
-    let pos = conv.fresh_name("pos");
     let origin = conv.fresh_name("origin");
     let class = |n: &str| java::Type::class(n);
     let mut body = vec![
+        S::Declare { t: java::Type::Int, name: PARAM_INDEX.into(), init: Some(J::IntLit(0)), is_final: true },
         S::Declare {
             t: class(CONFIG_CLASS),
             name: PARAM_CONFIG.into(),
@@ -194,22 +220,13 @@ pub fn convert_eval(
             }),
             is_final: true,
         },
-        S::Declare {
-            t: class(POSITION_ITERATOR_CLASS),
-            name: PARAM_POS.into(),
-            init: Some(J::New { class: POSITION_ITERATOR_CLASS.into(), args: vec![J::name(PARAM_CONFIG)], comment: None }),
-            is_final: true,
-        },
-        S::Expr(J::call(
-            Some(J::name(PARAM_POS)),
-            "set",
-            vec![J::field(J::name(&pos), "x"), J::field(J::name(&pos), "y"), J::field(J::name(&pos), "z"), J::IntLit(0)],
-        )),
     ];
     body.extend(declare_locals(&mut conv, func));
     body.extend(conv.convert_block(&func.body));
-    let mut params = vec![(class("Pos3"), pos), (class("Vec3"), origin)];
-    params.extend(uniform_parameters().into_iter().skip(2));
+    let mut params: Vec<(java::Type, String)> =
+        POSITION_PARAMS.iter().map(|n| (java::Type::Int, n.to_string())).collect();
+    params.push((class("Vec3"), origin));
+    params.extend(uniform_parameters().into_iter().skip(POSITION_PARAMS.len() + 2));
     params.extend(offset_parameters(naming, *function));
     let method = java::Method {
         doc: Some(format!("eval of {}", func.canonical_name.as_deref().unwrap_or("a unit"))),
@@ -219,7 +236,7 @@ pub fn convert_eval(
         params,
         body,
     };
-    finish(conv, method)
+    finish(conv, method, vec![VectorGroup { start: 0, t: VariableType::Pos3 }])
 }
 
 /// A function with no variables, used to convert constant initializers like ordinary expressions.
@@ -355,16 +372,6 @@ fn kernel(
             is_final: true,
         },
         S::Declare {
-            t: class(POSITION_ITERATOR_CLASS),
-            name: PARAM_POS.into(),
-            init: Some(J::New {
-                class: POSITION_ITERATOR_CLASS.into(),
-                args: vec![J::name(PARAM_CONFIG)],
-                comment: None,
-            }),
-            is_final: true,
-        },
-        S::Declare {
             t: java::Type::Array(Box::new(element)),
             name: "out".into(),
             init: Some(J::field(J::name(PARAM_BUFFERS), pools.field(target_type))),
@@ -373,21 +380,18 @@ fn kernel(
         S::Declare { t: java::Type::Int, name: "idx".into(), init: Some(J::IntLit(0)), is_final: false },
     ];
 
-    // The running `idx` replaces a per-element index computation, like RCL's `iter_3d`. A refine
-    // call moves `pos` and leaves `idx`, which the store and unindexed reads use.
+    // The running `idx` replaces a per-element index computation, like RCL's `iter_3d`. The loop
+    // counters are the position, passed as plain ints. A refine call moves the position and
+    // leaves `idx`, which the store and unindexed reads use.
     let moved = |axis: &str, offset: &str| {
         if refine { J::binary(java::BinaryOperator::Add, J::name(axis), J::name(offset)) } else { J::name(axis) }
     };
-    let arguments = uniform_arguments()
+    let arguments = [moved("ix", "ox"), moved("iy", "oy"), moved("iz", "oz"), J::name(PARAM_INDEX), J::name(PARAM_CONFIG)]
         .into_iter()
+        .chain(uniform_tail_arguments())
         .chain(offsets.iter().map(|(_, n)| J::name(n)))
         .collect();
     let inner = vec![
-        S::Expr(J::call(
-            Some(J::name(PARAM_POS)),
-            "set",
-            vec![moved("ix", "ox"), moved("iy", "oy"), moved("iz", "oz"), J::name("idx")],
-        )),
         // In range by construction, so never the `PerBuffer` form.
         S::Assign {
             target: J::Index {

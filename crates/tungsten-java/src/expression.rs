@@ -9,11 +9,15 @@ use super::converter::FunctionConverter;
 use super::types::{boxed_class, convert_binary_op, convert_type, holder_class, is_object, numeric_literal, unit_return_type};
 use crate::mapping::read_pool;
 use tungsten_rust::pools::cells;
-use super::{HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_POS, uniform_arguments};
+use super::{
+    HELPERS_CLASS, PARAM_AUTO_CONSTS, PARAM_BUFFERS, PARAM_CONFIG, PARAM_HOST_CONSTS, PARAM_INDEX, POSITION_PARAMS,
+    uniform_arguments, uniform_tail_arguments,
+};
+use crate::vector::{AXES, BOXED_SUFFIX, is_vector_type};
 use tungsten_interface::naming::java_sanitize;
 use crate::model as java;
 use tungsten_ir::model::VariableType;
-use tungsten_ir::model::{AmbientKind, AxisFactor, BinaryOperator, ConstExpr, DensityMapping, Expression, UnaryOperator};
+use tungsten_ir::model::{AxisFactor, BinaryOperator, ConstExpr, DensityMapping, Expression, UnaryOperator};
 
 use java::Expression as J;
 
@@ -98,6 +102,22 @@ impl<'a> FunctionConverter<'a> {
 
     /// Converts an expression of the current function.
     pub fn convert_expression(&mut self, expr: &Expression) -> java::Expression {
+        // A splittable vector is built from its components (`vector.rs`).
+        if matches!(
+            expr,
+            Expression::Variable(_)
+                | Expression::Ambient(_)
+                | Expression::Construct { .. }
+                | Expression::BinaryOp { .. }
+                | Expression::Select { .. }
+                | Expression::ExplicitCast { .. }
+        ) {
+            if let Some(t) = self.vector_type(expr) {
+                if self.can_split(expr).is_some() {
+                    return self.materialize(expr, &t);
+                }
+            }
+        }
         match expr {
             Expression::Constant(r) => {
                 self.used_constants.push(*r);
@@ -110,26 +130,41 @@ impl<'a> FunctionConverter<'a> {
             Expression::Int(v) => J::IntLit(*v),
             Expression::Long(v) => J::LongLit(*v),
             Expression::Bool(v) => J::BoolLit(*v),
-            Expression::Ambient(k) => match k {
-                AmbientKind::Origin => J::field(J::name(PARAM_CONFIG), "origin"),
-                AmbientKind::OriginScale => J::field(J::name(PARAM_CONFIG), "origin_scale"),
-                AmbientKind::PositionScale => J::field(J::name(PARAM_CONFIG), "position_scale"),
-                AmbientKind::Pos3 => J::field(J::name(PARAM_POS), "pos"),
-            },
+            // Splittable, so built above.
+            Expression::Ambient(_) => unreachable!("ambients are vectors"),
             Expression::FunctionCall { function, parameters } => {
                 self.called.push(*function);
                 let program = self.program;
                 let callee = &program.functions[*function];
                 // Uniform arguments first, then the callee's offsets (the caller's own offset
-                // parameters, since `input_params` is transitive), then its own parameters.
+                // parameters, since `input_params` is transitive), then its own parameters. A
+                // vector parameter takes three components, or the call goes through the boxed
+                // adapter when an argument can't be split.
                 let mut args = uniform_arguments();
                 for &d in self.naming.input_params(*function) {
                     args.push(J::name(self.offset(d)));
                 }
+                let flat = callee
+                    .parameters
+                    .iter()
+                    .zip(parameters)
+                    .all(|(p, arg)| !is_vector_type(&callee.variables[*p].t) || self.can_split(arg).is_some());
                 for (p, arg) in callee.parameters.iter().zip(parameters) {
-                    args.push(self.convert_to_type(arg, &callee.variables[*p].t));
+                    let t = &callee.variables[*p].t;
+                    if flat && is_vector_type(t) {
+                        args.extend(self.split(arg));
+                    } else {
+                        args.push(self.convert_to_type(arg, t));
+                    }
                 }
-                J::call(None, self.naming.helper(*function), args)
+                let name = self.naming.helper(*function);
+                let vectors = callee.parameters.iter().any(|p| is_vector_type(&callee.variables[*p].t));
+                if flat || !vectors {
+                    J::call(None, name, args)
+                } else {
+                    self.used_boxed.push(name.to_string());
+                    J::call(None, &format!("{name}{BOXED_SUFFIX}"), args)
+                }
             }
             Expression::ExternCall { function_name, parameters, parameter_types, .. } => {
                 let args = parameters
@@ -145,7 +180,7 @@ impl<'a> FunctionConverter<'a> {
                 let element = unit_return_type(program, di.density_function);
                 let pool = J::field(J::name(PARAM_BUFFERS), self.pools.field(element));
                 let offset = J::name(self.offset(*input));
-                let pos = J::field(J::name(PARAM_POS), "pos");
+                let pos = POSITION_PARAMS.map(J::name);
                 let index = match (index, di.mapping) {
                     (Some(i), _) => self.convert_to_type(i, &VariableType::I32),
                     // A lerp reads several cells, so a helper does all of it (§5.2).
@@ -154,7 +189,7 @@ impl<'a> FunctionConverter<'a> {
                         let helper = self.naming.lerp_helpers().iter().find(|h| h.name == name);
                         self.used_lerps.push(helper.expect("lerp_helper found it").clone());
                         let mut args = vec![pool, offset];
-                        args.extend(["x", "y", "z"].map(|a| J::field(pos.clone(), a)));
+                        args.extend(pos);
                         return J::call(None, name, args);
                     }
                     (None, DensityMapping::Expand(factors)) => {
@@ -165,7 +200,7 @@ impl<'a> FunctionConverter<'a> {
                         }
                     }
                     (None, DensityMapping::Identity) if di.dimensions == (1, 1, 1) => J::IntLit(0),
-                    (None, DensityMapping::Identity) => J::field(J::name(PARAM_POS), "index"),
+                    (None, DensityMapping::Identity) => J::name(PARAM_INDEX),
                 };
                 read_pool(self.pools.bounds, pool, offset, cells(di.dimensions), index)
             }
@@ -175,8 +210,24 @@ impl<'a> FunctionConverter<'a> {
             Expression::HostInput(r) => J::field(J::name(PARAM_HOST_CONSTS), self.naming.host_field(*r)),
             Expression::BinaryOp { op, left, right } => self.convert_binary(*op, left, right),
             Expression::UnaryOp { op, operand } => self.convert_unary(*op, operand),
-            Expression::Field { base, field, .. } => J::field(self.convert_expression(base), field),
+            Expression::Field { base, field, base_type, .. } => {
+                if is_vector_type(base_type) {
+                    if let Some(axis) = AXES.iter().position(|a| a == field) {
+                        if let Some(c) = self.project(base, axis) {
+                            return c;
+                        }
+                    }
+                }
+                J::field(self.convert_expression(base), field)
+            }
             Expression::ArrayAccess { array, index } => {
+                if let Expression::Int(i @ 0..=2) = **index {
+                    if self.vector_type(array).is_some() {
+                        if let Some(c) = self.project(array, i as usize) {
+                            return c;
+                        }
+                    }
+                }
                 let base = self.convert_expression(array);
                 let index = self.convert_to_type(index, &VariableType::I32);
                 if is_vector(&self.derive_type(array)) {
@@ -239,15 +290,25 @@ impl<'a> FunctionConverter<'a> {
                 let program = self.program;
                 let tungsten_ir::model::ComputeUnit::DensityFunction { function: main, .. } =
                     &program.compute_units[*unit];
-                let mut args = vec![
-                    self.convert_expression(position),
-                    J::field(J::name(PARAM_CONFIG), "origin"),
-                ];
-                args.extend(uniform_arguments().into_iter().skip(2));
+                let flat = self.can_split(position).is_some();
+                let mut args = if flat {
+                    self.split(position).into()
+                } else {
+                    vec![self.convert_to_type(position, &VariableType::Pos3)]
+                };
+                args.push(J::field(J::name(PARAM_CONFIG), "origin"));
+                args.extend(uniform_tail_arguments());
                 for &d in self.naming.input_params(*main) {
                     args.push(J::name(self.offset(d)));
                 }
-                J::call(None, self.naming.eval_fn(*unit, *origin_scale, *position_scale), args)
+                let name = self.naming.eval_fn(*unit, *origin_scale, *position_scale).to_string();
+                if flat {
+                    J::call(None, &name, args)
+                } else {
+                    let boxed = format!("{name}{BOXED_SUFFIX}");
+                    self.used_boxed.push(name);
+                    J::call(None, &boxed, args)
+                }
             }
             // Eager by being a call (never `?:`, which is lazy); C2 inlines the helper.
             Expression::Select { cond, then, otherwise } => {
@@ -278,6 +339,12 @@ impl<'a> FunctionConverter<'a> {
 
     fn convert_binary(&mut self, op: BinaryOperator, left: &Expression, right: &Expression) -> java::Expression {
         use BinaryOperator as B;
+        // Splittable vectors compare per component.
+        if matches!(op, B::Equal | B::NotEqual) {
+            if let Some(e) = self.vector_equality(op == B::Equal, left, right) {
+                return e;
+            }
+        }
         let (lt, rt) = (self.derive_type(left), self.derive_type(right));
         let (l, r) = (self.convert_expression(left), self.convert_expression(right));
         let arithmetic = matches!(op, B::Add | B::Subtract | B::Multiply | B::Divide);

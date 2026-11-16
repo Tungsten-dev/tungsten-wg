@@ -119,11 +119,11 @@ fn generates_java_for_small_program() {
         "(flag ? 1 : 0)",
         "final DoubleRef v_ref = new DoubleRef(v);",
         "v = v_ref.value;",
-        "config.origin.equals(new Vec3(0.0, 0.0, 0.0))",
+        "((config.origin.x == 0.0) && (config.origin.y == 0.0)) && (config.origin.z == 0.0)",
         "Helpers.sample(auto_constants.",
         "host_consts.sea_level",
         // a read of an input: its pool, its offset parameter and a check against its own length
-        "buffers.f64s[off_noise_in + java.util.Objects.checkIndex(p.index, 64)]",
+        "buffers.f64s[off_noise_in + java.util.Objects.checkIndex(idx, 64)]",
         // an explicit index of 0 into a non-empty input can't fail
         "buffers.f64s[off_noise_in + 0]",
         "public double[] run(double x, double y, double z, MinecraftFinalHostConsts hc)",
@@ -195,7 +195,7 @@ program {
 #[test]
 fn ambients() {
     let java = java(&program(AMBIENTS));
-    for e in ["config.origin.x", "config.origin_scale.x", "config.position_scale.x", "p.pos.x"] {
+    for e in ["config.origin.x", "config.origin_scale.x", "config.position_scale.x", "px"] {
         assert!(java.contains(e), "missing `{e}` in:\n{java}");
     }
     assert!(!java.contains("Vec3 origin"), "{java}");
@@ -368,11 +368,11 @@ fn orchestration_and_workers() {
 fn offsets_pass_through_helpers() {
     let java = java(&program(SHARED));
     assert_contains(&java, &[
-        "static int get_leaf(PositionIterator p, Config config, InternalBuffers buffers, AutoConsts auto_constants, HostConsts host_consts, int off_leaf_in)",
-        "return buffers.i32s[off_leaf_in + java.util.Objects.checkIndex(p.index, 4)];",
-        "get_leaf(p, config, buffers, auto_constants, host_consts, off_leaf_in)",
+        "static int get_leaf(int px, int py, int pz, int idx, Config config, InternalBuffers buffers, AutoConsts auto_constants, HostConsts host_consts, int off_leaf_in)",
+        "return buffers.i32s[off_leaf_in + java.util.Objects.checkIndex(idx, 4)];",
+        "get_leaf(px, py, pz, idx, config, buffers, auto_constants, host_consts, off_leaf_in)",
         "static void mid_main_d4x1x1_kernel(double origin_x, double origin_y, double origin_z, InternalBuffers buffers, int out_off, int off_leaf_in, AutoConsts auto_constants, HostConsts host_consts)",
-        "out[out_off + idx] = mid_main_d4x1x1(p, config, buffers, auto_constants, host_consts, off_leaf_in);",
+        "out[out_off + idx] = mid_main_d4x1x1(ix, iy, iz, idx, config, buffers, auto_constants, host_consts, off_leaf_in);",
         // a (1, 1, 1) input reads cell 0
         "buffers.f64s[off_side_in + 0]",
     ]);
@@ -382,11 +382,11 @@ fn offsets_pass_through_helpers() {
 fn bounds_modes() {
     let p = program(SHARED);
     let per_buffer = java(&p);
-    assert!(per_buffer.contains("java.util.Objects.checkIndex(p.index, 4)"));
+    assert!(per_buffer.contains("java.util.Objects.checkIndex(idx, 4)"));
     // `Slab` indexes the pool, and the JVM checks its end. `Unchecked` is the same on Java.
     for bounds in [BufferBounds::Slab, BufferBounds::Unchecked] {
         let text = java_with(&p, bounds);
-        assert!(text.contains("buffers.i32s[off_leaf_in + p.index]"), "{text}");
+        assert!(text.contains("buffers.i32s[off_leaf_in + idx]"), "{text}");
         assert!(!text.contains("checkIndex"), "{text}");
     }
     assert_eq!(java_with(&p, BufferBounds::Slab), java_with(&p, BufferBounds::Unchecked));
@@ -397,7 +397,7 @@ fn bounds_modes() {
 #[test]
 fn expand_is_an_inline_index() {
     let text = java(&program(MAPPED));
-    assert_contains(&text, &["buffers.f64s[off_e + java.util.Objects.checkIndex((p.pos.x >> 2) + ((p.pos.z >> 2) * 4), 16)]"]);
+    assert_contains(&text, &["buffers.f64s[off_e + java.util.Objects.checkIndex((px >> 2) + ((pz >> 2) * 4), 16)]"]);
     let src = r#"
 program {
     fn leaf() -> f64 { return 1.0; }
@@ -412,10 +412,10 @@ program {
 "#;
     assert_contains(&java(&program(src)), &[
         // factor 1 reads the coordinate, factor 3 divides, `Repeat` has no term
-        "buffers.f64s[off_a + java.util.Objects.checkIndex(p.pos.x + ((p.pos.z / 3) * 5), 10)]",
+        "buffers.f64s[off_a + java.util.Objects.checkIndex(px + ((pz / 3) * 5), 10)]",
         // all `Repeat` reads cell 0
         "buffers.f64s[off_b + 0]",
-        "buffers.f64s[off_c + java.util.Objects.checkIndex(p.pos.x + (p.pos.y * 2), 6)]",
+        "buffers.f64s[off_c + java.util.Objects.checkIndex(px + (py * 2), 6)]",
     ]);
 }
 
@@ -425,7 +425,7 @@ program {
 fn lerp_is_a_helper_in_canonical_order() {
     let java = java(&program(MAPPED));
     assert_contains(&java, &[
-        "lerp_5x49x5_by_4x8x3_f64(buffers.f64s, off_l, p.pos.x, p.pos.y, p.pos.z)",
+        "lerp_5x49x5_by_4x8x3_f64(buffers.f64s, off_l, px, py, pz)",
         "private static double lerp_5x49x5_by_4x8x3_f64(double[] pool, int off, int px, int py, int pz) {",
         // a power of two shifts and masks, any other factor divides
         "final int x0 = px >> 2;\n        final double tx = ((double) (px & 3)) / 4.0;",
@@ -544,8 +544,8 @@ fn refine_method_stores_the_origin_and_moves_pos_only() {
         "public int[] refine_step(int ox, int oy, int oz, SeedMainHostConsts hc) {",
         "_refine_kernel(origin_x, origin_y, origin_z, ox, oy, oz, buffers, 0, 0, auto_constants, hosts);",
         "_refine_kernel(double origin_x, double origin_y, double origin_z, int ox, int oy, int oz, InternalBuffers buffers, int out_off, int off_prev, AutoConsts auto_constants, HostConsts host_consts)",
-        // The offset moves `pos`, not the index the store and unindexed reads use.
-        "p.set(ix + ox, iy + oy, iz + oz, idx);",
+        // The offset moves the position (px, py, pz), not the index the store and unindexed reads use.
+        "(ix + ox, iy + oy, iz + oz, idx, config, buffers, auto_constants, host_consts, off_prev);",
     ]);
     assert!(java.contains("out[out_off + idx] = acc_main_d2x1x1("), "{java}");
 }
@@ -577,9 +577,10 @@ program {
 fn select_is_an_overloaded_helper() {
     let java = java(&program(SELECT));
     assert_contains(&java, &[
-        "tw$select(p.pos.x == 0, (byte) (",
+        "tw$select(px == 0, (byte) (",
         "private static byte tw$select(boolean c, byte a, byte b) {\n        return c ? a : b;\n    }",
-        "private static Vec3 tw$select(boolean c, Vec3 a, Vec3 b) {",
+        "private static double tw$select(boolean c, double a, double b) {",
+        "return new Vec3(tw$select(false, config.origin.x, 1.0), tw$select(false, config.origin.y, 2.0), tw$select(false, config.origin.z, 3.0));",
     ]);
     assert_eq!(java.matches(" tw$select(boolean").count(), 2, "only the overloads used:\n{java}");
     assert_eq!(java.matches(" ? ").count(), 2, "`?:` only inside the helpers:\n{java}");

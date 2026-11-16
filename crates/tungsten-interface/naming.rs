@@ -115,6 +115,9 @@ pub const JAVA_RESERVED: &[&str] = &[
     "System",
     // uniform parameters, kernel locals and Orchestration members
     "p",
+    "px",
+    "py",
+    "pz",
     "config",
     "buffers",
     "auto_constants",

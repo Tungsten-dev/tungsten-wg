@@ -444,7 +444,7 @@ to decide.
 
 - **Helpers and expansion** as on Rust: the same folded index and the same helper order, with `java.util.Objects.checkIndex`
   for `PerBuffer`. The helper is `private static T <name>(T[] pool, int off, int px, int py, int pz)`, taking the three
-  coordinates of `p.pos`. Fractions are `(T) (p % n) / n` or `(T) (p & (n - 1)) / n`. Java never fuses a multiply-add, so the
+  coordinates of the position (`px, py, pz`). Fractions are `(T) (p % n) / n` or `(T) (p & (n - 1)) / n`. Java never fuses a multiply-add, so the
   helper is `a + t * (b - a)` as written. The refusals are the Rust ones (`tungsten_rust::mapping::check_emittable`).
 - **Mutation checks**, run on the real path against `density/map_*` on Java and reverted. Reversing the axis order turned
   `map_lerp_3axis`, `map_lerp_2axis_repeat`, `map_lerp_f32_3axis` and `map_lerp_last_cell` red. A `t == 0` shortcut turned

@@ -158,7 +158,7 @@ The call always takes an offset, including when `march` is all zero, in which ca
 
 ### 4.3 Reads
 
-`Pos3` and the index are already separate in each runtime: `it.pos` / `it.idx` in Rust, `p.pos` / `p.index` in
+`Pos3` and the index are already separate in each runtime: `it.pos` / `it.idx` in Rust, `px, py, pz` / `idx` in
 Java, `pos.pos` / `pos.idx` in CUDA, `ctx.cell` / `ctx.k` in core.
 
 | Read | Uses | In a marching unit |
@@ -273,7 +273,7 @@ runtime changes are needed, since these all use existing fields:
 | Backend | Kernel change |
 | --- | --- |
 | Rust | Per cell: `let it = PositionIterator { pos: it.pos + offset, idx: it.idx };` before calling the density function |
-| Java | `p.set(ix + ox, iy + oy, iz + oz, index)` |
+| Java | `<density>(ix + ox, iy + oy, iz + oz, idx, config, ..)` |
 | CUDA | After `tw::make_position`, add `offset` to `pos.pos` field by field, so it needs no `int3` operator from the runtime. Same `launch_shape`. `offset` is `int3`. The bounds check remains on `local` |
 
 **Workers.** Emitted only for entries with refinements:

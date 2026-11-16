@@ -17,6 +17,10 @@ impl<'a> FunctionConverter<'a> {
     /// Converts one statement. Values reaching a primitive sink are cast to its type when needed.
     pub fn convert_statement(&mut self, stmt: &Statement) -> Vec<java::Statement> {
         match stmt {
+            Statement::Assign { target, .. } if self.dead.contains(target) => vec![],
+            Statement::Assign { target, value } if crate::vector::is_vector_type(self.var_type(*target)) => {
+                self.assign_vector(*target, value)
+            }
             Statement::Assign { target, value } => {
                 let var_type: VariableType = self.var_type(*target).clone();
                 let value = self.convert_to_type(value, &var_type);

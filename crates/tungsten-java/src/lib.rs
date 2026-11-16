@@ -7,10 +7,13 @@
 //!   `InternalBuffers` and `Orchestration` classes, and assembly of the single compilation unit.
 //!
 //! Every density and helper function starts with the same parameters (see [`uniform_parameters`]):
-//! `PositionIterator p, Config config, InternalBuffers buffers, AutoConsts auto_constants,
-//! HostConsts host_consts`. Then one `int` offset per input the function reads, directly or
-//! through helpers (`Interface::input_params`), then the helper's own parameters. All names come
-//! from the shared [`Interface`] built with [`NamingRules::java`], so caller and callee always agree.
+//! `int px, int py, int pz, int idx, Config config, InternalBuffers buffers, AutoConsts
+//! auto_constants, HostConsts host_consts`. `px, py, pz` is the position (`ambient(pos3)`) and
+//! `idx` the buffer index, both plain ints so no object is made per sample. Then one `int` offset
+//! per input the function reads, directly or through helpers (`Interface::input_params`), then the
+//! helper's own parameters, with each `Vec3`/`Pos3` parameter split into three (`vector`). All
+//! names come from the shared [`Interface`] built with [`NamingRules::java`], so caller and callee
+//! always agree.
 //!
 //! `InternalBuffers` holds one array per element type (a pool, see [`pools`]). Each worker sizes
 //! the pools for its own entry and passes the offsets of its instances to the kernels
@@ -19,7 +22,7 @@
 //! Refinement (`specs/refinement.md` §6.2): a worker of an entry with refinements also stores the
 //! origin of its last `run`, and has one `refine_<name>(int ox, int oy, int oz, hosts)` method per
 //! refinement. Each runs the refinement's waves through refine kernels, which add the offset to
-//! the iterator's `pos` and leave its `index`, so buffer indices stay put.
+//! the position (`px, py, pz`) and leave `idx`, so buffer indices stay put.
 //!
 //! Modules:
 //! - `types`: type and operator conversion.
@@ -30,10 +33,11 @@
 //! - `pools`: the pool fields of `InternalBuffers`.
 //! - `mapping`: buffer reads, `Expand` indices and lerp helpers.
 //! - `size`: bytecode size estimates, warnings and the parameter limit.
+//! - `vector`: `Vec3`/`Pos3` split into components, and dead-store removal.
 //!
 //! Assumed runtime (not generated, imported from the runtime package): `Vec3`, `Pos3`, `Config`,
-//! `PositionIterator`, the `*Ref` holders, the frontend's handle types and `Helpers` (extern
-//! functions and auto-const initializers). See SPEC.md §6 for the contract.
+//! the `*Ref` holders, the frontend's handle types and `Helpers` (extern functions and auto-const
+//! initializers). See SPEC.md §6 for the contract. `PositionIterator` is no longer used.
 
 use std::collections::HashSet;
 
@@ -65,6 +69,8 @@ pub mod size;
 pub mod statement;
 #[doc(hidden)]
 pub mod types;
+#[doc(hidden)]
+pub mod vector;
 
 pub use backend::{JavaBackend, JavaCompile, JavaConfig, JavaOutput};
 pub use orchestration::TransformJavaOrchestration;
@@ -72,14 +78,16 @@ pub use orchestration::TransformJavaOrchestration;
 /// Names of runtime and generated classes that the generated code refers to by name.
 pub const HELPERS_CLASS: &str = "Helpers";
 pub const CONFIG_CLASS: &str = "Config";
-pub const POSITION_ITERATOR_CLASS: &str = "PositionIterator";
 pub const HOST_CONSTS_CLASS: &str = "HostConsts";
 pub const AUTO_CONSTS_CLASS: &str = "AutoConsts";
 pub const INTERNAL_BUFFERS_CLASS: &str = "InternalBuffers";
 pub const ORCHESTRATION_CLASS: &str = "Orchestration";
 
 /// Uniform parameter names shared by every generated density and helper function, in order.
-pub const PARAM_POS: &str = "p";
+/// `ambient(pos3)`, one `int` per axis.
+pub const POSITION_PARAMS: [&str; 3] = ["px", "py", "pz"];
+/// The buffer index of the current cell (an `Identity` read).
+pub const PARAM_INDEX: &str = "idx";
 pub const PARAM_CONFIG: &str = "config";
 pub const PARAM_BUFFERS: &str = "buffers";
 pub const PARAM_AUTO_CONSTS: &str = "auto_constants";
@@ -88,13 +96,22 @@ pub const PARAM_HOST_CONSTS: &str = "host_consts";
 /// The uniform leading parameters of every density and helper function.
 pub fn uniform_parameters() -> Vec<(java::Type, String)> {
     let c = java::Type::class;
-    vec![
-        (c(POSITION_ITERATOR_CLASS), PARAM_POS.into()),
+    let mut params: Vec<(java::Type, String)> =
+        POSITION_PARAMS.iter().map(|n| (java::Type::Int, n.to_string())).collect();
+    params.extend([
+        (java::Type::Int, PARAM_INDEX.into()),
         (c(CONFIG_CLASS), PARAM_CONFIG.into()),
         (c(INTERNAL_BUFFERS_CLASS), PARAM_BUFFERS.into()),
         (c(AUTO_CONSTS_CLASS), PARAM_AUTO_CONSTS.into()),
         (c(HOST_CONSTS_CLASS), PARAM_HOST_CONSTS.into()),
-    ]
+    ]);
+    params
+}
+
+/// The uniform parameters after the position, index and config (`buffers, auto_constants,
+/// host_consts`), as call arguments.
+pub fn uniform_tail_arguments() -> Vec<java::Expression> {
+    uniform_arguments().into_iter().skip(POSITION_PARAMS.len() + 2).collect()
 }
 
 /// The uniform parameters passed through unchanged, as call arguments.
@@ -126,6 +143,10 @@ pub struct JavaCodegen<'a> {
     done_refine_kernels: HashSet<RefineRun>,
     done_lerps: HashSet<String>,
     done_selects: Vec<VariableType>,
+    /// The split vector parameters of each flattened method, by name.
+    groups: std::collections::HashMap<String, Vec<vector::VectorGroup>>,
+    /// Flattened methods some call reaches through their boxed adapter.
+    boxed: HashSet<String>,
 }
 
 impl<'a> JavaCodegen<'a> {
@@ -155,6 +176,8 @@ impl<'a> JavaCodegen<'a> {
             done_refine_kernels: HashSet::new(),
             done_lerps: HashSet::new(),
             done_selects: Vec::new(),
+            groups: std::collections::HashMap::new(),
+            boxed: HashSet::new(),
         };
         codegen.generate_eval_fns();
         codegen
@@ -165,6 +188,7 @@ impl<'a> JavaCodegen<'a> {
         for e in self.naming.eval_fns() {
             let converted =
                 function::convert_eval(self.source, self.naming, self.pools, self.rules, &self.class_name, e);
+            self.record_vectors(&converted);
             self.functions.push(converted.method);
             for h in converted.called {
                 self.generate_helper(h);
@@ -193,9 +217,23 @@ impl<'a> JavaCodegen<'a> {
             .collect()
     }
 
-    /// Density functions and helpers, followed by kernels.
+    /// Density functions and helpers, the boxed adapters calls need, then kernels.
     pub fn methods(&self) -> Vec<java::Method> {
-        self.functions.iter().chain(&self.kernels).cloned().collect()
+        let adapters = self.functions.iter().filter(|m| self.boxed.contains(&m.name)).map(|m| {
+            vector::boxed_adapter(m, self.groups.get(&m.name).map(Vec::as_slice).unwrap_or_default())
+        });
+        let mut methods: Vec<java::Method> = self.functions.clone();
+        methods.extend(adapters);
+        methods.extend(self.kernels.iter().cloned());
+        methods
+    }
+
+    /// Notes a converted method's split parameters and the adapters its calls need.
+    fn record_vectors(&mut self, converted: &function::Converted) {
+        if !converted.groups.is_empty() {
+            self.groups.insert(converted.method.name.clone(), converted.groups.clone());
+        }
+        self.boxed.extend(converted.boxed.iter().cloned());
     }
 
     /// A class holding only the device members (constants, functions, kernels).
@@ -218,6 +256,7 @@ impl<'a> JavaCodegen<'a> {
             }
             let converted =
                 function::convert_helper(self.source, self.naming, self.pools, self.rules, &self.class_name, f);
+            self.record_vectors(&converted);
             self.functions.push(converted.method);
             pending.extend(converted.called);
             self.generate_lerps(converted.lerps);
@@ -297,6 +336,7 @@ impl DeviceCodegen for JavaCodegen<'_> {
                 cu,
                 dimensions,
             );
+            self.record_vectors(&converted);
             self.functions.push(converted.method);
             for h in converted.called {
                 self.generate_helper(h);

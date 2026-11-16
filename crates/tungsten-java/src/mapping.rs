@@ -42,11 +42,6 @@ pub fn read_pool(bounds: BufferBounds, pool: J, offset: J, len: usize, index: J)
     J::Index { base: Box::new(pool), index: Box::new(J::binary(Op::Add, offset, index)) }
 }
 
-/// `pos.<axis>`, an `int`.
-fn coordinate(pos: &J, axis: usize) -> J {
-    J::field(pos.clone(), AXES[axis])
-}
-
 /// `c / n` of a non-negative `int`, as a shift when `n` is a power of two.
 fn divide(c: J, n: i32) -> J {
     if (n as u32).is_power_of_two() {
@@ -82,13 +77,13 @@ fn flat_index((sx, sy, _): (i32, i32, i32), coordinates: [Option<J>; 3]) -> J {
     sum.unwrap_or(J::IntLit(0))
 }
 
-/// The flat index of an `Expand` read of `input` by the reader at `pos` (a `Pos3` expression):
+/// The flat index of an `Expand` read of `input` by the reader at `pos` (its `int` coordinates):
 /// `Repeat` drops its term, `Factor(1)` reads the coordinate, `Factor(n)` divides it (§3.2).
-pub fn expand_index(input: &DensityInput, factors: [AxisFactor; 3], pos: &J) -> J {
+pub fn expand_index(input: &DensityInput, factors: [AxisFactor; 3], pos: &[J; 3]) -> J {
     let coordinates = [0, 1, 2].map(|a| match factors[a] {
         AxisFactor::Repeat => None,
-        AxisFactor::Factor(1) => Some(coordinate(pos, a)),
-        AxisFactor::Factor(n) => Some(divide(coordinate(pos, a), n)),
+        AxisFactor::Factor(1) => Some(pos[a].clone()),
+        AxisFactor::Factor(n) => Some(divide(pos[a].clone(), n)),
     });
     flat_index(input.dimensions, coordinates)
 }

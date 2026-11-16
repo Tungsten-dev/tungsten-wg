@@ -144,7 +144,7 @@ tests/               roundtrip.rs, lowering.rs, corpus.rs (all use libtest-mimic
   88b88ae of that repo; adds `Neg for Vec3`), except `min`/`max`/`floor`/`ceil`/`pow`, whose registry versions
   have Java semantics, and `Vec3` and `Pos3` also derive `Default`. Generated code no longer calls `make_boxed`, so the
   runtime has none. The Java
-  `Vec3`, `Pos3`, `Config` and `PositionIterator` come from `tungsten-diff-harness/java_wrapper/runtime`; its
+  `Vec3`, `Pos3` and `Config` come from `tungsten-diff-harness/java_wrapper/runtime`; its
   `Helpers` and samplers are real Minecraft noise, so the suite has its own. The CUDA vector operators, `Array`,
   `Config`, `PositionIterator` and saturating casts follow `../cuda-density/src/tw/`; `tw::f2i8` clamps.
   The pure toy-table functions in `utilsf64.rs` are named `perm_lookup` and `sample_state`, so glob imports of

@@ -42,7 +42,14 @@ pub struct FunctionConverter<'a> {
     pub post: Vec<java::Statement>,
     /// Variables written back by `post`.
     pub written_back: Vec<Ref<Var>>,
+    /// Flattened methods called through their boxed adapter (`vector::boxed_adapter`).
+    pub used_boxed: Vec<String>,
     vars: HashMap<Ref<Var>, String>,
+    /// The component locals (`x, y, z`) of each `Vec3`/`Pos3` variable (`vector.rs`).
+    pub(crate) vector_vars: HashMap<Ref<Var>, [String; 3]>,
+    /// Locals never read whose stores are all pure: neither declared nor stored
+    /// (`FunctionConverter::dead_locals`).
+    pub(crate) dead: HashSet<Ref<Var>>,
     used_names: HashSet<String>,
 }
 
@@ -55,7 +62,7 @@ impl<'a> FunctionConverter<'a> {
         class_name: &'a str,
         function: &'a Function,
     ) -> Self {
-        Self {
+        let mut converter = Self {
             program,
             naming,
             pools,
@@ -69,9 +76,14 @@ impl<'a> FunctionConverter<'a> {
             pre: Vec::new(),
             post: Vec::new(),
             written_back: Vec::new(),
+            used_boxed: Vec::new(),
             vars: HashMap::new(),
+            vector_vars: HashMap::new(),
+            dead: HashSet::new(),
             used_names: rules.used_set(),
-        }
+        };
+        converter.dead = converter.dead_locals(function);
+        converter
     }
 
     /// Makes `f`'s offset parameters known, and keeps locals off their names.
@@ -109,8 +121,13 @@ impl<'a> FunctionConverter<'a> {
         }
     }
 
-    /// The Java local for `r`, named on first use.
+    /// The Java local for `r`, named on first use. A `Vec3`/`Pos3` variable has no single local:
+    /// use [`Self::declare_vector_var`].
     pub fn declare_var(&mut self, r: Ref<Var>) -> String {
+        assert!(
+            !crate::vector::is_vector_type(&self.function.variables[r].t),
+            "vector variables are split into components; use declare_vector_var"
+        );
         if let Some(v) = self.vars.get(&r) {
             return v.clone();
         }

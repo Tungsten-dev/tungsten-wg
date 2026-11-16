@@ -1,0 +1,28 @@
+// Vec3/Pos3 values the Java backend splits into components (tungsten-java `vector.rs`): a helper's
+// vector parameter, an argument that can't be split (a call returning a vec3, so the boxed
+// adapter), a swap that reads the target, an operand with a call in it, field reads,
+// a select of vectors, a vec3 + pos3 mix, and a dead vector store.
+program {
+    fn mk(a: f64) -> vec3 { return vec3(a, (a * 2.0), (a * 3.0)); }
+    fn take(v: vec3, s: f64) -> f64 { return (((v.x + (v.y * 10.0)) + (v.z * 100.0)) * s); }
+    fn run() -> [f64; 7] {
+        vars { v: vec3, w: vec3, unused: vec3, q: pos3 }
+        unused = (ambient(origin) * vec3(2.0, 2.0, 2.0));
+        v = (ambient(origin) + ambient(pos3));
+        v = vec3(v.y, v.x, v.z);
+        w = (v + vec3(take(mk(1.0), 1.0), 0.0, 0.0));
+        q = (ambient(pos3) + pos3(1, 2, 3));
+        return [w.x, w.y, take(w, 2.0), (vec3(0.0, 0.5, 0.0) + q).y,
+                select((v.y == 1.0), 1.0, 0.0),
+                select((ambient(pos3).x == 0), v, w).x,
+                (q.x as f64)];
+    }
+    unit u {
+        main run;
+        helpers [mk, take];
+    }
+    entry u @dims(2, 1, 1) @origin_scale(1, 1, 1) @position_scale(1, 1, 1);
+}
+@case "c" origin(1, 2, 3)
+@expect "c" u[0, 0, 0] = [323.0, 1.0, 1266.0, 2.5, 1.0, 2.0, 1.0]
+@expect "c" u[1, 0, 0] = [323.0, 2.0, 1286.0, 2.5, 0.0, 323.0, 2.0]
